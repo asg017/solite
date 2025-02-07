@@ -1,0 +1,62 @@
+---
+source: solite-lexer/src/lib.rs
+expression: result
+---
+[
+    (
+        "-- comment!\n",
+        Token {
+            kind: Comment,
+            start: 0,
+            end: 12,
+            value: Text(
+                "-- comment!\n",
+            ),
+        },
+    ),
+    (
+        "    select",
+        Token {
+            kind: Select,
+            start: 12,
+            end: 22,
+            value: None,
+        },
+    ),
+    (
+        " 1",
+        Token {
+            kind: Number,
+            start: 22,
+            end: 24,
+            value: None,
+        },
+    ),
+    (
+        " +",
+        Token {
+            kind: Plus,
+            start: 24,
+            end: 26,
+            value: None,
+        },
+    ),
+    (
+        " 2",
+        Token {
+            kind: Number,
+            start: 26,
+            end: 28,
+            value: None,
+        },
+    ),
+    (
+        "",
+        Token {
+            kind: Eof,
+            start: 28,
+            end: 28,
+            value: None,
+        },
+    ),
+]

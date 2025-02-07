@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "solite-cli",
+    "solite-core",
+    "solite-stdlib",
+    "solite-lexer",
+]
+
+[workspace.dependencies]
+libsqlite3-sys = {version="0.26.0", features=["bundled"]}
+insta = { version = "1.38.0", features = ["yaml"] }
+rusqlite = {version="0.29", features=["bundled"]}
+indicatif = "0.17"
+
+# for faster insta snapshots
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3

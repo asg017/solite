@@ -1,0 +1,15 @@
+[package]
+name = "solite-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ropey = "1.6.0"
+libsqlite3-sys.workspace = true
+indicatif.workspace = true
+solite-stdlib = {path="../solite-stdlib"}
+thiserror = "1.0"
+
+[dev-dependencies]
+rusqlite.workspace = true
+insta.workspace = true

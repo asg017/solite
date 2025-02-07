@@ -1,0 +1,73 @@
+# serializer version: 1
+# name: test_run_basic
+  '''
+  ✓ timer set off
+  a.sql:4:1 select 1;
+  ┌───┐
+  │ 1 │
+  ├───┤
+  │ 1 │
+  └───┘
+  a.sql:5:1 select 2;
+  ┌───┐
+  │ 2 │
+  ├───┤
+  │ 2 │
+  └───┘
+  a.sql:7:1 select 3
+  ┌───┐
+  │ 3 │
+  ├───┤
+  │ 3 │
+  └───┘
+  
+  '''
+# ---
+# name: test_run_basic_dots
+  '''
+  ✓ timer set off
+  a.sql:4:1 select 1;
+  ┌───┐
+  │ 1 │
+  ├───┤
+  │ 1 │
+  └───┘
+  yo
+  yo2
+  
+  '''
+# ---
+# name: test_run_error[stderr]
+  '''
+  SQL logic error (1)
+   8 |   1,
+   9 |   2,
+  10 |   3,
+  11 |   substr(),
+     |   ^ wrong number of arguments to function substr()
+  12 |   4,
+  13 |   5,
+  14 |   6;
+  	at a.sql:11:3
+  
+  
+  '''
+# ---
+# name: test_run_error[stdout]
+  '''
+  ✓ timer set off
+  a.sql:4:1 select 'hello' as world;
+  ┌───────┐
+  │ world │
+  ├───────┤
+  │ hello │
+  └───────┘
+  a.sql:5:1 select 1 + 1 as result;
+  ┌────────┐
+  │ result │
+  ├────────┤
+  │      2 │
+  └────────┘
+  
+  '''
+# ---

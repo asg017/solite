@@ -1,0 +1,11 @@
+[project]
+name = "tests"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "jupyter-client>=8",
+    "pytest>=7",
+    "syrupy>=4",
+]

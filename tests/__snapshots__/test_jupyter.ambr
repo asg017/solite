@@ -1,0 +1,93 @@
+# serializer version: 1
+# name: test_hello
+  '''
+  ┌───────┐
+  │ 1 + 1 │
+  ├───────┤
+  │     2 │
+  └───────┘
+  
+  '''
+# ---
+# name: test_hello.1
+  '''
+  <div>
+  <style>td {text-align: right;}</style><table>
+  <thead>
+  <tr style="text-align: center;">
+  <th>
+  1 + 1
+  </th>
+  </tr>
+  </thead>
+  <tbody>
+  <tr>
+  <td >
+  2
+  </td>
+  </tr>
+  </tbody>
+  </table>
+  <div>
+  1 row × 1 column
+  </div>
+  </div>
+  
+  '''
+# ---
+# name: test_hello[error contents: incomplete]
+  dict({
+    'ename': 'SQL logic error',
+    'evalue': '''
+      SQL logic error (1)
+      1 | select 1 + 
+        | ^ incomplete input
+      	at [cell]:1:1
+  
+    ''',
+    'traceback': list([
+    ]),
+  })
+# ---
+# name: test_hello[error contents: wrong num args]
+  dict({
+    'ename': 'SQL logic error',
+    'evalue': '''
+      SQL logic error (1)
+      1 | select substr();
+        |        ^ wrong number of arguments to function substr()
+      	at [cell]:1:8
+  
+    ''',
+    'traceback': list([
+    ]),
+  })
+# ---
+# name: test_multiple
+  '''
+  ┌────┬────┬────┐
+  │ a  │ b  │ c  │
+  ├────┼────┼────┤
+  │ 99 │ 99 │ 99 │
+  │ 88 │ 88 │ 88 │
+  │ 77 │ 77 │ 77 │
+  │ 66 │ 66 │ 66 │
+  │ 55 │ 55 │ 55 │
+  └────┴────┴────┘
+  
+  '''
+# ---
+# name: test_multiple.1
+  '''
+  ┌────┬────┬────┐
+  │ a  │ b  │ c  │
+  ├────┼────┼────┤
+  │ 99 │ 99 │ 99 │
+  │ 88 │ 88 │ 88 │
+  │ 77 │ 77 │ 77 │
+  │ 66 │ 66 │ 66 │
+  │ 55 │ 55 │ 55 │
+  └────┴────┴────┘
+  
+  '''
+# ---

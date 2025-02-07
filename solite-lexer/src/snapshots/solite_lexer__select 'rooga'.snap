@@ -1,0 +1,35 @@
+---
+source: solite-lexer/src/lib.rs
+expression: result
+---
+[
+    (
+        "select",
+        Token {
+            kind: Select,
+            start: 0,
+            end: 6,
+            value: None,
+        },
+    ),
+    (
+        " 'rooga'",
+        Token {
+            kind: String,
+            start: 6,
+            end: 14,
+            value: Text(
+                " 'rooga'",
+            ),
+        },
+    ),
+    (
+        "",
+        Token {
+            kind: Eof,
+            start: 14,
+            end: 14,
+            value: None,
+        },
+    ),
+]

@@ -1,0 +1,60 @@
+# serializer version: 1
+# name: test_query_fails[write fails]
+  '''
+  only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database.
+  
+  '''
+# ---
+# name: test_query_output_formats[a.csv contents]
+  '''
+  key,value,type,atom,id,parent,fullkey,path
+  ,"[1,2,3,4]",array,,0,,$,$
+  0,1,integer,1,1,0,$[0],$
+  1,2,integer,2,3,0,$[1],$
+  2,3,integer,3,5,0,$[2],$
+  3,4,integer,4,7,0,$[3],$
+  
+  '''
+# ---
+# name: test_query_output_formats[a.csv.gz contents]
+  b'\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff<\xccA\n\x840\x0c\x05\xd0\xbd\xc7\x90.\xff\xa2\xb5\x0es\x18q\x11\x98\xcc\x8cX\xb5\x94(\xf4\xf6&\x82\xee\x92\xbc\xfc?s\xc5AigH\xcd\x0c\x92m\xc1\xf4A\xa6\xc2\xab\xe0\xbb\xa74\xebG&\xf97h\x87\x80\x0e\x11\xfd\xd8\x82J\xa1\nx\xc0\xc15\x1e\x01\xd3*\xfc\xe3\xa2S\xd0\xb3\x1b\xfc\xa8`\x81\x1b,j\x10\x0cl\xb9!\xe2uAg\xa0\xf5\x0f\xf4x_\x10\rN\x00\x00\x00\xff\xff\x02\x00\x00\x00\xff\xff\x03\x00#\xc3\xd2\x0c\xaa\x00\x00\x00'
+# ---
+# name: test_query_output_formats[a.csv.zst contents]
+  b'(\xb5/\xfd\x00X\x8c\x03\x00\x82\x07\x17\x1a\x80\xa9\x1a\x03@d\xbd\xdf\x90\x1d\x03z\x02m \x13\x80\xfe\x94\xf5\xbc\x08\x81\xd5)\x0b\xc5\xac2pJ\'\x02\x9c9\xc2\x1c\xa1\xb1\x98\xd51\xccg\x1coKX\x97\x1c\xe3\xa7\x98\xcd\x9f\x7f\xda\x9a^\xa8t\x8eF\xa3\xb8\x14\x9c\xb2\xdf"k!\x06\xbbd\x9b\xb2\x05\xc7\x86\x83\xd3\x97=\xf7"\x96&~\x8b\x04\x08\x00@\x0cP\x03\xe2\x82;@\r\x88\x0b\xee\x88\\L3'
+# ---
+# name: test_query_output_formats[a.json contents]
+  '''
+  [{"atom":null,"fullkey":"$","id":0,"key":null,"parent":null,"path":"$","type":"array","value":[1,2,3,4]},{"atom":1,"fullkey":"$[0]","id":1,"key":0,"parent":0,"path":"$","type":"integer","value":1},{"atom":2,"fullkey":"$[1]","id":3,"key":1,"parent":0,"path":"$","type":"integer","value":2},{"atom":3,"fullkey":"$[2]","id":5,"key":2,"parent":0,"path":"$","type":"integer","value":3},{"atom":4,"fullkey":"$[3]","id":7,"key":3,"parent":0,"path":"$","type":"integer","value":4}]
+  
+  '''
+# ---
+# name: test_query_output_formats[a.tsv contents]
+  '''
+  key	value	type	atom	id	parent	fullkey	path
+  	[1,2,3,4]	array		0		$	$
+  0	1	integer	1	1	0	$[0]	$
+  1	2	integer	2	3	0	$[1]	$
+  2	3	integer	3	5	0	$[2]	$
+  3	4	integer	4	7	0	$[3]	$
+  
+  '''
+# ---
+# name: test_query_output_formats[basic-default]
+  '''
+  [{"atom":null,"fullkey":"$","id":0,"key":null,"parent":null,"path":"$","type":"array","value":[1,2,3,4]},{"atom":1,"fullkey":"$[0]","id":1,"key":0,"parent":0,"path":"$","type":"integer","value":1},{"atom":2,"fullkey":"$[1]","id":3,"key":1,"parent":0,"path":"$","type":"integer","value":2},{"atom":3,"fullkey":"$[2]","id":5,"key":2,"parent":0,"path":"$","type":"integer","value":3},{"atom":4,"fullkey":"$[3]","id":7,"key":3,"parent":0,"path":"$","type":"integer","value":4}]
+  
+  '''
+# ---
+# name: test_query_output_formats[basic-ndjson]
+  '''
+  {"atom":null,"fullkey":"$","id":0,"key":null,"parent":null,"path":"$","type":"array","value":[1,2,3,4]}
+  {"atom":1,"fullkey":"$[0]","id":1,"key":0,"parent":0,"path":"$","type":"integer","value":1}
+  {"atom":2,"fullkey":"$[1]","id":3,"key":1,"parent":0,"path":"$","type":"integer","value":2}
+  {"atom":3,"fullkey":"$[2]","id":5,"key":2,"parent":0,"path":"$","type":"integer","value":3}
+  {"atom":4,"fullkey":"$[3]","id":7,"key":3,"parent":0,"path":"$","type":"integer","value":4}
+  
+  '''
+# ---
+# name: test_query_output_formats[output a.json]
+  ''
+# ---

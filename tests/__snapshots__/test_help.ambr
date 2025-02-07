@@ -1,0 +1,78 @@
+# serializer version: 1
+# name: test_help[--help]
+  '''
+  Usage: solite [COMMAND]
+  
+  Commands:
+    run      Run SQL or PRQL scripts 
+    query    execute sql
+    repl     reh pull
+    jupyter  Jupyter
+    help     Print this message or the help of the given subcommand(s)
+  
+  Options:
+    -h, --help  Print help
+  
+  '''
+# ---
+# name: test_help[jupyter --help]
+  '''
+  Jupyter
+  
+  Usage: solite jupyter [OPTIONS]
+  
+  Options:
+        --install                  Install the Solite Jupyter kernel
+        --connection <CONNECTION>  Connection file, supplied by Jupyter
+    -h, --help                     Print help
+  
+  '''
+# ---
+# name: test_help[query --help]
+  '''
+  execute sql
+  
+  Usage: solite query [OPTIONS] [DATABASE] <SQL STATEMENT>
+  
+  Arguments:
+    [DATABASE]       Path to SQLite database
+    <SQL STATEMENT>  statement
+  
+  Options:
+    -p <PARAMETERS> <PARAMETERS>      parameter
+    -f <FORMAT>                       Output format
+    -o <PATH>                         Output file
+    -h, --help                        Print help
+  
+  '''
+# ---
+# name: test_help[repl --help]
+  '''
+  reh pull
+  
+  Usage: solite repl [DATABASE]
+  
+  Arguments:
+    [DATABASE]  Path to SQLite database
+  
+  Options:
+    -h, --help  Print help
+  
+  '''
+# ---
+# name: test_help[run --help]
+  '''
+  Run SQL or PRQL scripts 
+  
+  Usage: solite run [OPTIONS] [DATABASE] <SCRIPT>
+  
+  Arguments:
+    [DATABASE]  Path to SQLite database
+    <SCRIPT>    Path to SQL or PRQL file
+  
+  Options:
+        --verbose <verbose>  
+    -h, --help               Print help
+  
+  '''
+# ---

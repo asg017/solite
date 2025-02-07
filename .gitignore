@@ -1,0 +1,9 @@
+/target
+venv/
+__pycache__
+
+dist/
+*.db
+*.csv
+
+tests/latimes-place-totals.csv

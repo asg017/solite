@@ -1,0 +1,36 @@
+[package]
+name = "solite-stdlib"
+version = "0.1.0"
+edition = "2021"
+links = "sqlite"
+
+[dependencies]
+sqlite-loadable = "0.0.6-alpha.6"
+sqlite-ulid = "0.2.2-alpha.1"
+sqlite-regex = "0.2.4-alpha.1"
+sqlite-http = {git="https://github.com/asg017/sqlite-http.git", branch="rust"}
+sqlite-lines = {git="https://github.com/asg017/sqlite-lines.git", branch="rust"}
+sqlite-path = {git="https://github.com/asg017/sqlite-path.git", branch="rust"}
+sqlite-xsv = {git="https://github.com/asg017/sqlite-xsv.git", branch="main"}
+sqlite-url = {git="https://github.com/asg017/sqlite-url.git", branch="rust"}
+sqlite-vec = "0.1.6"
+sqlite-tg = "0.0.1-alpha.18"
+arboard = "3.4.1"
+#sqlite-fastrand = "0.2.1"
+
+
+[build-dependencies]
+cc = "1.0"
+pkg-config = "0.3"
+rusqlite.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+insta.workspace = true
+
+[features]
+default = ["static"]
+static = ["sqlite-loadable/static"]
+
+[lib]
+crate-type=["lib", "staticlib", "cdylib"]

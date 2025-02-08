@@ -1,7 +1,7 @@
 # serializer version: 1
 # name: test_repl
   '''
-  Solite 0.0.1-alpha.0 (SQLite 3.47.0)
+  Solite VERSION (SQLite 3.47.0)
   Enter ".help" for usage hints.
   Connected to a transient in-memory database.
   ┌───────┐

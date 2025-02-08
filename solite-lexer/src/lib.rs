@@ -435,13 +435,13 @@ fn test_lexer() {
         r#"-- comment!
     select 1 + 2"#,
     ];
-    for test in tests {
+    for (i, test) in tests.iter().enumerate() {
         let tokens = tokenize(test);
         let v: Vec<String> = tokens
             .iter()
             .map(|t| (&test[t.start..t.end]).to_string())
             .collect();
         let result: Vec<(&String, Token)> = v.iter().zip(tokens).collect();
-        insta::assert_debug_snapshot!(test, result);
+        insta::assert_debug_snapshot!(format!("test_{i}"), result);
     }
 }

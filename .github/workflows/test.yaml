@@ -22,7 +22,6 @@ jobs:
       - run: cargo build
         shell: bash
       - run: |
-          echo $PATH; 
           uv tool install --with ipykernel jupyter-core
           cargo run -- jupyter --install
         shell: bash

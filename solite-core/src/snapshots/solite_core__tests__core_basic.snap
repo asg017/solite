@@ -255,7 +255,14 @@ snapshot_kind: text
 - unlikely
 - upper
 - url_debug
+- url_escape
+- url_fragment
 - url_host
+- url_path
+- url_port
+- url_query
+- url_scheme
+- url_valid
 - url_version
 - usleep
 - uuid

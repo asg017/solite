@@ -97,7 +97,14 @@ snapshot_kind: text
 - ulid_with_prefix
 - uncompress
 - url_debug
+- url_escape
+- url_fragment
 - url_host
+- url_path
+- url_port
+- url_query
+- url_scheme
+- url_valid
 - url_version
 - usleep
 - uuid

@@ -2427,7 +2427,7 @@ dependencies = [
 [[package]]
 name = "sqlite-url"
 version = "0.1.0"
-source = "git+https://github.com/asg017/sqlite-url.git?branch=rust#168745f4796aef416abf277679ad847ea97d8ca0"
+source = "git+https://github.com/asg017/sqlite-url.git?rev=b0d6757139d0b462768aa5e382333437afc2e6d2#b0d6757139d0b462768aa5e382333437afc2e6d2"
 dependencies = [
  "sqlite-loadable",
  "url",

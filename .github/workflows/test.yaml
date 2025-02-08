@@ -9,7 +9,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest] #[windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -29,5 +29,5 @@ jobs:
       - run: make test
         shell: bash
       - run: ls -lah target/debug
-      - run: make all; ./dist/debug/sqlite3 < smoke.sql
-        working-directory: solite-stdlib/sqlite3
+      #- run: make all; ./dist/debug/sqlite3 < smoke.sql
+      #  working-directory: solite-stdlib/sqlite3

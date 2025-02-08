@@ -414,8 +414,10 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
             Err(error) => match error {
                 StepError::Prepare {
                     error: _,
-                    context: _,
-                } => eprintln!("todo prepare error"),
+                    context,
+                } => {
+                  eprintln!("{}", context);
+                },
                 StepError::ParseDot(_error) => eprintln!("todo parse dot error"),
             },
         }

@@ -4,6 +4,10 @@ version = "0.0.1-alpha.3"
 edition = "2021"
 repository = "https://github.com/asg017/solite"
 
+[[bin]]
+name = "solite"
+path = "src/main.rs"
+
 
 [dependencies]
 clap = "4.4.2"

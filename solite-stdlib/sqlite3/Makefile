@@ -25,6 +25,7 @@ else ifeq ($(OS),Windows_NT)
 CONFIG_WINDOWS=y
 else
 CONFIG_LINUX=y
+CFLAGS += -lssl -lcrypto -l
 endif
 
 

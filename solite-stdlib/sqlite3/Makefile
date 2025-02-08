@@ -1,16 +1,55 @@
 
-sqlite3: sqlite3-extra.c ../../dist/release/libsolite_stdlib.a
+CARGO_TARGET=debug
+
+SQLITE_VERSION=3490000
+SQLITE_YEAR=2025
+
+BUILD_DIR=dist/$(CARGO_TARGET)
+AMALGAMATION_DIR=$(BUILD_DIR)/sqlite-amalgamation-$(SQLITE_VERSION)
+SQLITE3_C=$(AMALGAMATION_DIR)/sqlite3.c
+SHELL_C=$(AMALGAMATION_DIR)/shell.c
+
+ifeq ($(shell uname -s),Darwin)
+CONFIG_DARWIN=y
+# ?
+CFLAGS += -framework CoreFoundation 
+# ?
+#CFLAGS += -framework Security 
+# arboard/clipboard
+CFLAGS += -framework AppKit
+else ifeq ($(OS),Windows_NT)
+CONFIG_WINDOWS=y
+else
+CONFIG_LINUX=y
+endif
+
+
+$(BUILD_DIR):
+	mkdir -p $@
+
+$(BUILD_DIR)/sqlite-amalgamation-$(SQLITE_VERSION).zip: $(BUILD_DIR)
+	curl -o $@ 'https://www.sqlite.org/$(SQLITE_YEAR)/sqlite-amalgamation-$(SQLITE_VERSION).zip'
+
+$(AMALGAMATION_DIR): $(BUILD_DIR)/sqlite-amalgamation-$(SQLITE_VERSION).zip
+	rm -rf $(AMALGAMATION_DIR)
+	unzip -d $(BUILD_DIR) $<
+	touch $@
+
+$(SQLITE3_C) $(SHELL_C): $(AMALGAMATION_DIR)
+
+$(BUILD_DIR)/sqlite3: core_init.c ../../target/$(CARGO_TARGET)/libsolite_stdlib.a $(SQLITE3_C) $(SHELL_C)
 	gcc \
 	-DSQLITE_EXTRA_INIT=core_init \
-	-DHAVE_READLINE=1 \
-	-lreadline \
-	-I./ -I./sqlite \
-	sqlite3-extra.c shell.c \
-	../../dist/release/libsolite_stdlib.a \
+	-DSQLITE_CORE -DHAVE_READLINE=1 \
+	-I./ -I./sqlite-amalgamation-$(SQLITE_VERSION) \
   -Wl,-undefined,dynamic_lookup \
-	-framework CoreFoundation -framework Security \
+	-lreadline \
+	$^ \
+	$(CFLAGS) \
 	-O3 \
 	-o $@
 
-sqlite3-extra.c: sqlite3.c core_init.c
-	cat sqlite3.c core_init.c > $@
+.PHONY: all clean
+all: $(BUILD_DIR)/sqlite3
+clean:
+	rm -rf $(BUILD_DIR)

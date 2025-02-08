@@ -11,12 +11,16 @@ SHELL_C=$(AMALGAMATION_DIR)/shell.c
 
 ifeq ($(shell uname -s),Darwin)
 CONFIG_DARWIN=y
+
+# macos readline support
+CFLAGS += -DHAVE_READLINE=1 -lreadline 
 # ?
 CFLAGS += -framework CoreFoundation 
 # ?
-#CFLAGS += -framework Security 
+CFLAGS += -framework Security 
 # arboard/clipboard
 CFLAGS += -framework AppKit
+
 else ifeq ($(OS),Windows_NT)
 CONFIG_WINDOWS=y
 else
@@ -40,10 +44,9 @@ $(SQLITE3_C) $(SHELL_C): $(AMALGAMATION_DIR)
 $(BUILD_DIR)/sqlite3: core_init.c ../../target/$(CARGO_TARGET)/libsolite_stdlib.a $(SQLITE3_C) $(SHELL_C)
 	gcc \
 	-DSQLITE_EXTRA_INIT=core_init \
-	-DSQLITE_CORE -DHAVE_READLINE=1 \
+	-DSQLITE_CORE \
 	-I./ -I./sqlite-amalgamation-$(SQLITE_VERSION) \
   -Wl,-undefined,dynamic_lookup \
-	-lreadline \
 	$^ \
 	$(CFLAGS) \
 	-O3 \

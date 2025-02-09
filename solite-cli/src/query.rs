@@ -73,7 +73,10 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                     None
                 }
                 Some(Err(_)) => todo!(),
-                None => todo!(),
+                None => {
+                    crate::errors::report_error("[input]", flags.statement.as_str(), &err, None);
+                    return Err(());
+                }
             },
         };
         if stmt.is_some() {
@@ -205,6 +208,7 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
             }
         }
         crate::cli::QueryFormat::Clipboard => {
+            let mut num_rows = 0;
             let mut html = "".to_owned();
             html += "<table> <thead> <tr>";
 
@@ -236,6 +240,7 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                             html.push_str("</td>");
                         }
                         html += "</tr>";
+                        num_rows += 1;
                         //output.write_all(&[b'\n']).unwrap();
                     }
                     Ok(None) => break,
@@ -249,7 +254,13 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
             html += "</table>";
 
             let mut clipboard = Clipboard::new().unwrap();
-            clipboard.set_html(html, None).unwrap();
+            // TODO write TSV equivalent to alt_text
+            clipboard.set_html(html, Some("".to_owned())).unwrap();
+            println!(
+                "✓ Wrote {} {} to clipboard",
+                num_rows,
+                if num_rows == 1 { "row" } else { "rows" }
+            );
         }
         crate::cli::QueryFormat::Value => {
             match stmt.next() {

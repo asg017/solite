@@ -20,7 +20,6 @@ async fn serve(spec: ConnectionSpec) {
 
 fn install() {
     println!("Installing jupyter kernel...");
-    
     let tmpdir = TempDir::new().unwrap();
     let f = fs::File::create(tmpdir.path().join("kernel.json")).unwrap();
     serde_json::to_writer(

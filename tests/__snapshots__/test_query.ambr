@@ -1,4 +1,33 @@
 # serializer version: 1
+# name: test_query_fails[column DNE]
+  '''
+  error[1]: SQL logic error
+    ┌─ [input]:1:8
+    │
+  1 │ select dne from pragma_function_list
+    │        ^^^ no such column: dne
+  
+  
+  '''
+# ---
+# name: test_query_fails[function DNE]
+  '''
+  error[1]: SQL logic error
+    ┌─ [input]:1:8
+    │
+  1 │ select xxx()
+    │        ^^^ no such function: xxx
+  
+  
+  '''
+# ---
+# name: test_query_fails[table DNE]
+  '''
+  error[1]: no such table: does_not_exist
+  
+  
+  '''
+# ---
 # name: test_query_fails[write fails]
   '''
   only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database.

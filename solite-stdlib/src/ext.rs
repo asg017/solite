@@ -10,19 +10,13 @@ pub fn solite_stdlib_version(
     Ok(())
 }
 
-
-pub fn clipboard_set(
-    context: *mut sqlite3_context,
-    values: &[*mut sqlite3_value],
-) -> Result<()> {
+pub fn clipboard_set(context: *mut sqlite3_context, values: &[*mut sqlite3_value]) -> Result<()> {
     let contents = api::value_text(&values[0])?;
     let mut cb = Clipboard::new().unwrap();
     cb.set_text(contents).unwrap();
     api::result_bool(context, true);
     Ok(())
 }
-
-
 
 #[sqlite_entrypoint]
 pub fn sqlite3_solite_stdlib_init(db: *mut sqlite3) -> Result<()> {
@@ -33,12 +27,6 @@ pub fn sqlite3_solite_stdlib_init(db: *mut sqlite3) -> Result<()> {
         solite_stdlib_version,
         FunctionFlags::UTF8 | FunctionFlags::DETERMINISTIC,
     )?;
-    define_scalar_function(
-        db,
-        "clipboard_set",
-        1,
-        clipboard_set,
-        FunctionFlags::UTF8,
-    )?;
+    define_scalar_function(db, "clipboard_set", 1, clipboard_set, FunctionFlags::UTF8)?;
     Ok(())
 }

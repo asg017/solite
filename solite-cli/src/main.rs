@@ -5,6 +5,8 @@ mod query;
 mod repl;
 mod run;
 mod ui;
+mod errors;
+
 use std::{env, process::exit};
 
 fn main() {

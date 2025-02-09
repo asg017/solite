@@ -13,17 +13,17 @@ pub const JSON_SUBTYPE: u32 = 74;
 pub const POINTER_SUBTYPE: u32 = 112;
 
 fn escape_identifier(identifer: &str) -> String {
-  let n = identifer.len();
-  let s = CString::new(identifer).unwrap();
-  unsafe {
-      let x = sqlite3_str_new(ptr::null_mut());
-      sqlite3_str_appendf(x, c"%w".as_ptr(), s.as_ptr());
-      let s = sqlite3_str_finish(x);
-      let cpy = CStr::from_ptr(s).to_string_lossy().into_owned();
-      sqlite3_free(s.cast());
-      cpy
-  }
-  //let _rc = unsafe { sqlite3_bind_text(self.statement, i, s.as_ptr(), n as i32, SQLITE_TRANSIENT()) };
+    let n = identifer.len();
+    let s = CString::new(identifer).unwrap();
+    unsafe {
+        let x = sqlite3_str_new(ptr::null_mut());
+        sqlite3_str_appendf(x, c"%w".as_ptr(), s.as_ptr());
+        let s = sqlite3_str_finish(x);
+        let cpy = CStr::from_ptr(s).to_string_lossy().into_owned();
+        sqlite3_free(s.cast());
+        cpy
+    }
+    //let _rc = unsafe { sqlite3_bind_text(self.statement, i, s.as_ptr(), n as i32, SQLITE_TRANSIENT()) };
 }
 
 // https://www.sqlite.org/c3ref/value.html
@@ -354,17 +354,14 @@ impl Connection {
         let entrypoint = entrypoint
             .as_ref()
             .map(|entrypoint| CString::new(entrypoint.clone()).unwrap());
-        
-        let entrypoint_cstr = entrypoint.as_ref().map(|e| CString::new(e.clone()).unwrap());
+
+        let entrypoint_cstr = entrypoint
+            .as_ref()
+            .map(|e| CString::new(e.clone()).unwrap());
         let entrypoint_ptr = entrypoint_cstr.as_ref().map_or(ptr::null(), |e| e.as_ptr());
         let mut pz_err_msg: *mut c_char = ptr::null_mut();
         let rc = unsafe {
-            sqlite3_load_extension(
-                self.db(),
-                p.as_ptr(),
-                entrypoint_ptr,
-                &mut pz_err_msg,
-            )
+            sqlite3_load_extension(self.db(), p.as_ptr(), entrypoint_ptr, &mut pz_err_msg)
         };
         if rc != SQLITE_OK {
             let s = unsafe { CStr::from_ptr(pz_err_msg).to_string_lossy() };

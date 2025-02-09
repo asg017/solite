@@ -64,7 +64,7 @@ def solite_kernel():
     km.shutdown_kernel()
 
 
-CLI_PATH = Path(__file__).parent.parent / "target" / "debug" / "solite-cli"
+CLI_PATH = Path(__file__).parent.parent / "target" / "debug" / "solite"
 
 
 # https://stackoverflow.com/questions/14693701/how-can-i-remove-the-ansi-escape-sequences-from-a-string-in-python

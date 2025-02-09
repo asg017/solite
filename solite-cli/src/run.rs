@@ -115,9 +115,9 @@ pub(crate) fn run(flags: RunFlags) -> Result<(), ()> {
                 },
             },
             Ok(None) => break,
-            Err(error) => match error {
-                StepError::Prepare { error: _, context } => {
-                    eprintln!("{context}");
+            Err(step_error) => match step_error {
+                StepError::Prepare { error, file_name, src, offset } => {
+                  crate::errors::report_error(file_name.as_str(), &src, &error, Some(offset));
                 }
                 StepError::ParseDot(error) => {
                     eprintln!("parse dot error {error}")

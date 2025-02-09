@@ -1,3 +1,6 @@
+- [ ] print "bail" message on run when bailing
+- [ ] on run: long SQL should have progress bar
+
 ## Core
 
 | Command          | Description                       | Repl | Query/Exec | Run | Jupyer     |

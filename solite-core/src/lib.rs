@@ -16,7 +16,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum StepError {
     #[error("Error preparing SQL statement:")]
-    Prepare { error: SQLiteError, context: String },
+    Prepare { file_name: String, src: String, offset: usize,error: SQLiteError },
     #[error("Error parsing dot command: {0}")]
     ParseDot(ParseDotError),
 }
@@ -226,7 +226,7 @@ impl Runtime {
                                 let context = error_context(&error, &current)
                                     .map_err(|_e| "error_context error???".to_owned())
                                     .unwrap();
-                                return Err(StepError::Prepare { error, context });
+                                return Err(StepError::Prepare { error, file_name: current.name, src: current.contents, offset: current.offset });
                             }
                         };
                     }

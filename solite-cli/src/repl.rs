@@ -412,12 +412,9 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
             },
             Ok(None) => break,
             Err(error) => match error {
-                StepError::Prepare {
-                    error: _,
-                    context,
-                } => {
-                  eprintln!("{}", context);
-                },
+                StepError::Prepare { error, file_name, src, offset } => {
+                    crate::errors::report_error(&file_name, &src, &error, Some(offset));
+                }
                 StepError::ParseDot(_error) => eprintln!("todo parse dot error"),
             },
         }

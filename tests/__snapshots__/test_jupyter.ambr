@@ -39,10 +39,8 @@
   dict({
     'ename': 'SQL logic error',
     'evalue': '''
-      SQL logic error (1)
-      1 | select 1 + 
-        | ^ incomplete input
-      	at [cell]:1:1
+      error[1]: incomplete input
+      
   
     ''',
     'traceback': list([
@@ -53,10 +51,12 @@
   dict({
     'ename': 'SQL logic error',
     'evalue': '''
-      SQL logic error (1)
-      1 | select substr();
-        |        ^ wrong number of arguments to function substr()
-      	at [cell]:1:8
+      error[1]: SQL logic error
+        ┌─ TODO:1:8
+        │
+      1 │ select substr();
+        │        ^^^^^^ wrong number of arguments to function substr()
+      
   
     ''',
     'traceback': list([

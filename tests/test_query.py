@@ -25,6 +25,9 @@ def test_query_output_formats(solite_cli, snapshot, tmp_path):
 
 def test_query_fails(solite_cli, snapshot):
     assert solite_cli(["q", "create table t(a)"]).stderr == snapshot(name="write fails")
+    assert solite_cli(["q", "select xxx()"]).stderr == snapshot(name="function DNE")
+    assert solite_cli(["q", "select * from does_not_exist"]).stderr == snapshot(name="table DNE")
+    assert solite_cli(["q", "select dne from pragma_function_list"]).stderr == snapshot(name="column DNE")
 
 
 def test_query_value(solite_cli):

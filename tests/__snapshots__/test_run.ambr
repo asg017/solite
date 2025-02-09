@@ -39,16 +39,11 @@
 # ---
 # name: test_run_error[stderr]
   '''
-  SQL logic error (1)
-   8 |   1,
-   9 |   2,
-  10 |   3,
-  11 |   substr(),
-     |   ^ wrong number of arguments to function substr()
-  12 |   4,
-  13 |   5,
-  14 |   6;
-  	at a.sql:11:3
+  error[1]: SQL logic error
+     ┌─ a.sql:11:3
+     │
+  11 │   substr(),
+     │   ^^^^^^ wrong number of arguments to function substr()
   
   
   '''

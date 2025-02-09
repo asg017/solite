@@ -36,9 +36,9 @@ extern "C" {
 extern "C" {
     fn sqlite3_fileio_init();
 }
-#[link(name = "natsort")]
+#[link(name = "uint")]
 extern "C" {
-    fn sqlite3_natsort_init();
+    fn sqlite3_uint_init();
 }
 #[link(name = "series")]
 extern "C" {
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn solite_stdlib_init(
     init_arg0(sqlite3_decimal_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_ieee_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_fileio_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_natsort_init, db, pz_err_msg, p_api);
+    init_arg0(sqlite3_uint_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_series_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_sha_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_shathree_init, db, pz_err_msg, p_api);

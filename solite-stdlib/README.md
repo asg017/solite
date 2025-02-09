@@ -32,7 +32,7 @@ These functions, virtual table modules, and collations are provided by two diffe
 | sha3         |             | https://www.sqlite.org/src/file?name=ext/misc/shathree.c&ci=tip |
 | uuid         |             | https://www.sqlite.org/src/file?name=ext/misc/uuid.c&ci=tip     |
 | series       |             | https://www.sqlite.org/src/file?name=ext/misc/series.c&ci=tip   |
-| natsort      |             | https://sqlite.org/forum/forumpost/35fb7712279d7f52             |
+| uint         |             | https://www.sqlite.org/src/file?name=ext/misc/uint.c&ci=tip     |
 
 - usleep
 - compress

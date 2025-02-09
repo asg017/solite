@@ -144,6 +144,7 @@ fn main() {
         "zipfile", //"stmt",
         "uuid",
         "completion",
+        "uint",
     ];
 
     if cfg!(target_os = "windows") {
@@ -180,19 +181,6 @@ fn main() {
     for ext in sqlite_org_extensions {
         build_sqlite_org_extension(ext, &out_dir, &amalgammation_src_dir, zlib.clone());
     }
-
-    // natsort isn't in the sqlite.org source tree yet
-    let mut build = cc::Build::new();
-    build
-        .file("./natsort.c")
-        .static_flag(true)
-        .opt_level(3)
-        .warnings(false)
-        .include(&amalgammation_src_dir);
-    if cfg!(feature = "static") {
-        build.define("SQLITE_CORE", None);
-    }
-    build.compile("natsort");
 
     let mut build = cc::Build::new();
     build

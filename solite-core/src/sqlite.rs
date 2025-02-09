@@ -350,30 +350,26 @@ impl Connection {
     }
 
     pub fn load_extension(&self, path: &str, entrypoint: &Option<String>) {
-        dbg!(path, entrypoint);
-
         let p = CString::new(path).unwrap();
         let entrypoint = entrypoint
             .as_ref()
             .map(|entrypoint| CString::new(entrypoint.clone()).unwrap());
-        println!("{:?}", entrypoint);
+        
+        let entrypoint_cstr = entrypoint.as_ref().map(|e| CString::new(e.clone()).unwrap());
+        let entrypoint_ptr = entrypoint_cstr.as_ref().map_or(ptr::null(), |e| e.as_ptr());
         let mut pz_err_msg: *mut c_char = ptr::null_mut();
         let rc = unsafe {
             sqlite3_load_extension(
                 self.db(),
                 p.as_ptr(),
-                match entrypoint {
-                    Some(e) => e.as_ptr(),
-                    None => ptr::null_mut(),
-                },
+                entrypoint_ptr,
                 &mut pz_err_msg,
             )
         };
         if rc != SQLITE_OK {
             let s = unsafe { CStr::from_ptr(pz_err_msg).to_string_lossy() };
-            println!("'{s}'");
+            println!("Loading extension failed: {s}");
         }
-        println!("load_extension result: '{path}' {rc}");
     }
 
     pub fn prepare(&self, sql: &str) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {

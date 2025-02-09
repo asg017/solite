@@ -8,7 +8,7 @@ links = "sqlite"
 sqlite-loadable = "0.0.6-alpha.6"
 sqlite-ulid = "0.2.2-alpha.1"
 sqlite-regex = "0.2.4-alpha.1"
-sqlite-http = {git="https://github.com/asg017/sqlite-http.git", branch="rust"}
+sqlite-http = {git="https://github.com/asg017/sqlite-http.git", rev="9a738f796ae72513fa150c9c816a8b66da7f50d1"}
 sqlite-lines = {git="https://github.com/asg017/sqlite-lines.git", branch="rust"}
 sqlite-path = {git="https://github.com/asg017/sqlite-path.git", branch="rust"}
 sqlite-xsv = {git="https://github.com/asg017/sqlite-xsv.git", branch="main"}

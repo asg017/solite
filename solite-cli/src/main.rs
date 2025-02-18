@@ -1,11 +1,11 @@
 mod cli;
 mod colors;
+mod errors;
 mod jupyter;
 mod query;
 mod repl;
 mod run;
 mod ui;
-mod errors;
 
 use std::{env, process::exit};
 

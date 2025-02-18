@@ -66,6 +66,17 @@ pub(crate) fn ui_table(columns: Vec<String>, ui_rows: Vec<Vec<CellStruct>>) -> T
 }
 
 pub(crate) fn table_from_statement(stmt: Statement, color: bool) -> Option<TableStruct> {
+    let num_display_rows = match term_size::dimensions() {
+        Some((_w, h)) => {
+            h
+              - 1 // TODO
+              - 1 // TODO
+              - 1 // TODO
+              - 1 // TODO
+        }
+        None => 20,
+    };
+    
     let columns = stmt.column_names().unwrap();
     let mut ui_rows = vec![];
     loop {

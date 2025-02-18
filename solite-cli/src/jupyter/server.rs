@@ -226,10 +226,15 @@ fn handle_code(runtime: &mut Runtime, code: String) -> Result<UiResponse, UiErro
                 })
             }
             Err(error) => match error {
-                StepError::Prepare { error, file_name, src, offset} => {
-                  
-                  let x = crate::errors::report_error_string(file_name.as_str(), &src, &error, None);
-                    return Err(UiError::new(error.code_description.clone(), x))
+                StepError::Prepare {
+                    error,
+                    file_name,
+                    src,
+                    offset,
+                } => {
+                    let x =
+                        crate::errors::report_error_string(file_name.as_str(), &src, &error, None);
+                    return Err(UiError::new(error.code_description.clone(), x));
                 }
                 StepError::ParseDot(error) => {
                     return Err(UiError::new(

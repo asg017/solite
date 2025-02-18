@@ -2,7 +2,6 @@ import re
 
 def repl(solite_cli, commands):
     msg = "\n".join(commands) + "\n"
-    print(msg.encode())
     result = solite_cli([], communicate=[msg.encode()], kill=True)
     stdout = re.sub(r"Solite \d+\.\d+\.\d+(-[a-z]+\.\d+)?", "Solite REDACTED", result.stdout)
     stderr = result.stderr

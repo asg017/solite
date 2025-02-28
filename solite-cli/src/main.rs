@@ -6,6 +6,7 @@ mod query;
 mod repl;
 mod run;
 mod ui;
+mod snapshot;
 
 use std::{env, process::exit};
 

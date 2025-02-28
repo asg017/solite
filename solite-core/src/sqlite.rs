@@ -1,8 +1,8 @@
 use core::fmt;
 use libsqlite3_sys::*;
 use std::borrow::Cow;
-use std::ffi::CStr;
-use std::ptr;
+use std::ffi::{c_void, CStr};
+use std::ptr::{self};
 use std::str::Utf8Error;
 use std::{ffi::CString, os::raw::c_char};
 
@@ -24,6 +24,20 @@ fn escape_identifier(identifer: &str) -> String {
         cpy
     }
     //let _rc = unsafe { sqlite3_bind_text(self.statement, i, s.as_ptr(), n as i32, SQLITE_TRANSIENT()) };
+}
+
+// Use the SQLite printf '%Q' conversion to escape a string as a SQL string literal, surrounded by single quotes.
+pub fn escape_string(value: &str) -> String {
+    let n = value.len();
+    let s = CString::new(value).unwrap();
+    unsafe {
+        let x = sqlite3_str_new(ptr::null_mut());
+        sqlite3_str_appendf(x, c"%Q".as_ptr(), s.as_ptr());
+        let s = sqlite3_str_finish(x);
+        let cpy = CStr::from_ptr(s).to_string_lossy().into_owned();
+        sqlite3_free(s.cast());
+        cpy
+    }
 }
 
 // https://www.sqlite.org/c3ref/value.html
@@ -247,6 +261,19 @@ impl Statement {
             )
         };
     }
+
+    // TODO expose destructor interface here?
+    pub fn bind_pointer(&self, i: i32, p: *mut c_void, name: &CStr) {
+        unsafe {
+            sqlite3_bind_pointer(
+                self.statement,
+                i,
+                p,
+                name.as_ptr(),
+                None,
+            )
+        };
+    }
     pub fn bind_text<S: AsRef<str>>(&self, i: i32, value: S) {
         let n = value.as_ref().len();
         let s = CString::new(value.as_ref()).unwrap();
@@ -273,6 +300,10 @@ impl Statement {
     }
     pub fn readonly(&self) -> bool {
         unsafe { sqlite3_stmt_readonly(self.statement) != 0 }
+    }
+
+    pub fn pointer(&self) -> *mut sqlite3_stmt {
+      self.statement
     }
 }
 impl Drop for Statement {
@@ -367,6 +398,11 @@ impl Connection {
             let s = unsafe { CStr::from_ptr(pz_err_msg).to_string_lossy() };
             println!("Loading extension failed: {s}");
         }
+    }
+
+    pub fn execute(&self, sql: &str) -> Result<usize, /* TODO */ ()> {
+        let stmt = self.prepare(sql).unwrap().1.unwrap();
+        Ok(stmt.execute().unwrap())
     }
 
     pub fn prepare(&self, sql: &str) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {

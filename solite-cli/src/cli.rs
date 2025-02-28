@@ -8,6 +8,7 @@ use std::process::exit;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SoliteSubcommand {
     Run(RunFlags),
+    Snapshot(SnapshotFlags),
     Query(QueryFlags),
     Help(HelpFlags),
     Repl(ReplFlags),
@@ -67,6 +68,32 @@ pub fn run_subcommand() -> Command {
         )
         .arg(Arg::new("verbose").long("verbose").required(false))
         .about("Run SQL or PRQL scripts ")
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotFlags {
+    pub script: String,
+    pub extension: Option<String>,
+}
+pub fn snapshot_subcommand() -> Command {
+  Command::new("snapshot")
+  .allow_missing_positional(true)
+      .arg(
+          Arg::new("script")
+              .help("Path to SQL file")
+              .value_name("SCRIPT")
+              .value_hint(ValueHint::FilePath)
+              .required(true),
+      )
+      
+      .arg(
+          Arg::new("extension")
+              .help("Path to SQLite extension")
+              .value_name("EXT")
+              .required(false)
+      )
+      
+      .about("Snapshot results of SQL commands")
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -185,6 +212,7 @@ pub fn flags_from_vec(args: Vec<String>) -> Result<Flags> {
         .max_term_width(80)
         .allow_external_subcommands(true)
         .subcommand(run_subcommand())
+        .subcommand(snapshot_subcommand())
         .subcommand(query_subcommand())
         .subcommand(repl_subcommand())
         .subcommand(jupyter_subcommand());
@@ -195,6 +223,10 @@ pub fn flags_from_vec(args: Vec<String>) -> Result<Flags> {
             database: m.get_one::<String>("database").cloned(),
             script: m.get_one::<String>("script").unwrap().to_string(),
             verbose: *m.get_one::<bool>("verbose").unwrap_or(&false),
+        }),
+        Some(("snapshot", m)) => SoliteSubcommand::Snapshot(SnapshotFlags {
+            script: m.get_one::<String>("script").unwrap().to_string(),
+            extension: m.get_one::<String>("extension").cloned().map(String::from),
         }),
         Some(("query", m)) => {
             let output = m.get_one::<String>("output").cloned().map(PathBuf::from);
@@ -245,6 +277,10 @@ pub fn flags_from_vec(args: Vec<String>) -> Result<Flags> {
 pub(crate) fn launch(flags: Flags) {
     match flags.subcommand.clone() {
         SoliteSubcommand::Run(run_flags) => match crate::run::run(run_flags) {
+            Ok(()) => exit(0),
+            Err(()) => exit(1),
+        },
+        SoliteSubcommand::Snapshot(snapshot_flags) => match crate::snapshot::snapshot(snapshot_flags) {
             Ok(()) => exit(0),
             Err(()) => exit(1),
         },

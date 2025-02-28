@@ -155,11 +155,11 @@ fn render_statement(stmt: &Statement) -> Result<UiResponse, UiError> {
     html.push_str("<div>\n");
     html.push_str(
         format!(
-            "{} row{} \u{00d7} {} column{}",
+            "{} column{} \u{00d7} {} row{}",
+            column_count,
+            if column_count < 2 { "" } else { "s" },
             row_count,
             if row_count < 2 { "" } else { "s" },
-            column_count,
-            if column_count < 2 { "" } else { "s" }
         )
         .as_str(),
     );
@@ -179,7 +179,7 @@ fn handle_code(runtime: &mut Runtime, code: String) -> Result<UiResponse, UiErro
     loop {
         match runtime.next_step() {
             Ok(Some(step)) => match step.result {
-                StepResult::SqlStatement(stmt) => {
+                StepResult::SqlStatement{stmt, ..} => {
                     if !runtime.has_next() {
                         return render_statement(&stmt);
                     } else {

@@ -127,6 +127,7 @@ fn main() {
         .flag("-DSQLITE_ENABLE_STMTVTAB")
         .flag("-DSQLITE_ENABLE_BYTECODE_VTAB")
         .flag("-DSQLITE_ENABLE_EXPLAIN_COMMENTS")
+        .flag("-DSQLITE_ENABLE_STMT_SCANSTATUS")
         .warnings(false)
         .compile("sqlite");
 

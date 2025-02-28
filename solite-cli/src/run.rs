@@ -70,10 +70,10 @@ pub(crate) fn run(flags: RunFlags) -> Result<(), ()> {
     loop {
         match rt.next_step() {
             Ok(Some(step)) => match step.result {
-                StepResult::SqlStatement(stmt) => {
+                StepResult::SqlStatement{stmt, ..} => {
                     println!(
                         "{} {}",
-                        colors::green(step.source),
+                        colors::green(step.reference.to_string()),
                         colors::italic_gray(stmt.sql().trim())
                     );
                     let start = std::time::Instant::now();

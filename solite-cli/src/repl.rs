@@ -396,7 +396,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                         solite_core::dot::ParameterCommand::Clear => todo!(),
                     },
                 },
-                StepResult::SqlStatement(stmt) => {
+                StepResult::SqlStatement{stmt, ..} => {
                     let start = std::time::Instant::now();
 
                     if let Some(table) = crate::ui::table_from_statement(stmt, true) {

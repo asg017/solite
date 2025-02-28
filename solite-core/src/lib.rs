@@ -10,7 +10,7 @@ use libsqlite3_sys::{
 use ropey::Rope;
 use solite_stdlib::solite_stdlib_init;
 use sqlite::{OwnedValue, SQLiteError, Statement};
-use std::{fmt::Write, path::PathBuf};
+use std::{fmt, fmt::Write, path::PathBuf};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -58,13 +58,28 @@ pub struct Runtime {
     initialized_sqlite_parameters_table: bool,
 }
 
+pub struct StepReference {
+  block_name: String,
+  line_number: usize,
+  column_number: usize,
+}
+
+impl fmt::Display for StepReference {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(f, "{}:{}:{}", self.block_name, self.line_number, self.column_number)
+  }
+}
+
 pub enum StepResult {
-    SqlStatement(Statement),
+    SqlStatement{stmt: Statement, raw_sql: String},
     DotCommand(dot::DotCommand),
 }
 pub struct Step {
+    /// Dot command or SQL
     pub result: StepResult,
-    pub source: String,
+
+
+    pub reference: StepReference,
 }
 
 fn error_context(error: &SQLiteError, block: &Block) -> Result<String, std::fmt::Error> {
@@ -164,7 +179,45 @@ impl Runtime {
             offset: 0,
         });
     }
-
+    
+    // temporary for snapshot
+    pub fn next_sql_step(&mut self) -> Result<Option<Step>, StepError> {
+      let mut current = match self.stack.pop() {
+        Some(x) => x,
+        None => return Ok(None),
+      };
+      let full = (current.contents).get(current.offset..).unwrap();
+      let code = full.to_owned();
+      let local_offset = 0;
+      match self.prepare_with_parameters(&code) {
+        Ok((rest, Some(stmt))) => {
+            let stmt_offset_idx = if (current.offset - local_offset) == 0 {
+                0
+            } else {
+                current.offset - local_offset + 1
+            };
+            let line_idx = current.rope.byte_to_line(stmt_offset_idx);
+            let column_idx = stmt_offset_idx - current.rope.line_to_byte(line_idx);
+            let block_name = current.name.clone();
+            if let Some(rest) = rest {
+                current.offset += rest;
+                self.stack.insert(0, current);
+            }
+            return Ok(Some(Step {
+                reference: StepReference {
+                  block_name,
+                  line_number: line_idx + 1,
+                  column_number: column_idx + 1,
+                },
+                result: StepResult::SqlStatement{stmt, raw_sql: code.to_owned()},
+            }));
+        }
+        Ok((_rest, None)) => {
+            return Ok(None)
+        }
+        Err(error) => todo!(),
+    }
+    }
     pub fn next_step(&mut self) -> Result<Option<Step>, StepError> {
         // loop here handles:
         // 1. Dot commands
@@ -176,7 +229,7 @@ impl Runtime {
             // the first "real" code.
             //let code = (current.contents).get(current.offset..).unwrap();
             let full = (current.contents).get(current.offset..).unwrap();
-            let code = advance_through_ignorable(full);
+            let code = advance_through_ignorable(full).to_owned();
             let local_offset = full.len() - code.len();
             current.offset += local_offset;
             if code.starts_with('.') {
@@ -193,11 +246,16 @@ impl Runtime {
                 }
                 let cmd = parse_dot(dot_command, dot_args).map_err(StepError::ParseDot)?;
                 return Ok(Some(Step {
-                    source,
+                    reference: StepReference {
+                      block_name: source,
+                      // TODO: why hardcode here?
+                      line_number: 1,
+                      column_number: 1,
+                    },
                     result: StepResult::DotCommand(cmd),
                 }));
             } else {
-                match self.prepare_with_parameters(code) {
+                match self.prepare_with_parameters(&code) {
                     Ok((rest, Some(stmt))) => {
                         let stmt_offset_idx = if (current.offset - local_offset) == 0 {
                             0
@@ -206,15 +264,18 @@ impl Runtime {
                         };
                         let line_idx = current.rope.byte_to_line(stmt_offset_idx);
                         let column_idx = stmt_offset_idx - current.rope.line_to_byte(line_idx);
-                        let source =
-                            format!("{}:{}:{}", current.name, line_idx + 1, column_idx + 1);
+                        let block_name = current.name.clone();
                         if let Some(rest) = rest {
                             current.offset += rest;
                             self.stack.insert(0, current);
                         }
                         return Ok(Some(Step {
-                            source,
-                            result: StepResult::SqlStatement(stmt),
+                            reference: StepReference {
+                              block_name,
+                              line_number: line_idx + 1,
+                              column_number: column_idx + 1,
+                            },
+                            result: StepResult::SqlStatement{stmt, raw_sql: code.to_owned()},
                         }));
                     }
                     Ok((_rest, None)) => {
@@ -240,7 +301,7 @@ impl Runtime {
                             }
                         };
                     }
-                };
+                }
             }
         }
 
@@ -253,7 +314,7 @@ impl Runtime {
                 Ok(None) => return Ok(()),
                 Ok(Some(step)) => {
                     match step.result {
-                        StepResult::SqlStatement(stmt) => stmt.execute().unwrap(),
+                        StepResult::SqlStatement{stmt, ..} => stmt.execute().unwrap(),
                         StepResult::DotCommand(_cmd) => todo!(),
                     };
                     continue;
@@ -346,7 +407,7 @@ impl Runtime {
     }
 }
 
-fn advance_through_ignorable(contents: &str) -> &str {
+pub fn advance_through_ignorable(contents: &str) -> &str {
     let mut chars = contents.char_indices();
     let mut latest = 0;
 
@@ -569,7 +630,7 @@ select 4;",
             _ => panic!("fail"),
         };
         match runtime.next_step().unwrap().unwrap().result {
-            StepResult::SqlStatement(stmt) => {
+            StepResult::SqlStatement{stmt, ..} => {
                 let row = stmt.next().unwrap().unwrap();
                 assert_eq!(row.first().unwrap().as_str(), "4");
             }

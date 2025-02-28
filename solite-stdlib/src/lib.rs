@@ -56,6 +56,8 @@ extern "C" {
 extern "C" {
     fn sqlite3_spellfix_init();
 }
+
+/*
 #[link(name = "sqlar")]
 extern "C" {
     fn sqlite3_sqlar_init();
@@ -64,14 +66,19 @@ extern "C" {
 extern "C" {
     fn sqlite3_compress_init();
 }
+*/
 #[link(name = "uuid")]
 extern "C" {
     fn sqlite3_uuid_init();
 }
+
+/*
 #[link(name = "zipfile")]
 extern "C" {
     fn sqlite3_zipfile_init();
 }
+*/
+
 #[link(name = "usleep")]
 extern "C" {
     fn sqlite3_usleep_init();
@@ -127,11 +134,11 @@ pub unsafe extern "C" fn solite_stdlib_init(
     init_arg0(sqlite3_sha_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_shathree_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_spellfix_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_sqlar_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_compress_init, db, pz_err_msg, p_api);
+    //init_arg0(sqlite3_sqlar_init, db, pz_err_msg, p_api);
+    //init_arg0(sqlite3_compress_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_uuid_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_usleep_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_zipfile_init, db, pz_err_msg, p_api);
+    //init_arg0(sqlite3_zipfile_init, db, pz_err_msg, p_api);
     //init_arg0(sqlite3_base85_init, db, pz_err_msg, p_api);
     0
 }

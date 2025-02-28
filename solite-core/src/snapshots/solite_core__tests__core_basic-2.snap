@@ -1,6 +1,7 @@
 ---
 source: solite-core/src/lib.rs
 expression: modules_of(&runtime.connection)
+snapshot_kind: text
 ---
 - bytecode
 - completion
@@ -45,4 +46,3 @@ expression: modules_of(&runtime.connection)
 - xsv_fields
 - xsv_reader
 - xsv_rows
-- zipfile

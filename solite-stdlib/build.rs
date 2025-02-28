@@ -139,10 +139,14 @@ fn main() {
         "sha1",
         "shathree",
         "spellfix",
+        
+        /* temporary, until windows zlib stuff is fixed
         "compress",
-        "sqlar",
-        "series",
         "zipfile", //"stmt",
+        "sqlar",
+         */
+
+        "series",
         "uuid",
         "completion",
         "uint",

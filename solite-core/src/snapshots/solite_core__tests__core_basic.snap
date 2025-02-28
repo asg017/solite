@@ -22,7 +22,6 @@ snapshot_kind: text
 - char
 - clipboard_set
 - coalesce
-- compress
 - concat
 - concat_ws
 - cos
@@ -192,8 +191,6 @@ snapshot_kind: text
 - spellfix1_phonehash
 - spellfix1_scriptcode
 - spellfix1_translit
-- sqlar_compress
-- sqlar_uncompress
 - sqlite_compileoption_get
 - sqlite_compileoption_used
 - sqlite_log
@@ -248,7 +245,6 @@ snapshot_kind: text
 - ulid_version
 - ulid_with_datetime
 - ulid_with_prefix
-- uncompress
 - unhex
 - unicode
 - unixepoch
@@ -293,5 +289,3 @@ snapshot_kind: text
 - xsv_path
 - xsv_version
 - zeroblob
-- zipfile
-- zipfile_cds

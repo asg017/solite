@@ -9,7 +9,6 @@ snapshot_kind: text
 - regex_version == v0.2.4-alpha.1
 - solite_stdlib_version == v0.0.1-alpha.1
 - sqlite_version == 3.47.0
-- tg_version == v0.0.1-alpha.18
 - ulid_version == v0.2.2-alpha.1
 - url_version == xv0.1.0
 - vec_version == v0.1.6

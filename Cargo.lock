@@ -2346,7 +2346,6 @@ dependencies = [
  "sqlite-loadable",
  "sqlite-path",
  "sqlite-regex",
- "sqlite-tg",
  "sqlite-ulid",
  "sqlite-url",
  "sqlite-vec",
@@ -2424,15 +2423,6 @@ checksum = "add01ebc6be34f26bdb71cf1b4fec3d379d5d6d6a78700fb5f829576d306f3e8"
 dependencies = [
  "regex",
  "sqlite-loadable",
-]
-
-[[package]]
-name = "sqlite-tg"
-version = "0.0.1-alpha.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "351d660c89cb004196b050f4e6f8629b5fed07ff47d8cc73c6cb9302c9b941e1"
-dependencies = [
- "cc",
 ]
 
 [[package]]

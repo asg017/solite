@@ -6,7 +6,6 @@ use sqlite_lines::sqlite3_lines_init;
 use sqlite_loadable::ext::{sqlite3, sqlite3_api_routines};
 use sqlite_path::sqlite3_path_init;
 use sqlite_regex::sqlite3_regex_init;
-use sqlite_tg::sqlite3_tg_init;
 use sqlite_ulid::sqlite3_ulid_init;
 use sqlite_url::sqlite3_url_init;
 use sqlite_vec::sqlite3_vec_init;
@@ -124,7 +123,6 @@ pub unsafe extern "C" fn solite_stdlib_init(
 
     //sqlite3_fastrand_init(db, pz_err_msg, p_api);
     init_arg0(sqlite3_vec_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_tg_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_completion_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_decimal_init, db, pz_err_msg, p_api);
     init_arg0(sqlite3_ieee_init, db, pz_err_msg, p_api);

@@ -21,6 +21,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
         shell: bash
+      # `uv tool install` installs binaries to ~/.local/bin, but it's not on PATH
+      # for windows/macos-13
+      - run: echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$GITHUB_ENV"
       - run: uv tool install --with ipykernel jupyter-core
       - run: jupyter kernelspec list
       - run: cargo run -- jupyter --install

@@ -24,7 +24,9 @@ jobs:
       # `uv tool install` installs binaries to ~/.local/bin, but it's not on PATH
       # for windows/macos-13
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - if: runner.os == 'Windows'
         shell: bash
+        run: echo "$USERPROFILE/.local/bin" >> $GITHUB_PATH
       - run: uv tool install --with ipykernel jupyter-core
       - run: jupyter kernelspec list
       - run: cargo run -- jupyter --install

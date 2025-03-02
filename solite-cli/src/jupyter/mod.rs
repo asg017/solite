@@ -51,18 +51,25 @@ fn install() {
         ])
         .spawn();
 
-    if let Ok(mut child) = child_result {
-        let wait_result = child.wait();
-        match wait_result {
-            Ok(status) => {
-                if !status.success() {
-                    eprintln!("Failed to install kernelspec, try again.");
+    match child_result {
+        Ok(mut child) => {
+            let wait_result = child.wait();
+            match wait_result {
+                Ok(status) => {
+                    if !status.success() {
+                        eprintln!("Failed to install kernelspec, try again.");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Failed to install kernelspec: {}", err);
                 }
             }
-            Err(err) => {
-                eprintln!("Failed to install kernelspec: {}", err);
-            }
         }
+        Err(err) => {
+            eprintln!("Failed to install kernelspec: {}", err);
+            return;
+        }
+        _ => {}
     }
 
     let _ = std::fs::remove_dir(tmpdir);

@@ -205,7 +205,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     // breaks for macos - but works for linux??
+    /*
     if cfg!(target_os = "linux") {
         println!("cargo::rustc-link-lib=static=z");
     }
+     */
 }

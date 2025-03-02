@@ -53,6 +53,7 @@ snapshot_kind: text
 - format
 - fts5
 - fts5_get_locale
+- fts5_insttoken
 - fts5_locale
 - fts5_source_id
 - geopoly_area
@@ -82,6 +83,7 @@ snapshot_kind: text
 - ieee754_inc
 - ieee754_mantissa
 - ieee754_to_blob
+- if
 - ifnull
 - iif
 - instr

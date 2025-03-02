@@ -1,6 +1,7 @@
 ---
 source: solite-stdlib/src/lib.rs
 expression: base_functions
+snapshot_kind: text
 ---
 - "->"
 - "->>"
@@ -38,6 +39,7 @@ expression: base_functions
 - format
 - fts5
 - fts5_get_locale
+- fts5_insttoken
 - fts5_locale
 - fts5_source_id
 - geopoly_area
@@ -57,6 +59,7 @@ expression: base_functions
 - group_concat
 - hex
 - highlight
+- if
 - ifnull
 - iif
 - instr

@@ -1,0 +1,6 @@
+---
+source: solite-core/src/lib.rs
+expression: rt.next_step()
+snapshot_kind: text
+---
+Ok: ~

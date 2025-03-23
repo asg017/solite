@@ -7,6 +7,7 @@ mod repl;
 mod run;
 mod ui;
 mod snapshot;
+mod docs;
 
 use std::{env, process::exit};
 

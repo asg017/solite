@@ -4,7 +4,7 @@ use solite_core::sqlite::{Statement, ValueRefX, ValueRefXValue};
 use termcolor::Color;
 
 lazy_static::lazy_static! {
-  static ref BORDER: Border = Border::builder()
+  pub static ref BORDER: Border = Border::builder()
   .top(HorizontalLine::new('┌', '┐', '┬', '─'))
   .bottom(HorizontalLine::new('└', '┘', '┴', '─'))
   .left(VerticalLine::new('│'))
@@ -12,7 +12,7 @@ lazy_static::lazy_static! {
   .build();
   static ref COLUMN_SEPARATOR: VerticalLine = VerticalLine::new('│');
   static ref TITLE_SEPARATOR: HorizontalLine = HorizontalLine::new('├', '┤', '┼', '─');
-  static ref SEPARATOR: Separator =Separator::builder()
+  pub static ref SEPARATOR: Separator =Separator::builder()
   .column(Some(*COLUMN_SEPARATOR))
   .row(None)
   .title(Some(*TITLE_SEPARATOR))

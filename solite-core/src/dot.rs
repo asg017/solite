@@ -1,8 +1,9 @@
 use thiserror::Error;
 
 use crate::{sqlite::Connection, Runtime};
+use serde::{Deserialize, Serialize};
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Error, Debug, PartialEq)]
 pub enum ParseDotError {
     #[error("Unknown command '{0}'")]
     UnknownCommand(String),
@@ -10,7 +11,7 @@ pub enum ParseDotError {
     InvalidArgument(String),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct PrintCommand {
     pub message: String,
 }
@@ -20,7 +21,7 @@ impl PrintCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct TablesCommand {}
 impl TablesCommand {
     pub fn execute(&self, runtime: &Runtime) {
@@ -49,7 +50,7 @@ impl TablesCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct OpenCommand {
     pub path: String,
 }
@@ -59,7 +60,7 @@ impl OpenCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct LoadCommand {
     pub path: String,
     pub entrypoint: Option<String>,
@@ -77,7 +78,7 @@ impl LoadCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq)]
 pub enum ParameterCommand {
     Set { key: String, value: String },
     Unset(String),
@@ -105,8 +106,7 @@ fn parse_parameter(line: String) -> ParameterCommand {
         },
     }
 }
-
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq)]
 pub enum DotCommand {
     /*  introspection  */
     //Databases,

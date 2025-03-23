@@ -10,10 +10,11 @@ use libsqlite3_sys::{
 use ropey::Rope;
 use solite_stdlib::solite_stdlib_init;
 use sqlite::{OwnedValue, SQLiteError, Statement};
-use std::{fmt, fmt::Write, path::PathBuf};
+use std::{fmt, path::PathBuf};
 use thiserror::Error;
+use serde::{Deserialize, Serialize};
 
-#[derive(Error, Debug)]
+#[derive(Serialize, Deserialize, Error, Debug)]
 pub enum StepError {
     #[error("Error preparing SQL statement:")]
     Prepare {
@@ -58,6 +59,7 @@ pub struct Runtime {
     initialized_sqlite_parameters_table: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct StepReference {
   block_name: String,
   line_number: usize,
@@ -70,10 +72,14 @@ impl fmt::Display for StepReference {
   }
 }
 
+#[derive(Serialize, Debug)]
 pub enum StepResult {
     SqlStatement{stmt: Statement, raw_sql: String},
     DotCommand(dot::DotCommand),
 }
+
+#[derive(Serialize, Debug)]
+
 pub struct Step {
     /// Dot command or SQL
     pub result: StepResult,
@@ -82,87 +88,18 @@ pub struct Step {
     pub reference: StepReference,
 }
 
-fn error_context(error: &SQLiteError, block: &Block) -> Result<String, std::fmt::Error> {
-    let mut ctx = String::new();
-
-    let error_offset = error.offset.unwrap_or(0) + block.offset;
-    let line_idx_with_error = block.rope.byte_to_line(error_offset);
-    let line_error_offset = error_offset - block.rope.line_to_byte(line_idx_with_error);
-    let longest_digit_length =
-        ((line_idx_with_error + 1 + 4).checked_ilog10().unwrap_or(0) + 1) as usize;
-    writeln!(
-        &mut ctx,
-        "{} ({})",
-        error.code_description, error.result_code
-    )?;
-
-    for b in (1..4).rev() {
-        if let Some(idx) = line_idx_with_error.checked_sub(b) {
-            if let Some(line) = block.rope.get_line(idx) {
-                writeln!(
-                    &mut ctx,
-                    "{:longest_digit_length$} | {}",
-                    line_idx_with_error + 1 - b,
-                    line.as_str().unwrap().trim_end_matches('\n'),
-                )?;
-            }
-        };
-    }
-    writeln!(
-        &mut ctx,
-        "{:longest_digit_length$} | {}",
-        line_idx_with_error + 1,
-        block
-            .rope
-            .line(line_idx_with_error)
-            .as_str()
-            .unwrap()
-            .trim_end_matches('\n'),
-    )?;
-    writeln!(
-        &mut ctx,
-        "{:longest_digit_length$} | {}^ {}",
-        " ",
-        " ".repeat(line_error_offset),
-        error.message,
-    )?;
-    for b in 1..4 {
-        if let Some(line) = block.rope.get_line(line_idx_with_error + b) {
-            writeln!(
-                &mut ctx,
-                "{:longest_digit_length$} | {}",
-                line_idx_with_error + 1 + b,
-                line.as_str().unwrap().trim_end_matches('\n'),
-            )?;
-        }
-    }
-
-    writeln!(
-        &mut ctx,
-        "\tat {:longest_digit_length$}:{}:{}",
-        match &block.source {
-            BlockSource::File(p) => p.to_string_lossy().to_string(),
-            BlockSource::JupyerCell => "[cell]".to_owned(),
-            BlockSource::Repl => "[repl]".to_owned(),
-        },
-        line_idx_with_error + 1,
-        line_error_offset + 1,
-    )?;
-
-    Ok(ctx)
-}
-
 impl Runtime {
     pub fn new(path: Option<String>) -> Self {
         unsafe {
-            libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(
-                solite_stdlib_init as *const (),
-            )));
+            //libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(solite_stdlib_init as *const (),)));
         }
         let connection = match path {
             Some(path) => Connection::open(path.as_str()).unwrap(),
             None => Connection::open_in_memory().unwrap(),
         };
+        unsafe {
+          solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
+        }
         Runtime {
             connection,
             stack: vec![],
@@ -215,7 +152,10 @@ impl Runtime {
         Ok((_rest, None)) => {
             return Ok(None)
         }
-        Err(error) => todo!(),
+        Err(error) => {
+          eprintln!("{}", error);
+          todo!();
+        },
     }
     }
     pub fn next_step(&mut self) -> Result<Option<Step>, StepError> {
@@ -289,9 +229,6 @@ impl Runtime {
                             }
                             Some(Err(_)) => todo!(),
                             None => {
-                                let context = error_context(&error, &current)
-                                    .map_err(|_e| "error_context error???".to_owned())
-                                    .unwrap();
                                 return Err(StepError::Prepare {
                                     error,
                                     file_name: current.name,
@@ -479,6 +416,7 @@ pub fn advance_through_ignorable(contents: &str) -> &str {
 }
 #[cfg(test)]
 mod tests {
+    use insta::assert_yaml_snapshot;
     use solite_stdlib::BUILTIN_FUNCTIONS;
 
     use super::*;
@@ -644,5 +582,33 @@ select 4;",
             BlockSource::File(PathBuf::new()),
         )
         .unwrap();*/
+    }
+
+    #[test]
+    fn snap() {
+      let mut rt = Runtime::new(None);
+        rt.enqueue(
+            "[input]",
+            "create table t(a);
+                insert into t select 1;
+                insert into t select 2; ",
+            BlockSource::File(PathBuf::new()),
+        );
+        loop {
+          let step = rt.next_step();
+          assert_yaml_snapshot!(step);
+          match step {
+            Ok(None) => break,
+            Ok(Some(step)) => {
+              match step.result {
+                StepResult::SqlStatement{stmt, ..} => {
+                  stmt.execute();
+                }
+                _ => panic!("fail"),
+              };
+            }
+            Err(err) => (),
+          }
+        }
     }
 }

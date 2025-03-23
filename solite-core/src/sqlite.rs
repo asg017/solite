@@ -5,6 +5,7 @@ use std::ffi::{c_void, CStr};
 use std::ptr::{self};
 use std::str::Utf8Error;
 use std::{ffi::CString, os::raw::c_char};
+use serde::{Deserialize, Serialize};
 
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/json.c#L126
 pub const JSON_SUBTYPE: u32 = 74;
@@ -143,12 +144,15 @@ impl<'a> Row<'a> {
 }
 
 /// https://www.sqlite.org/c3ref/stmt.html
+#[derive(Serialize, Debug)]
 pub struct Statement {
+    #[serde(skip)]
     statement: *mut sqlite3_stmt,
 }
 impl Statement {
     pub fn sql(&self) -> String {
         unsafe {
+            // Freed when statement is finalized, but we make copy here anyway
             let z = sqlite3_sql(self.statement);
             let s = CStr::from_ptr(z);
             s.to_str().unwrap().to_string()
@@ -458,7 +462,7 @@ impl Drop for Connection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SQLiteError {
     pub result_code: i32,
     pub code_description: String,

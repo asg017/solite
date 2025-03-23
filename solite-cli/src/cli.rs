@@ -9,6 +9,7 @@ use std::process::exit;
 pub enum SoliteSubcommand {
     Run(RunFlags),
     Snapshot(SnapshotFlags),
+    Docs(DocsFlags),
     Query(QueryFlags),
     Help(HelpFlags),
     Repl(ReplFlags),
@@ -74,6 +75,8 @@ pub fn run_subcommand() -> Command {
 pub struct SnapshotFlags {
     pub script: String,
     pub extension: Option<String>,
+    pub output: Option<PathBuf>,
+    pub verbose: bool
 }
 pub fn snapshot_subcommand() -> Command {
   Command::new("snapshot")
@@ -92,8 +95,59 @@ pub fn snapshot_subcommand() -> Command {
               .value_name("EXT")
               .required(false)
       )
+      .arg(
+          Arg::new("verbose")
+            .short('v')
+              .help("Print SQL before executing")
+              .action(ArgAction::SetTrue)
+      )
+      .arg(
+        Arg::new("output")
+                .short('o')
+                .help("Output file")
+                .value_name("PATH")
+                .value_hint(ValueHint::FilePath)
+                .num_args(1)
+                .required(false),
+      )
       
       .about("Snapshot results of SQL commands")
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DocsFlags {
+    pub input: PathBuf,
+    pub extension: Option<String>,
+    pub output: Option<PathBuf>,
+}
+pub fn docs_subcommand() -> Command {
+  Command::new("docs")
+  .allow_missing_positional(false)
+      .arg(
+          Arg::new("input")
+              .help("Path to input markdown docs")
+              .value_name("DOCS")
+              .value_hint(ValueHint::FilePath)
+              .required(true),
+      )
+      
+      .arg(
+          Arg::new("extension")
+              .help("Path to SQLite extension")
+              .value_name("EXT")
+              .required(false)
+      )
+      .arg(
+        Arg::new("output")
+                .short('o')
+                .help("Output file")
+                .value_name("PATH")
+                .value_hint(ValueHint::FilePath)
+                .num_args(1)
+                .required(false),
+      )
+      
+      .about("Generate markdown docs with inline SQL results")
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -212,10 +266,11 @@ pub fn flags_from_vec(args: Vec<String>) -> Result<Flags> {
         .max_term_width(80)
         .allow_external_subcommands(true)
         .subcommand(run_subcommand())
-        .subcommand(snapshot_subcommand())
         .subcommand(query_subcommand())
         .subcommand(repl_subcommand())
-        .subcommand(jupyter_subcommand());
+        .subcommand(jupyter_subcommand())
+      .subcommand(snapshot_subcommand())
+      .subcommand(docs_subcommand());
 
     let matches = app.get_matches_from(args);
     let subcommand = match matches.subcommand() {
@@ -227,6 +282,13 @@ pub fn flags_from_vec(args: Vec<String>) -> Result<Flags> {
         Some(("snapshot", m)) => SoliteSubcommand::Snapshot(SnapshotFlags {
             script: m.get_one::<String>("script").unwrap().to_string(),
             extension: m.get_one::<String>("extension").cloned().map(String::from),
+            verbose: m.get_flag("verbose"),
+            output: m.get_one::<String>("output").cloned().map(PathBuf::from),
+        }),
+        Some(("docs", m)) => SoliteSubcommand::Docs(DocsFlags {
+            input: m.get_one::<String>("input").map(PathBuf::from).unwrap(),
+            extension: m.get_one::<String>("extension").cloned().map(String::from),
+            output: m.get_one::<String>("output").cloned().map(PathBuf::from),
         }),
         Some(("query", m)) => {
             let output = m.get_one::<String>("output").cloned().map(PathBuf::from);
@@ -281,6 +343,10 @@ pub(crate) fn launch(flags: Flags) {
             Err(()) => exit(1),
         },
         SoliteSubcommand::Snapshot(snapshot_flags) => match crate::snapshot::snapshot(snapshot_flags) {
+            Ok(()) => exit(0),
+            Err(()) => exit(1),
+        },
+        SoliteSubcommand::Docs(docs_flags) => match crate::docs::docs(docs_flags) {
             Ok(()) => exit(0),
             Err(()) => exit(1),
         },

@@ -5,10 +5,11 @@
   
   Commands:
     run       Run SQL or PRQL scripts 
-    snapshot  Snapshot results of SQL commands
     query     execute sql
     repl      reh pull
     jupyter   Jupyter
+    snapshot  Snapshot results of SQL commands
+    docs      Generate markdown docs with inline SQL results
     help      Print this message or the help of the given subcommand(s)
   
   Options:

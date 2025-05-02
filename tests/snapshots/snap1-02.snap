@@ -1,0 +1,4 @@
+Source: ../snap1.sql
+select 1 + 2;
+---
+3

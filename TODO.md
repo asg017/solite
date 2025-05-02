@@ -1,3 +1,7 @@
+- [ ] `.export`
+- [ ] `! ` shell commands
+
+
 - [ ] print "bail" message on run when bailing
 - [ ] on run: long SQL should have progress bar
 

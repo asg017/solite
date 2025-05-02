@@ -10,6 +10,7 @@ indicatif.workspace = true
 solite-stdlib = {path="../solite-stdlib"}
 thiserror = "1.0"
 serde = "1.0.219"
+regex = "1.11.1"
 
 [dev-dependencies]
 rusqlite.workspace = true

@@ -7,7 +7,7 @@ use solite_core::sqlite::{
     escape_string, Statement, ValueRefX, ValueRefXValue, JSON_SUBTYPE, POINTER_SUBTYPE,
 };
 use solite_core::{advance_through_ignorable, BlockSource, Runtime, StepError, StepResult};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs::read_to_string;
 use std::io::Write as _;
@@ -322,18 +322,27 @@ fn sql_comment_region_name(sql: &str) -> Option<&str> {
         .and_then(|captures| captures.get(1).map(|m| m.as_str()))
 }
 
+struct ExtensionsReport {
+    num_functions_loaded: usize,
+    missing_functions: Vec<String>,
+    num_modules_loaded: usize,
+    missing_modules: Vec<String>,
+}
+
 struct Report {
     num_matches: usize,
     num_updated: usize,
     num_rejected: usize,
     num_removed: usize,
-    num_functions_loaded: i64,
-    missing_functions: Vec<String>,
-    num_modules_loaded: i64,
-    missing_modules: Vec<String>,
+    extensions_report: Option<ExtensionsReport>,
 }
-fn snapshot_report(rt: &Runtime, snapshot_results: &Vec<SnapshotResult>) -> Report {
-  let num_matches = snapshot_results
+
+fn snapshot_report(
+    rt: &Runtime,
+    snapshot_results: &Vec<SnapshotResult>,
+    loaded_extension: bool,
+) -> Report {
+    let num_matches = snapshot_results
         .iter()
         .filter(|v| matches!(v, SnapshotResult::Matches))
         .count();
@@ -350,38 +359,47 @@ fn snapshot_report(rt: &Runtime, snapshot_results: &Vec<SnapshotResult>) -> Repo
         .filter(|v| matches!(v, SnapshotResult::Removed))
         .count();
 
-    let stmt = rt
-        .connection
-        .prepare(SNAPSHOT_FUNCTIONS_REPORT_SQL)
-        .unwrap()
-        .1
-        .unwrap();
-    let row = stmt.nextx().unwrap().unwrap();
-    let num_functions_loaded = row.value_at(0).as_int64();
-    let missing_functions: Vec<String> = serde_json::from_str(row.value_at(1).as_str()).unwrap();
+    let extensions_report = if loaded_extension {
+        let stmt = rt
+            .connection
+            .prepare(SNAPSHOT_FUNCTIONS_REPORT_SQL)
+            .unwrap()
+            .1
+            .unwrap();
+        let row = stmt.nextx().unwrap().unwrap();
+        let num_functions_loaded = row.value_at(0).as_int64() as usize;
+        let missing_functions: Vec<String> =
+            serde_json::from_str(row.value_at(1).as_str()).unwrap();
+        drop(stmt);
 
-    drop(stmt);
+        let stmt = rt
+            .connection
+            .prepare(SNAPSHOT_MODULES_REPORT_SQL)
+            .unwrap()
+            .1
+            .unwrap();
+        let row = stmt.nextx().unwrap().unwrap();
+        let num_modules_loaded = row.value_at(0).as_int64() as usize;
+        let missing_modules: Vec<String> = serde_json::from_str(row.value_at(1).as_str()).unwrap();
 
-    let stmt = rt
-        .connection
-        .prepare(SNAPSHOT_MODULES_REPORT_SQL)
-        .unwrap()
-        .1
-        .unwrap();
-    let row = stmt.nextx().unwrap().unwrap();
-    let num_modules_loaded = row.value_at(0).as_int64();
-    let missing_modules: Vec<String> = serde_json::from_str(row.value_at(1).as_str()).unwrap();
+        drop(stmt);
 
-    drop(stmt);
+        Some(ExtensionsReport {
+            num_functions_loaded,
+            missing_functions,
+            num_modules_loaded,
+            missing_modules,
+        })
+    } else {
+        None
+    };
+
     Report {
         num_matches,
         num_updated,
         num_rejected,
         num_removed,
-        num_functions_loaded,
-        missing_functions,
-        num_modules_loaded,
-        missing_modules,
+        extensions_report,
     }
 }
 
@@ -392,7 +410,8 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         .execute("ATTACH DATABASE ':memory:' AS solite_snapshot")
         .unwrap();
 
-    if let Some(ext) = flags.extension {
+  /*
+    if let Some(ext) = &flags.extension {
         rt.connection.execute(BASE_FUNCTIONS_CREATE).unwrap();
         rt.connection.execute(BASE_MODULES_CREATE).unwrap();
         rt.connection.load_extension(&ext, &None);
@@ -402,9 +421,9 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         rt.connection
             .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
             .unwrap();
-    }
+    } */
     let script = Path::new(flags.script.as_str());
-    let snapshots_dir = script.parent().unwrap().join("snapshots");
+    let snapshots_dir = script.parent().unwrap().join("__snapshots__");
     if !snapshots_dir.exists() {
         std::fs::create_dir_all(&snapshots_dir).unwrap();
     }
@@ -430,39 +449,18 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         BlockSource::File(script.into()),
     );
 
-    let mut snapshot_idx = 1;
-    let mut region = None;
     let mut snapshot_results: Vec<SnapshotResult> = vec![];
+    let mut snapshot_idx_map:HashMap<String, usize> = HashMap::new();
     loop {
-        match rt.next_sql_step() {
-            Ok(Some(step)) => match step.result {
+        match rt.next_stepx() {
+            Some(Ok(step)) => match step.result {
                 StepResult::SqlStatement { stmt, raw_sql } => {
-                    for line in raw_sql.lines() {
-                        if line.trim().is_empty() {
-                            continue;
-                        }
-                        // first non-line comment is probably SQL, so break out
-                        if !line.trim().starts_with("--") {
-                            break;
-                        }
-                        if let Some(region_name) = sql_comment_region_name(line) {
-                            region = Some(region_name.to_owned());
-                            snapshot_idx = 0;
-                        }
-                        if SQL_COMMENT_ENDREGION.is_match(line) {
-                            region = None;
-                        }
-                    }
+                    let region_section = step.reference.region.join("-");
+                    let snapshot_idx = snapshot_idx_map.entry(region_section.clone()).or_insert(0);
+                    let snapshot_path =snapshots_dir.join(format!("{}-{}{:02}.snap", basename, if region_section.is_empty() {"".to_owned()} else {format!("{region_section}-")}, snapshot_idx));
+                    *snapshot_idx += 1;
 
-                    let snapshot_path = match region {
-                        Some(ref region) => snapshots_dir
-                            .join(format!("{}-{}-{:02}.snap", basename, region, snapshot_idx)),
-                        None => {
-                            snapshots_dir.join(format!("{}-{:02}.snap", basename, snapshot_idx))
-                        }
-                    };
-
-                    let statement_id;
+                    let mut statement_id = 0;
                     {
                         let insert = rt
                             .connection
@@ -577,18 +575,31 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
                             _ => todo!(),
                         };
                     }
-                    snapshot_idx += 1;
                 }
                 StepResult::DotCommand(cmd) => match cmd {
                     solite_core::dot::DotCommand::Load(load_command) => {
-                        println!("{}", load_command.path);
-                        load_command.execute(&mut rt.connection);
+                      
+                      rt.connection.execute(BASE_FUNCTIONS_CREATE).unwrap();
+                      rt.connection.execute(BASE_MODULES_CREATE).unwrap();
+                      load_command.execute(&mut rt.connection);
+                      rt.connection.execute(LOADED_FUNCTIONS_CREATE).unwrap();
+                      rt.connection.execute(LOADED_MODULES_CREATE).unwrap();
+                      rt.connection.execute(SNAPPED_STATEMENT_CREATE).unwrap();
+                      rt.connection
+                          .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
+                          .unwrap();
                     }
-                    _ => todo!(),
+                    solite_core::dot::DotCommand::Tables(tables_command) => todo!(),
+                    solite_core::dot::DotCommand::Open(open_command) => {
+                        open_command.execute(&mut rt);
+                    }
+                    solite_core::dot::DotCommand::Print(print_command) => print_command.execute(),
+                    solite_core::dot::DotCommand::Parameter(parameter_command) => todo!(),
+                    solite_core::dot::DotCommand::Timer(_) => todo!(),
                 },
             },
-            Ok(None) => break,
-            Err(step_error) => match step_error {
+            None => break,
+            Some(Err(step_error)) => match step_error {
                 StepError::Prepare {
                     error,
                     file_name,
@@ -624,8 +635,7 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         };
     }
 
-    
-    let report = snapshot_report(&rt, &snapshot_results);
+    let report = snapshot_report(&rt, &snapshot_results, true);//flags.extension.is_some());
 
     println!(
         "{:>4} passing snapshot{}",
@@ -654,26 +664,38 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         );
     }
 
-    
-    if report.missing_functions.len() > 0 {
+    if let Some(report) = report.extensions_report {
         println!(
-            "{}/{} functions missing tests :(",
-            report.missing_functions.len(),
-            report.num_functions_loaded
+            "{}/{} functions loaded from extension",
+            report.num_functions_loaded,
+            report.num_functions_loaded + report.missing_functions.len()
         );
-        for function in report.missing_functions {
-            println!("- {}", function);
-        }
-    }
+        if report.missing_functions.len() > 0 {
+            println!(
+                "{} function{} missing from extension",
+                report.missing_functions.len(),
+                if report.missing_functions.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            );
 
-    if report.missing_modules.len() > 0 {
+            for missing in report.missing_functions {
+                println!("  - {}", missing);
+            }
+        }
+
         println!(
-            "{}/{} modules are missing tests :(",
-            report.missing_modules.len(),
-            report.num_modules_loaded
+            "{}/{} modules tested{}",
+            report.num_modules_loaded,
+            report.num_modules_loaded + report.missing_modules.len(),
+            if  report.missing_modules.len() > 0 {
+              ", missing:"
+            }else {""}
         );
-        for module in report.missing_modules {
-            println!("- {}", module);
+        for missing in report.missing_modules {
+            println!("  - {}", missing);
         }
     }
 

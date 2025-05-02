@@ -17,6 +17,7 @@ snapshot_kind: text
 - geopoly
 - json_each
 - json_tree
+- lines
 - lines_read
 - pragma_function_list
 - pragma_module_list

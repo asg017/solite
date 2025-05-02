@@ -4,9 +4,7 @@ use std::{
 };
 
 use crate::{
-    cli::DocsFlags,
-    snapshot::{ValueCopy, ValueCopyValue},
-    ui::{BORDER, SEPARATOR},
+    cli::DocsFlags, errors::report_error_string, snapshot::{ValueCopy, ValueCopyValue}, ui::{BORDER, SEPARATOR}
 };
 use cli_table::{Cell, CellStruct, Table};
 use markdown::{
@@ -157,7 +155,10 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
                             }
                         }
                         Ok((_, None)) => break,
-                        Err(err) => todo!("{err:?}"),
+                        Err(error) => {
+                          println!("{}", report_error_string("TODO", &sql, &error, None));
+                          panic!();
+                        },
                     }
                 }
                 code.value = new_value;
@@ -222,14 +223,7 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
         .filter(|f| !documented_funcs.contains(f))
         .cloned()
         .collect();
-    if undocumented_funcs.len() > 0 {
-        undocumented_funcs.sort();
-        eprintln!("The following functions are not documented:");
-        for func in undocumented_funcs {
-            eprintln!("  - {func}");
-        }
-        return Err(());
-    }
+    
     let out_md = to_markdown(&ast).unwrap().replace("ю", "_");
     match flags.output {
         Some(output) => {
@@ -247,5 +241,14 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
             writeln!(stdout(), "{}", out_md).unwrap();
         }
     }
+
+    if undocumented_funcs.len() > 0 {
+      undocumented_funcs.sort();
+      eprintln!("The following functions are not documented:");
+      for func in undocumented_funcs {
+          eprintln!("  - {func}");
+      }
+      return Err(());
+  }
     Ok(())
 }

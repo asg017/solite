@@ -74,13 +74,12 @@ pub fn run_subcommand() -> Command {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotFlags {
     pub script: String,
-    pub extension: Option<String>,
     pub output: Option<PathBuf>,
     pub verbose: bool
 }
 pub fn snapshot_subcommand() -> Command {
   Command::new("snapshot")
-  .allow_missing_positional(true)
+  .alias("snap")
       .arg(
           Arg::new("script")
               .help("Path to SQL file")
@@ -281,7 +280,6 @@ pub fn flags_from_vec(args: Vec<String>) -> Result<Flags> {
         }),
         Some(("snapshot", m)) => SoliteSubcommand::Snapshot(SnapshotFlags {
             script: m.get_one::<String>("script").unwrap().to_string(),
-            extension: m.get_one::<String>("extension").cloned().map(String::from),
             verbose: m.get_flag("verbose"),
             output: m.get_one::<String>("output").cloned().map(PathBuf::from),
         }),

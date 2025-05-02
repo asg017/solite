@@ -2340,6 +2340,7 @@ dependencies = [
  "indicatif",
  "insta",
  "libsqlite3-sys",
+ "regex",
  "ropey",
  "rusqlite",
  "serde",

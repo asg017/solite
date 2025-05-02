@@ -4,6 +4,7 @@ expression: step
 snapshot_kind: text
 ---
 Ok:
+  preamble: ~
   result:
     SqlStatement:
       stmt: {}
@@ -12,3 +13,4 @@ Ok:
     block_name: "[input]"
     line_number: 2
     column_number: 1
+    region: []

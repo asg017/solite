@@ -4,7 +4,6 @@ expression: version_functions_of(&runtime.connection)
 snapshot_kind: text
 ---
 - http_version == v0.1.0
-- lines_version == xv0.1.0
 - path_version == xv0.1.0
 - regex_version == v0.2.4-alpha.1
 - solite_stdlib_version == v0.0.1-alpha.1

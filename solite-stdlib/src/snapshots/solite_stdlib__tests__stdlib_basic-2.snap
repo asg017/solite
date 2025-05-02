@@ -27,8 +27,6 @@ snapshot_kind: text
 - ieee754_inc
 - ieee754_mantissa
 - ieee754_to_blob
-- lines_debug
-- lines_version
 - lsmode
 - path_at
 - path_debug

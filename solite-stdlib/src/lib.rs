@@ -2,7 +2,6 @@ mod ext;
 
 use crate::ext::sqlite3_solite_stdlib_init;
 use sqlite_http::sqlite3_http_init;
-use sqlite_lines::sqlite3_lines_init;
 use sqlite_loadable::ext::{sqlite3, sqlite3_api_routines};
 use sqlite_path::sqlite3_path_init;
 use sqlite_regex::sqlite3_regex_init;
@@ -112,7 +111,6 @@ pub unsafe extern "C" fn solite_stdlib_init(
     sqlite3_ulid_init(db, pz_err_msg, p_api);
     sqlite3_regex_init(db, pz_err_msg, p_api);
     sqlite3_http_init(db, pz_err_msg, p_api);
-    sqlite3_lines_init(db, pz_err_msg, p_api);
     sqlite3_path_init(db, pz_err_msg, p_api);
     sqlite3_url_init(db, pz_err_msg, p_api);
     sqlite3_xsv_init(db, pz_err_msg, p_api);

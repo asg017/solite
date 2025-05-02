@@ -2367,7 +2367,6 @@ dependencies = [
  "pkg-config",
  "rusqlite",
  "sqlite-http",
- "sqlite-lines",
  "sqlite-loadable",
  "sqlite-path",
  "sqlite-regex",
@@ -2389,14 +2388,6 @@ version = "0.1.0"
 source = "git+https://github.com/asg017/sqlite-http.git?rev=9a738f796ae72513fa150c9c816a8b66da7f50d1#9a738f796ae72513fa150c9c816a8b66da7f50d1"
 dependencies = [
  "reqwest",
- "sqlite-loadable",
- "sqlite-reader",
-]
-
-[[package]]
-name = "sqlite-lines"
-version = "0.1.0"
-dependencies = [
  "sqlite-loadable",
  "sqlite-reader",
 ]

@@ -124,8 +124,6 @@ snapshot_kind: text
 - like
 - likelihood
 - likely
-- lines_debug
-- lines_version
 - ln
 - load_extension
 - log

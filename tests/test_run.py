@@ -8,7 +8,8 @@ select 1;
 select 2;
 
 select 3
-"""
+""",
+        newline="\n",
     )
     assert solite_cli(["run", "a.sql"], cwd=tmp_path).stdout == snapshot
 
@@ -23,7 +24,8 @@ select 1;
 .print yo
 
 .print yo2
-"""
+""",
+        newline="\n",
     )
     assert solite_cli(["run", "a.sql"], cwd=tmp_path).stdout == snapshot
 
@@ -45,7 +47,8 @@ select
   5,
   6;
 
-"""
+""",
+        newline="\n",
     )
     assert solite_cli(["run", "a.sql"], cwd=tmp_path).stdout == snapshot(name="stdout")
     assert solite_cli(["run", "a.sql"], cwd=tmp_path).stderr == snapshot(name="stderr")

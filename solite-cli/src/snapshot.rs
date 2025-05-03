@@ -520,7 +520,7 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
                                 .to_string_lossy()
                                 .to_string(),
                         );
-                        let orignal_snapshot = std::fs::read_to_string(&snapshot_path).unwrap();
+                        let orignal_snapshot = std::fs::read_to_string(&snapshot_path).unwrap().replace("\r\n", "\n");
                         if orignal_snapshot == snapshot_contents {
                             snapshot_results.push(SnapshotResult::Matches);
                         } else {

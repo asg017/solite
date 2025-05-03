@@ -197,6 +197,13 @@ snapshot_kind: text
 - sqlite_source_id
 - sqlite_version
 - sqrt
+- str_contains
+- str_lower
+- str_lower_ascii
+- str_replace
+- str_upper
+- str_upper_ascii
+- str_version
 - strftime
 - string_agg
 - substr

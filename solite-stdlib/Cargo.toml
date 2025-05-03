@@ -12,6 +12,7 @@ sqlite-http = {git="https://github.com/asg017/sqlite-http.git", rev="9a738f796ae
 sqlite-path = {git="https://github.com/asg017/sqlite-path.git", branch="rust"}
 sqlite-xsv = {git="https://github.com/asg017/sqlite-xsv.git", branch="main"}
 sqlite-url = {git="https://github.com/asg017/sqlite-url.git", rev="b0d6757139d0b462768aa5e382333437afc2e6d2"}
+sqlite-str = {git="https://github.com/asg017/sqlite-str.git", rev="5b41ba22ec4bbac7552446eda38faba00a74d528"}
 sqlite-vec = "0.1.6"
 # rm until windows build is fixed :(
 #sqlite-tg = "0.0.1-alpha.18"

@@ -2370,6 +2370,7 @@ dependencies = [
  "sqlite-loadable",
  "sqlite-path",
  "sqlite-regex",
+ "sqlite-str",
  "sqlite-ulid",
  "sqlite-url",
  "sqlite-vec",
@@ -2437,6 +2438,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "add01ebc6be34f26bdb71cf1b4fec3d379d5d6d6a78700fb5f829576d306f3e8"
 dependencies = [
  "regex",
+ "sqlite-loadable",
+]
+
+[[package]]
+name = "sqlite-str"
+version = "0.0.1-alpha.1"
+source = "git+https://github.com/asg017/sqlite-str.git?rev=5b41ba22ec4bbac7552446eda38faba00a74d528#5b41ba22ec4bbac7552446eda38faba00a74d528"
+dependencies = [
  "sqlite-loadable",
 ]
 

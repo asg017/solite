@@ -27,6 +27,9 @@ snapshot_kind: text
 - rtree_i32
 - spellfix1
 - sqlite_stmt
+- str_bytes
+- str_chars
+- str_lines
 - tables_used
 - tsv
 - tsv_fields

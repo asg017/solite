@@ -57,6 +57,13 @@ snapshot_kind: text
 - spellfix1_phonehash
 - spellfix1_scriptcode
 - spellfix1_translit
+- str_contains
+- str_lower
+- str_lower_ascii
+- str_replace
+- str_upper
+- str_upper_ascii
+- str_version
 - tsv_at
 - tsv_line_number
 - tsv_path

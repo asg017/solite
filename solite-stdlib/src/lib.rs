@@ -11,6 +11,7 @@ use sqlite_vec::sqlite3_vec_init;
 use std::ffi::{c_char, c_uint};
 //use sqlite_fastrand::sqlite3_fastrand_init;
 use sqlite_xsv::sqlite3_xsv_init;
+use sqlite_str::sqlite3_str_init;
 
 include!(concat!(env!("OUT_DIR"), "/builtins.rs"));
 
@@ -114,6 +115,7 @@ pub unsafe extern "C" fn solite_stdlib_init(
     sqlite3_path_init(db, pz_err_msg, p_api);
     sqlite3_url_init(db, pz_err_msg, p_api);
     sqlite3_xsv_init(db, pz_err_msg, p_api);
+    sqlite3_str_init(db, pz_err_msg, p_api);
 
     sqlite3_solite_stdlib_init(db, pz_err_msg, p_api);
 

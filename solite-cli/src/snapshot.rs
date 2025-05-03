@@ -489,6 +489,8 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
                         pathdiff::diff_paths(script, snapshot_path.as_path().parent().unwrap())
                             .unwrap()
                             .to_string_lossy()
+                            // replace windows backslashes with forward slashes
+                            .replace("\\", "/")
                             .to_string(),
                         &stmt,
                     );

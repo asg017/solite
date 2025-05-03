@@ -8,6 +8,7 @@ use solite_core::sqlite::{
 };
 use solite_core::{advance_through_ignorable, BlockSource, Runtime, StepError, StepResult};
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fmt::Write as _;
 use std::fs::read_to_string;
 use std::io::Write as _;
@@ -410,6 +411,10 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         .execute("ATTACH DATABASE ':memory:' AS solite_snapshot")
         .unwrap();
 
+    rt.connection.execute(SNAPPED_STATEMENT_CREATE).unwrap();
+    rt.connection
+        .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
+        .unwrap();
   /*
     if let Some(ext) = &flags.extension {
         rt.connection.execute(BASE_FUNCTIONS_CREATE).unwrap();
@@ -423,7 +428,10 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
             .unwrap();
     } */
     let script = Path::new(flags.script.as_str());
-    let snapshots_dir = script.parent().unwrap().join("__snapshots__");
+    let snapshots_dir = match env::var("SOLITE_SNAPSHOT_DIRECTORY")  {
+      Ok(v) => Path::new(&v).to_path_buf(),
+      Err(_) => script.parent().unwrap().join("__snapshots__"),
+    };
     if !snapshots_dir.exists() {
         std::fs::create_dir_all(&snapshots_dir).unwrap();
     }
@@ -451,6 +459,7 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
 
     let mut snapshot_results: Vec<SnapshotResult> = vec![];
     let mut snapshot_idx_map:HashMap<String, usize> = HashMap::new();
+    let mut loaded_extension = false;
     loop {
         match rt.next_stepx() {
             Some(Ok(step)) => match step.result {
@@ -584,10 +593,7 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
                       load_command.execute(&mut rt.connection);
                       rt.connection.execute(LOADED_FUNCTIONS_CREATE).unwrap();
                       rt.connection.execute(LOADED_MODULES_CREATE).unwrap();
-                      rt.connection.execute(SNAPPED_STATEMENT_CREATE).unwrap();
-                      rt.connection
-                          .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
-                          .unwrap();
+                      loaded_extension = true;
                     }
                     solite_core::dot::DotCommand::Tables(tables_command) => todo!(),
                     solite_core::dot::DotCommand::Open(open_command) => {
@@ -635,7 +641,7 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
         };
     }
 
-    let report = snapshot_report(&rt, &snapshot_results, true);//flags.extension.is_some());
+    let report = snapshot_report(&rt, &snapshot_results, loaded_extension);
 
     println!(
         "{:>4} passing snapshot{}",

@@ -3,6 +3,7 @@ test:
 	cargo test
 	cargo build
 	uv run --project tests pytest
+	SOLITE_SNAPSHOT_DIRECTORY=tests/__solite_snaps__ cargo run -- snap tests/snap1.sql
 
 
 stdlib-loadable:

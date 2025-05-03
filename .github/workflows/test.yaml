@@ -34,6 +34,5 @@ jobs:
         shell: bash
       - run: make test
         shell: bash
-      - run: ls -lah target/debug
       #- run: make all; ./dist/debug/sqlite3 < smoke.sql
       #  working-directory: solite-stdlib/sqlite3

@@ -2,10 +2,10 @@
 resolver = "2"
 
 members = [
-    "solite-cli",
-    "solite-core",
-    "solite-stdlib",
-    "solite-lexer",
+    "crates/solite-cli",
+    "crates/solite-core",
+    "crates/solite-stdlib",
+    "crates/solite-lexer",
 ]
 
 [workspace.dependencies]

@@ -1,4 +1,4 @@
-use crate::cli::SnapshotFlags;
+use crate::cli::SnapNamespace;
 use console::{Key, Term};
 use indicatif::HumanBytes;
 use regex::Regex;
@@ -6,13 +6,13 @@ use similar::{Algorithm, ChangeTag, TextDiff};
 use solite_core::sqlite::{
     escape_string, Statement, ValueRefX, ValueRefXValue, JSON_SUBTYPE, POINTER_SUBTYPE,
 };
-use solite_core::{advance_through_ignorable, BlockSource, Runtime, StepError, StepResult};
+use solite_core::{advance_through_ignorable, BlockSource, Runtime, Step, StepError, StepResult};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs::read_to_string;
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -338,30 +338,99 @@ struct Report {
     extensions_report: Option<ExtensionsReport>,
 }
 
-fn snapshot_report(
-    rt: &Runtime,
-    snapshot_results: &Vec<SnapshotResult>,
-    loaded_extension: bool,
-) -> Report {
-    let num_matches = snapshot_results
+impl Report {
+    fn print(&self) {
+        println!(
+            "{:>4} passing snapshot{}",
+            self.num_matches,
+            if self.num_matches == 1 { "" } else { "s" }
+        );
+        if self.num_updated > 0 {
+            println!(
+                "{:>4} updated snapshot{}",
+                self.num_updated,
+                if self.num_updated == 1 { "" } else { "s" }
+            );
+        }
+        if self.num_rejected > 0 {
+            println!(
+                "{:>4} rejected snapshot{}",
+                self.num_rejected,
+                if self.num_rejected == 1 { "" } else { "s" }
+            );
+        }
+        if self.num_removed > 0 {
+            println!(
+                "{:>4} removed snapshot{}",
+                self.num_removed,
+                if self.num_removed == 1 { "" } else { "s" }
+            );
+        }
+
+        if let Some(report) = &self.extensions_report {
+            println!(
+                "{}/{} functions loaded from extension",
+                report.num_functions_loaded,
+                report.num_functions_loaded + report.missing_functions.len()
+            );
+            if report.missing_functions.len() > 0 {
+                println!(
+                    "{} function{} missing from extension",
+                    report.missing_functions.len(),
+                    if report.missing_functions.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                );
+
+                for missing in report.missing_functions.iter() {
+                    println!("  - {}", missing);
+                }
+            }
+
+            println!(
+                "{}/{} modules tested{}",
+                report.num_modules_loaded,
+                report.num_modules_loaded + report.missing_modules.len(),
+                if report.missing_modules.len() > 0 {
+                    ", missing:"
+                } else {
+                    ""
+                }
+            );
+            for missing in report.missing_modules.iter() {
+                println!("  - {}", missing);
+            }
+        }
+    }
+}
+
+fn snapshot_report(state: &SnapshotState) -> Report {
+    let num_matches = state
+        .results
         .iter()
         .filter(|v| matches!(v, SnapshotResult::Matches))
         .count();
-    let num_updated = snapshot_results
+    let num_updated = state
+        .results
         .iter()
         .filter(|v| matches!(v, SnapshotResult::Accepted))
         .count();
-    let num_rejected = snapshot_results
+    let num_rejected = state
+        .results
         .iter()
         .filter(|v| matches!(v, SnapshotResult::Rejected))
         .count();
-    let num_removed = snapshot_results
+    let num_removed = state
+        .results
         .iter()
         .filter(|v| matches!(v, SnapshotResult::Removed))
         .count();
 
-    let extensions_report = if loaded_extension {
-        let stmt = rt
+    let extensions_report = if state.loaded_extension {
+        let stmt = state
+            .runtime
             .connection
             .prepare(SNAPSHOT_FUNCTIONS_REPORT_SQL)
             .unwrap()
@@ -373,7 +442,8 @@ fn snapshot_report(
             serde_json::from_str(row.value_at(1).as_str()).unwrap();
         drop(stmt);
 
-        let stmt = rt
+        let stmt = state
+            .runtime
             .connection
             .prepare(SNAPSHOT_MODULES_REPORT_SQL)
             .unwrap()
@@ -404,84 +474,71 @@ fn snapshot_report(
     }
 }
 
-pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
-    let _started = std::time::Instant::now();
-    let mut rt = Runtime::new(None);
-    rt.connection
-        .execute("ATTACH DATABASE ':memory:' AS solite_snapshot")
-        .unwrap();
-
-    rt.connection.execute(SNAPPED_STATEMENT_CREATE).unwrap();
-    rt.connection
-        .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
-        .unwrap();
-  /*
-    if let Some(ext) = &flags.extension {
-        rt.connection.execute(BASE_FUNCTIONS_CREATE).unwrap();
-        rt.connection.execute(BASE_MODULES_CREATE).unwrap();
-        rt.connection.load_extension(&ext, &None);
-        rt.connection.execute(LOADED_FUNCTIONS_CREATE).unwrap();
-        rt.connection.execute(LOADED_MODULES_CREATE).unwrap();
-        rt.connection.execute(SNAPPED_STATEMENT_CREATE).unwrap();
-        rt.connection
-            .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
-            .unwrap();
-    } */
-    let script = Path::new(flags.script.as_str());
-    let snapshots_dir = match env::var("SOLITE_SNAPSHOT_DIRECTORY")  {
-      Ok(v) => Path::new(&v).to_path_buf(),
-      Err(_) => script.parent().unwrap().join("__snapshots__"),
-    };
-    if !snapshots_dir.exists() {
-        std::fs::create_dir_all(&snapshots_dir).unwrap();
-    }
-    let preexisting_snapshots: Vec<String> = std::fs::read_dir(&snapshots_dir)
+fn register_statement(rt: &mut Runtime, stmt: &Statement, step: &Step) -> i64 {
+    let insert = rt
+        .connection
+        .prepare(SNAPPED_STATEMENT_INSERT)
         .unwrap()
-        .filter_map(|entry| {
-            let entry = entry.unwrap();
-            if entry.file_type().unwrap().is_file() {
-                Some(entry.file_name().to_str().unwrap().to_owned())
-            } else {
-                None
-            }
-        })
-        .collect();
-    let mut generated_snapshots = vec![];
+        .1
+        .unwrap();
+    insert.bind_text(1, stmt.sql());
+    insert.bind_text(2, step.reference.to_string());
+    insert.nextx().unwrap().unwrap().value_at(0).as_int64()
+}
 
+fn register_stmt_bytecode(rt: &mut Runtime, stmt: &Statement, statement_id: i64) {
+    let stmt_bytecode = rt
+        .connection
+        .prepare(SNAPPED_STATEMENT_BYTECODE_STEPS_INSERT)
+        .unwrap()
+        .1
+        .unwrap();
+    stmt_bytecode.bind_int64(1, statement_id);
+    stmt_bytecode.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer");
+    stmt_bytecode.execute().unwrap();
+}
+
+struct SnapshotState {
+    runtime: Runtime,
+    snapshots_dir: PathBuf,
+    generated_snapshots: Vec<String>,
+    results: Vec<SnapshotResult>,
+    is_review: bool,
+    verbose: bool,
+    loaded_extension: bool,
+}
+fn snapshot_file(state: &mut SnapshotState, script: &PathBuf) -> Result<(), ()> {
     let basename = script.file_stem().unwrap().to_string_lossy().to_string();
 
     let sql = read_to_string(script).unwrap();
-    rt.enqueue(
-        flags.script.as_str(),
+    state.runtime.enqueue(
+        &script.to_string_lossy(),
         sql.as_str(),
         BlockSource::File(script.into()),
     );
 
-    let mut snapshot_results: Vec<SnapshotResult> = vec![];
-    let mut snapshot_idx_map:HashMap<String, usize> = HashMap::new();
-    let mut loaded_extension = false;
+    let mut snapshot_idx_map: HashMap<String, usize> = HashMap::new();
     loop {
-        match rt.next_stepx() {
-            Some(Ok(step)) => match step.result {
+        match state.runtime.next_stepx() {
+            Some(Ok(ref step)) => match &step.result {
                 StepResult::SqlStatement { stmt, raw_sql } => {
                     let region_section = step.reference.region.join("-");
                     let snapshot_idx = snapshot_idx_map.entry(region_section.clone()).or_insert(0);
-                    let snapshot_path =snapshots_dir.join(format!("{}-{}{:02}.snap", basename, if region_section.is_empty() {"".to_owned()} else {format!("{region_section}-")}, snapshot_idx));
+                    let snapshot_path = state.snapshots_dir.join(format!(
+                        "{}-{}{:02}.snap",
+                        basename,
+                        if region_section.is_empty() {
+                            "".to_owned()
+                        } else {
+                            format!("{region_section}-")
+                        },
+                        snapshot_idx
+                    ));
                     *snapshot_idx += 1;
 
-                    let mut statement_id = 0;
-                    {
-                        let insert = rt
-                            .connection
-                            .prepare(SNAPPED_STATEMENT_INSERT)
-                            .unwrap()
-                            .1
-                            .unwrap();
-                        insert.bind_text(1, stmt.sql());
-                        insert.bind_text(2, step.reference.to_string());
-                        statement_id = insert.nextx().unwrap().unwrap().value_at(0).as_int64();
-                    }
-                    if flags.verbose {
+                    let statement_id = register_statement(&mut state.runtime, &stmt, &step);
+
+                    if state.verbose {
                         println!("{}", stmt.sql());
                     }
 
@@ -495,17 +552,7 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
                         &stmt,
                     );
 
-                    {
-                        let stmt_bytecode = rt
-                            .connection
-                            .prepare(SNAPPED_STATEMENT_BYTECODE_STEPS_INSERT)
-                            .unwrap()
-                            .1
-                            .unwrap();
-                        stmt_bytecode.bind_int64(1, statement_id);
-                        stmt_bytecode.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer");
-                        stmt_bytecode.execute().unwrap();
-                    }
+                    register_stmt_bytecode(&mut state.runtime, &stmt, statement_id);
 
                     let snapshot_contents = match snapshot_contents {
                         Some(x) => x,
@@ -513,97 +560,120 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
                     };
 
                     if snapshot_path.exists() {
-                        generated_snapshots.push(
+                        state.generated_snapshots.push(
                             snapshot_path
                                 .file_name()
                                 .unwrap()
                                 .to_string_lossy()
                                 .to_string(),
                         );
-                        let orignal_snapshot = std::fs::read_to_string(&snapshot_path).unwrap().replace("\r\n", "\n");
+                        let orignal_snapshot = std::fs::read_to_string(&snapshot_path)
+                            .unwrap()
+                            .replace("\r\n", "\n");
                         if orignal_snapshot == snapshot_contents {
-                            snapshot_results.push(SnapshotResult::Matches);
+                            state.results.push(SnapshotResult::Matches);
                         } else {
                             println!(
                                 "{} changed at {}",
                                 step.reference.to_string(),
                                 &snapshot_path.display()
                             );
-                            print_diff(&orignal_snapshot, &snapshot_contents);
+                            let result = if state.is_review {
+                                print_diff(&orignal_snapshot, &snapshot_contents);
+                                print_decision();
+
+                                let term = Term::stdout();
+                                match term.read_key().unwrap() {
+                                    Key::Char('a') | Key::Char('A') | Key::Enter => {
+                                        std::fs::OpenOptions::new()
+                                            .read(true)
+                                            .write(true)
+                                            .create(true)
+                                            .truncate(true)
+                                            .open(&snapshot_path)
+                                            .unwrap()
+                                            .write_all(snapshot_contents.as_bytes())
+                                            .unwrap();
+                                        SnapshotResult::Accepted
+                                    }
+                                    Key::Char('r') | Key::Char('R') | Key::Escape => {
+                                        SnapshotResult::Rejected
+                                    }
+                                    _ => todo!(),
+                                }
+                            } else {
+                                SnapshotResult::Rejected
+                            };
+                            state.results.push(result);
+                        }
+                    } else {
+                        println!("{}", &snapshot_path.display());
+                        let result = if state.is_review {
+                            print_diff("", &snapshot_contents);
                             print_decision();
 
                             let term = Term::stdout();
                             match term.read_key().unwrap() {
-                                Key::Char('a') | Key::Char('A') | Key::Enter => {
-                                    snapshot_results.push(SnapshotResult::Accepted);
-
-                                    std::fs::OpenOptions::new()
-                                        .read(true)
+                                Key::Char('a') | Key::Enter => {
+                                    let mut snapshot_file = std::fs::OpenOptions::new()
                                         .write(true)
-                                        .create(true)
                                         .truncate(true)
+                                        .create_new(true)
                                         .open(&snapshot_path)
-                                        .unwrap()
+                                        .unwrap();
+                                    snapshot_file
                                         .write_all(snapshot_contents.as_bytes())
                                         .unwrap();
-                                }
-                                Key::Char('r') | Key::Char('R') | Key::Escape => {
-                                    snapshot_results.push(SnapshotResult::Rejected);
-                                }
-                                _ => todo!(),
-                            };
-                        }
-                    } else {
-                        println!("{}", &snapshot_path.display());
-                        print_diff("", &snapshot_contents);
-                        print_decision();
 
-                        let term = Term::stdout();
-                        match term.read_key().unwrap() {
-                            Key::Char('a') | Key::Enter => {
-                                let mut snapshot_file = std::fs::OpenOptions::new()
-                                    .write(true)
-                                    .truncate(true)
-                                    .create_new(true)
-                                    .open(&snapshot_path)
-                                    .unwrap();
-                                snapshot_file
-                                    .write_all(snapshot_contents.as_bytes())
-                                    .unwrap();
-                                snapshot_results.push(SnapshotResult::Accepted);
-                                println!("created {}", &snapshot_path.display());
-                                generated_snapshots.push(
-                                    snapshot_path
-                                        .file_name()
-                                        .unwrap()
-                                        .to_string_lossy()
-                                        .to_string(),
-                                );
+                                    println!("created {}", &snapshot_path.display());
+                                    state.generated_snapshots.push(
+                                        snapshot_path
+                                            .file_name()
+                                            .unwrap()
+                                            .to_string_lossy()
+                                            .to_string(),
+                                    );
+                                    SnapshotResult::Accepted
+                                }
+                                Key::Char('r') | Key::Escape => SnapshotResult::Rejected,
+                                _ => todo!(),
                             }
-                            Key::Char('r') | Key::Escape => {
-                                snapshot_results.push(SnapshotResult::Rejected);
-                            }
-                            _ => todo!(),
+                        } else {
+                            SnapshotResult::Rejected
                         };
+                        state.results.push(result);
                     }
                 }
                 StepResult::DotCommand(cmd) => match cmd {
                     solite_core::dot::DotCommand::Load(load_command) => {
-                      
-                      rt.connection.execute(BASE_FUNCTIONS_CREATE).unwrap();
-                      rt.connection.execute(BASE_MODULES_CREATE).unwrap();
-                      load_command.execute(&mut rt.connection);
-                      rt.connection.execute(LOADED_FUNCTIONS_CREATE).unwrap();
-                      rt.connection.execute(LOADED_MODULES_CREATE).unwrap();
-                      loaded_extension = true;
+                        state
+                            .runtime
+                            .connection
+                            .execute(BASE_FUNCTIONS_CREATE)
+                            .unwrap();
+                        state
+                            .runtime
+                            .connection
+                            .execute(BASE_MODULES_CREATE)
+                            .unwrap();
+                        load_command.execute(&mut state.runtime.connection);
+                        state
+                            .runtime
+                            .connection
+                            .execute(LOADED_FUNCTIONS_CREATE)
+                            .unwrap();
+                        state
+                            .runtime
+                            .connection
+                            .execute(LOADED_MODULES_CREATE)
+                            .unwrap();
+                        state.loaded_extension = true;
                     }
-                    solite_core::dot::DotCommand::Tables(tables_command) => todo!(),
                     solite_core::dot::DotCommand::Open(open_command) => {
-                        open_command.execute(&mut rt);
+                        open_command.execute(&mut state.runtime);
                     }
                     solite_core::dot::DotCommand::Print(print_command) => print_command.execute(),
-                    solite_core::dot::DotCommand::Parameter(parameter_command) => todo!(),
-                    solite_core::dot::DotCommand::Timer(_) => todo!(),
+                    _ => todo!(),
                 },
             },
             None => break,
@@ -622,96 +692,137 @@ pub(crate) fn snapshot(flags: SnapshotFlags) -> Result<(), ()> {
             },
         }
     }
+    Ok(())
+}
 
-    let x: HashSet<String> = generated_snapshots.into_iter().collect();
+pub(crate) fn snapshot(cmd: SnapNamespace) -> Result<(), ()> {
+    let is_review = matches!(cmd.command, crate::cli::SnapCommand::Review(_));
+    let args = match cmd.command {
+        crate::cli::SnapCommand::Test(args) => args,
+        crate::cli::SnapCommand::Review(args) => args,
+    };
+
+    let _started = std::time::Instant::now();
+    let rt = Runtime::new(None);
+    rt.connection
+        .execute("ATTACH DATABASE ':memory:' AS solite_snapshot")
+        .unwrap();
+
+    rt.connection.execute(SNAPPED_STATEMENT_CREATE).unwrap();
+    rt.connection
+        .execute(SNAPPED_STATEMENT_BYTECODE_STEPS_CREATE)
+        .unwrap();
+    let snapshots_dir = match env::var("SOLITE_SNAPSHOT_DIRECTORY") {
+        Ok(v) => Path::new(&v).to_path_buf(),
+        Err(_) => {
+            if args.file.is_dir() {
+                args.file.join("__snapshots__")
+            } else {
+                args.file.parent().unwrap().join("__snapshots__")
+            }
+        }
+    };
+    if !snapshots_dir.exists() {
+        std::fs::create_dir_all(&snapshots_dir).unwrap();
+    }
+    let preexisting_snapshots: Vec<String> = std::fs::read_dir(&snapshots_dir)
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_file() {
+                Some(entry.file_name().to_str().unwrap().to_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let scripts: Vec<PathBuf> = if args.file.is_dir() {
+        let mut scripts = vec![];
+        for entry in std::fs::read_dir(&args.file).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_file() {
+                let path = entry.path();
+                if path.extension().map(|s| s == "sql").unwrap_or(false) {
+                    scripts.push(path);
+                }
+            }
+        }
+        scripts.sort_by(|a, b| {
+            let a_is_init = a
+                .file_name()
+                .and_then(|f| f.to_str())
+                .map(|s| s == "_init.sql" || s.ends_with("/_init.sql"))
+                .unwrap_or(false);
+            let b_is_init = b
+                .file_name()
+                .and_then(|f| f.to_str())
+                .map(|s| s == "_init.sql" || s.ends_with("/_init.sql"))
+                .unwrap_or(false);
+
+            if a_is_init && !b_is_init {
+                std::cmp::Ordering::Less
+            } else if !a_is_init && b_is_init {
+                std::cmp::Ordering::Greater
+            } else {
+                a.cmp(b)
+            }
+        });
+        scripts
+    } else {
+        vec![args.file.clone()]
+    };
+
+    //let script = Path::new(&args.file);
+    let mut state = SnapshotState {
+        runtime: rt,
+        snapshots_dir,
+        generated_snapshots: vec![],
+        results: vec![],
+        is_review,
+        verbose: args.verbose,
+        loaded_extension: false,
+    };
+
+    for script in scripts {
+        snapshot_file(&mut state, &script)?;
+    }
+
+    let x: HashSet<String> = state.generated_snapshots.clone().into_iter().collect();
     let y: HashSet<String> = preexisting_snapshots.into_iter().collect();
     // preexisting snapshots that were not generated
     let diff = y.difference(&x);
-    for d in diff {
-        print_diff(&std::fs::read_to_string(snapshots_dir.join(d)).unwrap(), "");
-        println!("Remove {}? [y/n]", snapshots_dir.join(d).display());
-        let term = Term::stdout();
-        match term.read_key().unwrap() {
-            Key::Char('y') | Key::Char('Y') => {
-                std::fs::remove_file(snapshots_dir.join(d)).unwrap();
-                snapshot_results.push(SnapshotResult::Removed);
-            }
-            Key::Char('n') | Key::Char('N') | Key::Escape => {
-                println!("AAAAAHHHH; ");
-            }
-            _ => todo!(),
-        };
-    }
-
-    let report = snapshot_report(&rt, &snapshot_results, loaded_extension);
-
-    println!(
-        "{:>4} passing snapshot{}",
-        report.num_matches,
-        if report.num_matches == 1 { "" } else { "s" }
-    );
-    if report.num_updated > 0 {
-        println!(
-            "{:>4} updated snapshot{}",
-            report.num_updated,
-            if report.num_updated == 1 { "" } else { "s" }
-        );
-    }
-    if report.num_rejected > 0 {
-        println!(
-            "{:>4} rejected snapshot{}",
-            report.num_rejected,
-            if report.num_rejected == 1 { "" } else { "s" }
-        );
-    }
-    if report.num_removed > 0 {
-        println!(
-            "{:>4} removed snapshot{}",
-            report.num_removed,
-            if report.num_removed == 1 { "" } else { "s" }
-        );
-    }
-
-    if let Some(report) = report.extensions_report {
-        println!(
-            "{}/{} functions loaded from extension",
-            report.num_functions_loaded,
-            report.num_functions_loaded + report.missing_functions.len()
-        );
-        if report.missing_functions.len() > 0 {
-            println!(
-                "{} function{} missing from extension",
-                report.missing_functions.len(),
-                if report.missing_functions.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                }
+    if is_review {
+        for d in diff {
+            print_diff(
+                &std::fs::read_to_string(state.snapshots_dir.join(d)).unwrap(),
+                "",
             );
-
-            for missing in report.missing_functions {
-                println!("  - {}", missing);
-            }
-        }
-
-        println!(
-            "{}/{} modules tested{}",
-            report.num_modules_loaded,
-            report.num_modules_loaded + report.missing_modules.len(),
-            if  report.missing_modules.len() > 0 {
-              ", missing:"
-            }else {""}
-        );
-        for missing in report.missing_modules {
-            println!("  - {}", missing);
+            println!("Remove {}? [y/n]", state.snapshots_dir.join(d).display());
+            let term = Term::stdout();
+            match term.read_key().unwrap() {
+                Key::Char('y') | Key::Char('Y') => {
+                    std::fs::remove_file(state.snapshots_dir.join(d)).unwrap();
+                    state.results.push(SnapshotResult::Removed);
+                }
+                Key::Char('n') | Key::Char('N') | Key::Escape => {
+                    println!("AAAAAHHHH; ");
+                }
+                _ => todo!(),
+            };
         }
     }
 
-    if let Some(output) = &flags.output {
+    let report = snapshot_report(&state);
+
+    report.print();
+
+    if let Some(output) = &args.trace {
         if output.exists() {
             std::fs::remove_file(output).unwrap();
         }
-        let stmt = rt
+        let stmt = state
+            .runtime
             .connection
             .prepare("vacuum solite_snapshot into ?")
             .unwrap()

@@ -1,13 +1,6 @@
 # serializer version: 1
 # name: test_hello
-  '''
-  ┌───────┐
-  │ 1 + 1 │
-  ├───────┤
-  │     2 │
-  └───────┘
-  
-  '''
+  'select 1 + 1'
 # ---
 # name: test_hello.1
   '''
@@ -37,57 +30,31 @@
 # ---
 # name: test_hello[error contents: incomplete]
   dict({
-    'ename': 'SQL logic error',
-    'evalue': '''
-      error[1]: incomplete input
-      
+    'data': dict({
+      'text/plain': '''
+        error[1]: incomplete input
+        
   
-    ''',
-    'traceback': list([
-    ]),
+      ''',
+    }),
+    'metadata': dict({
+    }),
   })
 # ---
 # name: test_hello[error contents: wrong num args]
   dict({
-    'ename': 'SQL logic error',
-    'evalue': '''
-      error[1]: SQL logic error
-        ┌─ TODO:1:8
-        │
-      1 │ select substr();
-        │        ^^^^^^ wrong number of arguments to function substr()
-      
+    'data': dict({
+      'text/plain': '''
+        error[1]: SQL logic error
+          ┌─ <anonymous>:1:8
+          │
+        1 │ select substr();
+          │        ^^^^^^ wrong number of arguments to function substr()
+        
   
-    ''',
-    'traceback': list([
-    ]),
+      ''',
+    }),
+    'metadata': dict({
+    }),
   })
-# ---
-# name: test_multiple
-  '''
-  ┌────┬────┬────┐
-  │ a  │ b  │ c  │
-  ├────┼────┼────┤
-  │ 99 │ 99 │ 99 │
-  │ 88 │ 88 │ 88 │
-  │ 77 │ 77 │ 77 │
-  │ 66 │ 66 │ 66 │
-  │ 55 │ 55 │ 55 │
-  └────┴────┴────┘
-  
-  '''
-# ---
-# name: test_multiple.1
-  '''
-  ┌────┬────┬────┐
-  │ a  │ b  │ c  │
-  ├────┼────┼────┤
-  │ 99 │ 99 │ 99 │
-  │ 88 │ 88 │ 88 │
-  │ 77 │ 77 │ 77 │
-  │ 66 │ 66 │ 66 │
-  │ 55 │ 55 │ 55 │
-  └────┴────┴────┘
-  
-  '''
 # ---

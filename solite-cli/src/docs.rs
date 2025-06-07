@@ -4,7 +4,10 @@ use std::{
 };
 
 use crate::{
-    cli::DocsFlags, errors::report_error_string, snapshot::{ValueCopy, ValueCopyValue}, ui::{BORDER, SEPARATOR}
+    cli::{DocsCommand, DocsInlineArgs, DocsNamespace},
+    errors::{report_error, report_error_string},
+    snapshot::{ValueCopy, ValueCopyValue},
+    ui::{BORDER, SEPARATOR},
 };
 use cli_table::{Cell, CellStruct, Table};
 use markdown::{
@@ -45,16 +48,16 @@ const LOADED_MODULES_CREATE: &str = r#"
 "#;
 
 pub(crate) fn display_value(v: &ValueCopy) -> String {
-  match &v.value {
-      ValueCopyValue::Null | ValueCopyValue::Pointer => "NULL".to_string(),
-      ValueCopyValue::Int(value) => value.to_string(),
-      ValueCopyValue::Double(value) => value.to_string(),
-      ValueCopyValue::Text(value) => {
-          escape_string(String::from_utf8_lossy(&value).to_string().as_str())
-      }
-      // hex value of u8
-      ValueCopyValue::Blob(value) => format!("X'{}'", hex::encode(value).to_uppercase()),
-  }
+    match &v.value {
+        ValueCopyValue::Null | ValueCopyValue::Pointer => "NULL".to_string(),
+        ValueCopyValue::Int(value) => value.to_string(),
+        ValueCopyValue::Double(value) => value.to_string(),
+        ValueCopyValue::Text(value) => {
+            escape_string(String::from_utf8_lossy(&value).to_string().as_str())
+        }
+        // hex value of u8
+        ValueCopyValue::Blob(value) => format!("X'{}'", hex::encode(value).to_uppercase()),
+    }
 }
 
 fn table(columns: &Vec<String>, results: &Vec<Vec<ValueCopy>>) -> String {
@@ -72,20 +75,20 @@ fn table(columns: &Vec<String>, results: &Vec<Vec<ValueCopy>>) -> String {
         .to_string()
 }
 
-pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
+fn inline(args: DocsInlineArgs) -> Result<(), ()> {
     let rt = Runtime::new(None);
     rt.connection
         .execute("ATTACH DATABASE ':memory:' AS solite_docs")
         .unwrap();
 
-    if let Some(ext) = flags.extension {
+    if let Some(ext) = args.extension {
         rt.connection.execute(BASE_FUNCTIONS_CREATE).unwrap();
         rt.connection.execute(BASE_MODULES_CREATE).unwrap();
         rt.connection.load_extension(&ext, &None);
         rt.connection.execute(LOADED_FUNCTIONS_CREATE).unwrap();
         rt.connection.execute(LOADED_MODULES_CREATE).unwrap();
     }
-    let docs_in = std::fs::read_to_string(flags.input).unwrap();
+    let docs_in = std::fs::read_to_string(&args.input).unwrap();
     let mut options = markdown::ParseOptions::gfm();
     options.constructs.frontmatter = true;
     let mut ast = markdown::to_mdast(&docs_in, &options).unwrap();
@@ -120,7 +123,15 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
                                                 results.push(row);
                                             }
                                             Ok(None) => break,
-                                            Err(_err) => todo!(),
+                                            Err(error) => {
+                                                report_error(
+                                                    args.input.to_string_lossy().as_ref(),
+                                                    &stmt.sql(),
+                                                    &error,
+                                                    None,
+                                                );
+                                                return Err(());
+                                            }
                                         }
                                     }
 
@@ -156,9 +167,9 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
                         }
                         Ok((_, None)) => break,
                         Err(error) => {
-                          println!("{}", report_error_string("TODO", &sql, &error, None));
-                          panic!();
-                        },
+                            println!("{}", report_error_string("TODO", &sql, &error, None));
+                            panic!();
+                        }
                     }
                 }
                 code.value = new_value;
@@ -173,7 +184,7 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
         .iter_mut()
         .filter_map(|mut n| match n {
             Node::Heading(heading) => {
-                if heading.depth == 3 {
+                if heading.depth == 3 || heading.depth == 4 {
                     let t = n.children().unwrap().first().unwrap();
                     let function = match t {
                         Node::InlineCode(c) => match c.value.split_once('(') {
@@ -223,9 +234,9 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
         .filter(|f| !documented_funcs.contains(f))
         .cloned()
         .collect();
-    
+
     let out_md = to_markdown(&ast).unwrap().replace("ю", "_");
-    match flags.output {
+    match args.output {
         Some(output) => {
             let mut f = OpenOptions::new()
                 .create(true)
@@ -243,12 +254,18 @@ pub(crate) fn docs(flags: DocsFlags) -> Result<(), ()> {
     }
 
     if undocumented_funcs.len() > 0 {
-      undocumented_funcs.sort();
-      eprintln!("The following functions are not documented:");
-      for func in undocumented_funcs {
-          eprintln!("  - {func}");
-      }
-      return Err(());
-  }
+        undocumented_funcs.sort();
+        eprintln!("The following functions are not documented:");
+        for func in undocumented_funcs {
+            eprintln!("  - {func}");
+        }
+        return Err(());
+    }
     Ok(())
+}
+
+pub(crate) fn docs(cmd: DocsNamespace) -> Result<(), ()> {
+    match cmd.command {
+        DocsCommand::Inline(args) => inline(args),
+    }
 }

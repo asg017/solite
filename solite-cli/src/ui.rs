@@ -1,6 +1,6 @@
 use cli_table::format::{Border, HorizontalLine, Separator, VerticalLine};
 use cli_table::{format::Justify, Cell, CellStruct, Style, Table, TableStruct};
-use solite_core::sqlite::{Statement, ValueRefX, ValueRefXValue};
+use solite_core::sqlite::{SQLiteError, Statement, ValueRefX, ValueRefXValue};
 use termcolor::Color;
 
 lazy_static::lazy_static! {
@@ -65,7 +65,10 @@ pub(crate) fn ui_table(columns: Vec<String>, ui_rows: Vec<Vec<CellStruct>>) -> T
         .separator(*SEPARATOR)
 }
 
-pub(crate) fn table_from_statement(stmt: Statement, color: bool) -> Option<TableStruct> {
+pub(crate) fn table_from_statement(
+    stmt: &Statement,
+    color: bool,
+) -> Result<Option<TableStruct>, SQLiteError> {
     let num_display_rows = match term_size::dimensions() {
         Some((_w, h)) => {
             h
@@ -76,7 +79,7 @@ pub(crate) fn table_from_statement(stmt: Statement, color: bool) -> Option<Table
         }
         None => 20,
     };
-    
+
     let columns = stmt.column_names().unwrap();
     let mut ui_rows = vec![];
     loop {
@@ -84,15 +87,13 @@ pub(crate) fn table_from_statement(stmt: Statement, color: bool) -> Option<Table
             Ok(Some(row)) => ui_rows.push(ui_row(&row, color)),
             Ok(None) => break,
             Err(error) => {
-                eprintln!("{:?}", error);
-                todo!();
-                //return Some()
+                return Err(error);
             }
         }
     }
     if columns.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(ui_table(columns, ui_rows))
+        Ok(Some(ui_table(columns, ui_rows)))
     }
 }

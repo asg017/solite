@@ -1,0 +1,1 @@
+select 'in snap2.sql' as snap2;

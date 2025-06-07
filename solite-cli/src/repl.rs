@@ -1,4 +1,4 @@
-use crate::cli::ReplFlags;
+use crate::cli::ReplArgs;
 use crate::colors::bold;
 use crate::run::format_duration;
 
@@ -12,13 +12,12 @@ use rustyline::{
 };
 
 use cli_table::print_stdout;
-use solite_core::dot::DotCommand;
+use solite_core::dot::{DotCommand, LoadCommandSource};
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
 use solite_stdlib::BUILTIN_FUNCTIONS;
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
-use tokio::time::error::Elapsed;
 
 fn is_all_whitespace(s: &str) -> bool {
     for c in s.chars() {
@@ -384,7 +383,19 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                     DotCommand::Tables(cmd) => cmd.execute(runtime),
                     DotCommand::Print(print_cmd) => print_cmd.execute(),
                     DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
-                    DotCommand::Load(load_cmd) => load_cmd.execute(&mut runtime.connection),
+                    DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
+                        Ok(source) => match source {
+                            LoadCommandSource::Path(path) => {
+                                println!("✓ loaded extension {}", path);
+                            }
+                            LoadCommandSource::Uv { directory, package } => {
+                                println!("✓ uv loaded extension {} from {}", package, directory);
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("✗ failed to load extension {}: {}", load_cmd.path, e);
+                        }
+                    },
                     DotCommand::Timer(enabled) => *timer = enabled,
                     DotCommand::Parameter(param_cmd) => match param_cmd {
                         solite_core::dot::ParameterCommand::Set { key, value } => {
@@ -395,11 +406,13 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                         solite_core::dot::ParameterCommand::List => todo!(),
                         solite_core::dot::ParameterCommand::Clear => todo!(),
                     },
+                    _ => todo!(),
                 },
-                StepResult::SqlStatement{stmt, ..} => {
+                StepResult::SqlStatement { stmt, .. } => {
                     let start = std::time::Instant::now();
 
-                    if let Some(table) = crate::ui::table_from_statement(stmt, true) {
+                    // TODO error handle
+                    if let Ok(Some(table)) = crate::ui::table_from_statement(&stmt, true) {
                         print_stdout(table).unwrap();
                     }
                     if *timer {
@@ -554,8 +567,12 @@ impl Completer for ReplCompleter {
 const PROMPT: &str = "❱ ";
 const PROMPT_TRANSACTION: &str = "❱• ";
 
-pub fn repl_launch(flags: ReplFlags) -> Result<()> {
-    let runtime = Runtime::new(flags.database.clone());
+pub fn launch_repl(args: ReplArgs) -> Result<()> {
+    let runtime = Runtime::new(
+        args.database
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
+    );
     let rc_runtime = Rc::new(RefCell::new(runtime));
 
     let mut timer = true;
@@ -575,9 +592,9 @@ pub fn repl_launch(flags: ReplFlags) -> Result<()> {
     let x = Rc::clone(&rc_runtime);
     rl.set_helper(Some(helper));
 
-    let connection_info = match &flags.database {
+    let connection_info = match &args.database {
         None => "Connected to a transient in-memory database.".to_string(),
-        Some(db) => format!("Connected to {}", bold(db)),
+        Some(db) => format!("Connected to {:?}", db),
     };
 
     let prelude = format!(
@@ -636,9 +653,6 @@ Enter \".help\" for usage hints.
     }
     Ok(())
 }
-pub(crate) fn repl(flags: ReplFlags) -> std::result::Result<(), ()> {
-    match repl_launch(flags) {
-        Ok(_) => Ok(()),
-        Err(_) => Err(()),
-    }
+pub fn repl(args: ReplArgs) -> std::result::Result<(), ()> {
+    launch_repl(args).map_err(|_| ())
 }

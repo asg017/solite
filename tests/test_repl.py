@@ -16,6 +16,7 @@ def test_repl(solite_cli, snapshot):
         [], communicate=[b".timer off\nselect 1 + 1;\n"], kill=True
     ).stdout
     output = re.sub(r"Solite \d+\.\d+\.\d+(-[a-z]+\.\d+)?", "Solite VERSION", output)
+    print(output)
     assert output == snapshot
 
 

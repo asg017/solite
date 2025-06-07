@@ -1,4 +1,5 @@
 pub mod dot;
+pub mod load_uv;
 pub mod replacement_scans;
 pub mod sqlite;
 
@@ -203,7 +204,7 @@ impl Runtime {
                 (code.to_owned(), preamble_offset)
             };
             let regions = current.regions.clone();
-                
+
             if code.starts_with('.') {
                 let end_idx = code.find('\n').unwrap_or(code.len());
                 let dot_line = code.get(0..end_idx).unwrap();

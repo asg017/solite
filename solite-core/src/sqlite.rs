@@ -1,12 +1,13 @@
 use core::fmt;
 use libsqlite3_sys::*;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::ffi::{c_void, CStr};
+use std::ffi::{c_int, c_void, CStr};
 use std::ptr::{self};
 use std::str::Utf8Error;
 use std::{ffi::CString, os::raw::c_char};
-use serde::{Deserialize, Serialize};
 
+pub use libsqlite3_sys::sqlite3_stmt;
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/json.c#L126
 pub const JSON_SUBTYPE: u32 = 74;
 
@@ -81,7 +82,11 @@ impl<'a> ValueRefX<'a> {
         unsafe {
             let n = sqlite3_value_bytes(self.raw);
             let s = sqlite3_value_text(self.raw);
-            std::str::from_utf8(std::slice::from_raw_parts(s, n as usize)).unwrap()
+            if n == 0 {
+                ""
+            } else {
+                std::str::from_utf8(std::slice::from_raw_parts(s, n as usize)).unwrap()
+            }
         }
     }
     pub fn as_int64(&self) -> i64 {
@@ -268,15 +273,7 @@ impl Statement {
 
     // TODO expose destructor interface here?
     pub fn bind_pointer(&self, i: i32, p: *mut c_void, name: &CStr) {
-        unsafe {
-            sqlite3_bind_pointer(
-                self.statement,
-                i,
-                p,
-                name.as_ptr(),
-                None,
-            )
-        };
+        unsafe { sqlite3_bind_pointer(self.statement, i, p, name.as_ptr(), None) };
     }
     pub fn bind_text<S: AsRef<str>>(&self, i: i32, value: S) {
         let n = value.as_ref().len();
@@ -307,7 +304,7 @@ impl Statement {
     }
 
     pub fn pointer(&self) -> *mut sqlite3_stmt {
-      self.statement
+        self.statement
     }
 }
 impl Drop for Statement {
@@ -319,9 +316,80 @@ impl Drop for Statement {
     }
 }
 
+#[derive(Debug)]
+pub struct BytecodeStep {
+    pub addr: i64,
+    pub opcode: String,
+    pub p1: i64,
+    pub p2: i64,
+    pub p3: i64,
+    pub p4: String,
+    pub p5: i64,
+    pub comment: String,
+    pub subprog: i64,
+    pub nexec: i64,
+    pub ncycle: i64,
+}
+pub fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
+    let mut steps = vec![];
+    unsafe {
+        let db: *mut sqlite3 = sqlite3_db_handle(pstmt);
+        let db = Connection {
+            connection: db,
+            owned: false,
+        };
+
+        let stmt = db
+            .prepare(
+                "SELECT addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle 
+    FROM bytecode(?)
+    ",
+            )
+            .unwrap()
+            .1
+            .unwrap();
+        stmt.bind_pointer(1, pstmt.cast(), c"stmt-pointer");
+        loop {
+            let rc = stmt.nextx();
+            match rc {
+                Ok(Some(row)) => {
+                    let addr = row.value_at(0).as_int64();
+                    let opcode = row.value_at(1).as_str().to_owned();
+                    let p1 = row.value_at(2).as_int64();
+                    let p2 = row.value_at(3).as_int64();
+                    let p3 = row.value_at(4).as_int64();
+                    let p4 = row.value_at(5).as_str().to_owned();
+                    let p5 = row.value_at(6).as_int64();
+                    let comment = row.value_at(7).as_str().to_owned();
+                    let subprog = row.value_at(8).as_int64();
+                    let nexec = row.value_at(9).as_int64();
+                    let ncycle = row.value_at(10).as_int64();
+                    steps.push(BytecodeStep {
+                        addr,
+                        opcode: opcode.to_string(),
+                        p1,
+                        p2,
+                        p3,
+                        p4: p4.to_string(),
+                        p5: p5,
+                        comment: comment.to_string(),
+                        subprog,
+                        nexec,
+                        ncycle,
+                    });
+                }
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+    }
+    // TODO
+    steps
+}
 /// https://www.sqlite.org/c3ref/sqlite3.html
 pub struct Connection {
     connection: *mut sqlite3,
+    owned: bool,
 }
 
 // NOT Sync, sqlite limitation
@@ -345,7 +413,10 @@ impl Connection {
             unsafe {
                 sqlite3_enable_load_extension(connection, 1);
             }
-            Ok(Connection { connection })
+            Ok(Connection {
+                connection,
+                owned: true,
+            })
         } else {
             let err = latest_error(connection, rc);
             unsafe {
@@ -367,7 +438,10 @@ impl Connection {
                 //let x = sqlite3_enable_load_extension(connection, 1);
                 //sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION);
             }
-            Ok(Connection { connection })
+            Ok(Connection {
+                connection,
+                owned: true,
+            })
         } else {
             let err = latest_error(connection, rc);
             unsafe {
@@ -376,7 +450,7 @@ impl Connection {
             Err(err)
         }
     }
-    pub(crate) unsafe fn db(&self) -> *mut sqlite3 {
+    pub unsafe fn db(&self) -> *mut sqlite3 {
         self.connection
     }
 
@@ -384,15 +458,13 @@ impl Connection {
         unsafe { sqlite3_get_autocommit(self.connection) == 0 }
     }
 
-    pub fn load_extension(&self, path: &str, entrypoint: &Option<String>) {
-        let p = CString::new(path).unwrap();
-        let entrypoint = entrypoint
-            .as_ref()
-            .map(|entrypoint| CString::new(entrypoint.clone()).unwrap());
+    pub fn load_extension(&self, path: &str, entrypoint: &Option<String>) -> anyhow::Result<()> {
+        let p = CString::new(path).map_err(|_| anyhow::anyhow!("Invalid path"))?;
 
         let entrypoint_cstr = entrypoint
             .as_ref()
-            .map(|e| CString::new(e.clone()).unwrap());
+            .map(|e| CString::new(e.clone()).map_err(|_| anyhow::anyhow!("Invalid entrypoint")))
+            .transpose()?;
         let entrypoint_ptr = entrypoint_cstr.as_ref().map_or(ptr::null(), |e| e.as_ptr());
         let mut pz_err_msg: *mut c_char = ptr::null_mut();
         let rc = unsafe {
@@ -400,13 +472,49 @@ impl Connection {
         };
         if rc != SQLITE_OK {
             let s = unsafe { CStr::from_ptr(pz_err_msg).to_string_lossy() };
-            println!("Loading extension failed: {s}");
+            //println!("Loading extension failed: {s}");
+            return Err(anyhow::anyhow!("Loading extension failed: {s}",));
         }
+        Ok(())
     }
 
     pub fn execute(&self, sql: &str) -> Result<usize, /* TODO */ ()> {
         let stmt = self.prepare(sql).unwrap().1.unwrap();
         Ok(stmt.execute().unwrap())
+    }
+
+    pub fn set_progress_handler<F, T>(&self, ops: i32, handle: Option<F>, aux: T)
+    where
+        F: FnMut(&T) -> bool + Send + 'static,
+    {
+        unsafe extern "C" fn call_boxed_closure<F, T>(p_arg: *mut c_void) -> c_int
+        where
+            F: FnMut(&T) -> bool,
+        {
+            //let boxed_handler: *mut F = p_arg.cast::<(F, T)>();
+            //let x = p_arg.cast::<(F, T)>();
+            //let r = ((*x).0)(&(*x).1);
+            let x = p_arg.cast::<(*mut F, *mut T)>();
+            let r = (*((*x).0))(&(*(*x).1));
+            return if r { 1 } else { 0 };
+        }
+        if let Some(handle) = handle {
+            unsafe {
+                //let boxed_handler = Box::new(handle);
+                let x: *mut F = Box::into_raw(Box::new(handle));
+                let y: *mut T = Box::into_raw(Box::new(aux));
+                ///let boxed_handler = Box::new((handle, aux));
+                let boxed_handler = Box::into_raw(Box::new((x, y)));
+                sqlite3_progress_handler(
+                    self.connection,
+                    ops,
+                    Some(call_boxed_closure::<F, T>),
+                    boxed_handler.cast(),
+                    //&*boxed_handler as *const (F, T) as *mut _,
+                    //&*boxed_handler as *const F as *mut _,
+                );
+            }
+        }
     }
 
     pub fn prepare(&self, sql: &str) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {
@@ -473,8 +581,8 @@ impl fmt::Display for SQLiteError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{} ({}) : {}",
-            self.code_description, self.result_code, self.message
+            "[{}] {}: {}",
+            self.result_code, self.code_description, self.message
         )
     }
 }

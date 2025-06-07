@@ -1,3 +1,8 @@
+use std::{
+    io::{BufRead, BufReader},
+    sync::mpsc::Receiver,
+};
+
 use solite_stdlib::solite_stdlib_init;
 use thiserror::Error;
 
@@ -19,6 +24,33 @@ pub struct PrintCommand {
 impl PrintCommand {
     pub fn execute(&self) {
         println!("{}", self.message);
+    }
+}
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ShellCommand {
+    pub command: String,
+}
+impl ShellCommand {
+    pub fn execute(&self) -> Receiver<String> {
+        let (tx, mut rx) = std::sync::mpsc::channel::<String>();
+        let command = self.command.clone();
+        std::thread::spawn(move || {
+            let mut child = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(command)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            let stdout = child.stdout.take().expect("Failed to capture stdout");
+            let reader = BufReader::with_capacity(1, stdout); //new(stdout);
+            let mut lines = reader.lines();
+            while let Some(Ok(line)) = lines.next() {
+                tx.send(line).unwrap();
+            }
+            let _ = child.wait();
+        });
+        return rx;
     }
 }
 
@@ -59,7 +91,11 @@ impl OpenCommand {
     pub fn execute(&self, runtime: &mut Runtime) {
         runtime.connection = Connection::open(&self.path).unwrap();
         unsafe {
-          solite_stdlib_init(runtime.connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
+            solite_stdlib_init(
+                runtime.connection.db(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
         }
     }
 }
@@ -68,17 +104,44 @@ impl OpenCommand {
 pub struct LoadCommand {
     pub path: String,
     pub entrypoint: Option<String>,
+    pub is_uv: bool,
 }
+
+pub enum LoadCommandSource {
+    Path(String),
+    Uv { directory: String, package: String },
+}
+
 impl LoadCommand {
     pub fn new(args: String) -> Self {
+        let (args, is_uv) = match args.strip_prefix("uv:") {
+            Some(args) => (args, true),
+            None => (args.as_str(), false),
+        };
+
         let (path, entrypoint) = match args.split_once(' ') {
             Some((path, entrypoint)) => (path.to_string(), Some(entrypoint.trim().to_string())),
-            None => (args, None),
+            None => (args.to_owned(), None),
         };
-        Self { path, entrypoint }
+        Self {
+            path,
+            entrypoint,
+            is_uv,
+        }
     }
-    pub fn execute(&self, connection: &mut Connection) {
-        connection.load_extension(&self.path, &self.entrypoint);
+    pub fn execute(&self, connection: &mut Connection) -> anyhow::Result<LoadCommandSource> {
+        if self.is_uv {
+            crate::load_uv::load(connection, &self.path, &self.entrypoint).map(|path| {
+                LoadCommandSource::Uv {
+                    directory: path,
+                    package: self.path.clone(),
+                }
+            })
+        } else {
+            connection
+                .load_extension(&self.path, &self.entrypoint)
+                .map(|_| LoadCommandSource::Path(self.path.clone()))
+        }
     }
 }
 
@@ -140,6 +203,7 @@ pub enum DotCommand {
     //Load,
     Print(PrintCommand),
 
+    Shell(ShellCommand),
     /// usage: .param set name 'alex garcia'
     Parameter(ParameterCommand),
     /// usage: .bail on/off
@@ -164,6 +228,7 @@ pub fn parse_dot<S: Into<String>>(command: S, args: S) -> Result<DotCommand, Par
     let args = args.into();
     match command.to_lowercase().as_str() {
         "print" => Ok(DotCommand::Print(PrintCommand { message: args })),
+        "sh" => Ok(DotCommand::Shell(ShellCommand { command: args })),
         "tables" => Ok(DotCommand::Tables(TablesCommand {})),
         "open" => Ok(DotCommand::Open(OpenCommand { path: args })),
         "load" => Ok(DotCommand::Load(LoadCommand::new(args))),

@@ -13,6 +13,7 @@ libsqlite3-sys = {version="0.26.0", features=["bundled"]}
 insta = { version = "1.38.0", features = ["yaml"] }
 rusqlite = {version="0.29", features=["bundled"]}
 indicatif = "0.17"
+anyhow = "1"
 
 # for faster insta snapshots
 [profile.dev.package]

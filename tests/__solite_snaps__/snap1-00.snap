@@ -1,4 +1,4 @@
-Source: ../snap1.sql
+Source: ../snaps/snap1.sql
 select 1;
 ---
 1

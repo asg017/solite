@@ -2,19 +2,16 @@
 # name: test_run_basic
   '''
   ✓ timer set off
-  a.sql:4:1 select 1;
   ┌───┐
   │ 1 │
   ├───┤
   │ 1 │
   └───┘
-  a.sql:5:1 select 2;
   ┌───┐
   │ 2 │
   ├───┤
   │ 2 │
   └───┘
-  a.sql:7:1 select 3
   ┌───┐
   │ 3 │
   ├───┤
@@ -26,7 +23,6 @@
 # name: test_run_basic_dots
   '''
   ✓ timer set off
-  a.sql:4:1 select 1;
   ┌───┐
   │ 1 │
   ├───┤
@@ -51,13 +47,11 @@
 # name: test_run_error[stdout]
   '''
   ✓ timer set off
-  a.sql:4:1 select 'hello' as world;
   ┌───────┐
   │ world │
   ├───────┤
   │ hello │
   └───────┘
-  a.sql:5:1 select 1 + 1 as result;
   ┌────────┐
   │ result │
   ├────────┤

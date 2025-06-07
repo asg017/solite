@@ -1,15 +1,17 @@
+use anyhow::Error;
 use arboard::Clipboard;
 use solite_core::{
     replacement_scans::replacement_scan,
     sqlite::{ValueRefX, ValueRefXValue},
     Runtime,
 };
+use std::fmt;
 use std::{
     fs::File,
     io::{stdout, BufWriter, Write},
 };
 
-use crate::cli::QueryFlags;
+use crate::cli::{QueryArgs, QueryFormat};
 
 fn write_json_row<W>(
     output: &mut W,
@@ -57,14 +59,17 @@ where
     }))
 }
 
-pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
-    let mut runtime = Runtime::new(flags.database);
-    for (key, value) in flags.parameters {
-        runtime.define_parameter(key, value).unwrap();
+fn query_impl(args: QueryArgs, is_exec: bool) -> anyhow::Result<()> {
+    let mut runtime = Runtime::new(args.database.map(|p| p.to_string_lossy().to_string()));
+    for chunk in args.parameters.chunks(2) {
+        runtime
+            .define_parameter(chunk[0].clone(), chunk[1].clone())
+            .unwrap();
     }
+    let statement = args.statement;
     let mut stmt;
     loop {
-        stmt = match runtime.prepare_with_parameters(flags.statement.as_str()) {
+        stmt = match runtime.prepare_with_parameters(statement.as_str()) {
             Ok((_, Some(stmt))) => Some(stmt),
             Ok((_, None)) => todo!(),
             Err(err) => match replacement_scan(&err, &runtime.connection) {
@@ -74,8 +79,8 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                 }
                 Some(Err(_)) => todo!(),
                 None => {
-                    crate::errors::report_error("[input]", flags.statement.as_str(), &err, None);
-                    return Err(());
+                    crate::errors::report_error("[input]", statement.as_str(), &err, None);
+                    return Err(MyError::new().into());
                 }
             },
         };
@@ -85,12 +90,11 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
     }
     let stmt = stmt.unwrap();
 
-    if !stmt.readonly() {
-        eprintln!("only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database.");
-        return Err(());
+    if !is_exec && !stmt.readonly() {
+        return Err(anyhow::anyhow!("only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database."));
     }
 
-    let mut output: Box<dyn Write> = match flags.output {
+    let mut output: Box<dyn Write> = match args.output {
         Some(ref output) => {
             let f = File::create(output).unwrap();
 
@@ -107,9 +111,25 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
         }
         None => Box::new(stdout()),
     };
-    let format = match flags.format {
+
+    if is_exec && stmt.column_names().unwrap().len() == 0 {
+        loop {
+            match stmt.next() {
+                Ok(Some(row)) => (),
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("{}", error);
+                    todo!()
+                }
+            }
+        }
+        println!("✔︎");
+        return Ok(());
+    }
+
+    let format = match args.format {
         Some(format) => format,
-        None => match flags.output {
+        None => match args.output {
             Some(p) => match p.extension() {
                 Some(ext) => {
                     let mut ext = ext.to_str().unwrap().to_string();
@@ -118,21 +138,21 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                         ext = p.extension().unwrap().to_str().unwrap().to_string();
                     }
                     match ext.as_str() {
-                        "csv" => crate::cli::QueryFormat::Csv,
-                        "tsv" => crate::cli::QueryFormat::Tsv,
-                        "json" => crate::cli::QueryFormat::Json,
-                        "ndjson" | "jsonl" => crate::cli::QueryFormat::Ndjson,
+                        "csv" => QueryFormat::Csv,
+                        "tsv" => QueryFormat::Tsv,
+                        "json" => QueryFormat::Json,
+                        "ndjson" | "jsonl" => QueryFormat::Ndjson,
                         _ => todo!("unknown extension"),
                     }
                 }
-                None => crate::cli::QueryFormat::Json,
+                None => QueryFormat::Json,
             },
-            None => crate::cli::QueryFormat::Json,
+            None => QueryFormat::Json,
         },
     };
 
     match format {
-        crate::cli::QueryFormat::Csv => {
+        QueryFormat::Csv => {
             let mut writer = csv::Writer::from_writer(output);
             writer.write_record(stmt.column_names().unwrap()).unwrap();
             loop {
@@ -143,13 +163,13 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                     Ok(None) => break,
                     Err(error) => {
                         eprintln!("{}", error);
-                        return Err(());
+                        todo!()
                     }
                 }
             }
             writer.flush().unwrap();
         }
-        crate::cli::QueryFormat::Tsv => {
+        QueryFormat::Tsv => {
             let mut writer = csv::WriterBuilder::new()
                 .delimiter(b'\t')
                 .from_writer(output);
@@ -162,13 +182,13 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                     Ok(None) => break,
                     Err(error) => {
                         eprintln!("{}", error);
-                        return Err(());
+                        todo!()
                     }
                 }
             }
             writer.flush().unwrap();
         }
-        crate::cli::QueryFormat::Json => {
+        QueryFormat::Json => {
             output.write_all(&[b'[']).unwrap();
             let columns = stmt.column_names().unwrap();
             let mut first = true;
@@ -185,13 +205,13 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                     Ok(None) => break,
                     Err(error) => {
                         eprintln!("{}", error);
-                        return Err(());
+                        todo!()
                     }
                 }
             }
             output.write_all(&[b']', b'\n']).unwrap();
         }
-        crate::cli::QueryFormat::Ndjson => {
+        QueryFormat::Ndjson => {
             let columns = stmt.column_names().unwrap();
             loop {
                 match stmt.next() {
@@ -202,12 +222,12 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                     Ok(None) => break,
                     Err(error) => {
                         eprintln!("{error}");
-                        return Err(());
+                        todo!()
                     }
                 }
             }
         }
-        crate::cli::QueryFormat::Clipboard => {
+        QueryFormat::Clipboard => {
             let mut num_rows = 0;
             let mut html = "".to_owned();
             html += "<table> <thead> <tr>";
@@ -246,7 +266,7 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                     Ok(None) => break,
                     Err(error) => {
                         eprintln!("{error}");
-                        return Err(());
+                        todo!()
                     }
                 }
             }
@@ -262,7 +282,7 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                 if num_rows == 1 { "row" } else { "rows" }
             );
         }
-        crate::cli::QueryFormat::Value => {
+        QueryFormat::Value => {
             match stmt.next() {
                 Ok(Some(row)) => {
                     let value = row.get(0).unwrap();
@@ -279,28 +299,59 @@ pub(crate) fn query(flags: QueryFlags) -> Result<(), ()> {
                         }
                     };
                 }
-                Ok(None) => {
-                    eprintln!("No rows returned in query.");
-                    return Err(());
-                }
-                Err(error) => {
-                    eprintln!("Error running query: {}", error);
-                    return Err(());
-                }
+                Ok(None) => return Err(anyhow::anyhow!("No rows returned in query.")),
+                Err(error) => return Err(anyhow::anyhow!("Error running query: {}", error)),
             };
             match stmt.next() {
                 Ok(None) => (),
                 Ok(Some(_)) => {
-                    eprintln!("More than 1 query returned, exepcted a single row. Try a `LIMIT 1`");
-                    return Err(());
+                    return Err(anyhow::anyhow!(
+                        "More than 1 query returned, exepcted a single row. Try a `LIMIT 1`"
+                    ));
                 }
                 Err(error) => {
-                    eprintln!("Error stepping through next row: {error}");
-                    return Err(());
+                    return Err(anyhow::anyhow!("Error stepping through next row: {error}"));
                 }
             }
         }
     }
 
     Ok(())
+}
+
+#[derive(Debug)] // Debug is required for all Error types
+pub struct MyError {
+    details: String,
+}
+
+impl MyError {
+    pub fn new() -> Self {
+        Self {
+            details: "".to_owned(),
+        }
+    }
+}
+
+// 2. Implement Display (human-readable error message)
+impl fmt::Display for MyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.details)
+    }
+}
+
+// 3. Implement the std::error::Error marker trait
+impl std::error::Error for MyError {
+    // Optional: report an underlying cause, if you store one
+    // fn source(&self) -> Option<&(dyn Error + 'static)> { None }
+}
+pub(crate) fn query(args: QueryArgs, is_exec: bool) -> Result<(), ()> {
+    match query_impl(args, is_exec) {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if !err.is::<MyError>() {
+                eprintln!("{}", err);
+            }
+            Err(())
+        }
+    }
 }

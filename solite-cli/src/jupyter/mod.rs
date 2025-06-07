@@ -1,93 +1,67 @@
 mod html;
-mod jupyer_msg;
-pub(crate) mod notebook;
 mod server;
 
-use crate::cli::JupyterFlags;
-use crate::jupyter::server::{ConnectionSpec, JupyterServer};
+use crate::cli::{JupyterCommand, JupyterInstallArgs, JupyterNamespace, JupyterUpArgs};
 
 use serde_json::json;
-use solite_core::Runtime;
-use std::fs;
-use tempfile::TempDir;
+use server::start_kernel;
+use std::env::current_exe;
 
-async fn serve(spec: ConnectionSpec) {
-    let (_stdio_tx, stdio_rx) = futures::channel::mpsc::unbounded();
-    JupyterServer::start(spec, stdio_rx, Runtime::new(None))
-        .await
-        .unwrap();
-}
+fn install(args: JupyterInstallArgs) -> anyhow::Result<()> {
+    let user_data_dir = runtimelib::dirs::user_data_dir()?;
+    let kernelspec_path = user_data_dir
+        .join("kernels")
+        .join(args.name.unwrap_or("solite".to_string()))
+        .join("kernel.json");
+    std::fs::create_dir_all(kernelspec_path.parent().unwrap())?;
 
-fn install() {
-    println!("Installing jupyter kernel...");
-    let tmpdir = TempDir::new().unwrap();
-    let f = fs::File::create(tmpdir.path().join("kernel.json")).unwrap();
-    serde_json::to_writer(
-        f,
-        &json!({
-          "argv": [
-            std::env::current_exe().unwrap().to_string_lossy(),
-            "jupyter",
-            "--connection",
-            "{connection_file}"
-          ],
-          "env": {},
-          "display_name": "Solite",
-          "language": "sql",
-          "interrupt_mode": "signal",
-          "metadata": {}
-        }),
-    )
-    .unwrap();
-
-    let child_result = std::process::Command::new("jupyter")
-        .args([
-            "kernelspec",
-            "install",
-            "--user",
-            "--name",
-            "solite",
-            &tmpdir.path().to_string_lossy(),
-        ])
-        .spawn();
-
-    match child_result {
-        Ok(mut child) => {
-            let wait_result = child.wait();
-            match wait_result {
-                Ok(status) => {
-                    if !status.success() {
-                        eprintln!("Failed to install kernelspec, try again.");
-                    }
-                }
-                Err(err) => {
-                    eprintln!("Failed to install kernelspec: {}", err);
-                }
-            }
-        }
-        Err(err) => {
-            eprintln!("Failed to install kernelspec: {}", err);
-            return;
-        }
-        _ => {}
+    if kernelspec_path.exists() && !args.force {
+        return Err(anyhow::anyhow!(
+            "Kernel spec already exists at {}. Use --force to overwrite.",
+            kernelspec_path.display()
+        ));
     }
 
-    let _ = std::fs::remove_dir(tmpdir);
-    println!("Successfully install solite jupyter kernel.")
+    let kernel_json = json!({
+      "argv": [
+        current_exe()?.to_string_lossy().to_string(),
+        "jupyter",
+        "up",
+        "--connection",
+        "{connection_file}"
+      ],
+      "env": {},
+      "display_name": args.display.unwrap_or("Solite".to_string()),
+      "language": "sql",
+      "interrupt_mode": "signal",
+      "metadata": {}
+    });
+
+    let f = std::fs::File::create(&kernelspec_path).unwrap();
+    serde_json::to_writer(f, &kernel_json).unwrap();
+    println!(
+        "Successfully installed Solite Jupyter kernel at {}",
+        kernelspec_path.display()
+    );
+    Ok(())
 }
 
-pub(crate) fn cli_jupyter(flags: JupyterFlags) -> Result<(), ()> {
-    if flags.install {
-        install();
-        return Ok(());
-    }
-    let config_path = flags.connection.ok_or(())?;
-
-    let spec: ConnectionSpec =
-        serde_json::from_str(std::fs::read_to_string(config_path).unwrap().as_str()).unwrap();
+fn up(args: JupyterUpArgs) -> Result<(), ()> {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        serve(spec).await;
+        start_kernel(args.connection).await.unwrap();
     });
     Ok(())
+}
+pub(crate) fn jupyter(cmd: JupyterNamespace) -> Result<(), ()> {
+    match cmd.command {
+        JupyterCommand::Install(args) => match install(args) {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                eprintln!("{error}");
+                Err(())
+            }
+        },
+        JupyterCommand::Up(args) => up(args),
+    }
 }

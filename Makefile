@@ -1,10 +1,23 @@
 
 test:
+	make test-cargo
+	make test-pytest
+	make test-snap
+	
+test-cargo:
 	cargo test
-	cargo build
-	uv run --project tests pytest
-	SOLITE_SNAPSHOT_DIRECTORY=tests/__solite_snaps__ cargo run -- snap tests/snap1.sql
 
+test-pytest:
+	cargo build
+	uv run --project tests pytest -vv
+
+test-snap:
+	SOLITE_SNAPSHOT_DIRECTORY=tests/__solite_snaps__ cargo run -- snap test tests/snaps
+
+.PHONY: test test-cargo test-pytest test-snap
+
+docs-dev:
+	npm -C site run dev
 
 stdlib-loadable:
 	mkdir -p dist/debug

@@ -1,61 +1,73 @@
 # serializer version: 1
 # name: test_help[--help]
   '''
+  Solite CLI
+  
   Usage: solite [COMMAND]
   
   Commands:
-    run       Run SQL or PRQL scripts 
-    query     execute sql
-    repl      reh pull
-    jupyter   Jupyter
-    snapshot  Snapshot results of SQL commands
-    docs      Generate markdown docs with inline SQL results
-    help      Print this message or the help of the given subcommand(s)
+    run      Run SQL scripts
+    repl     Start a REPL on a SQLite database
+    query    Run a read-only SQL query and output results to a file
+    execute  Execute a write SQL statement on a database
+    snap     Snapshot testing for extensions and SQL statements
+    jupyter  Manage the Solite Jupyter kernel
+    docs     Tooling for documenting SQLite extensions
+    bench    Run benchmarks on SQL statements
+    help     Print this message or the help of the given subcommand(s)
+  
+  Options:
+    -h, --help     Print help
+    -V, --version  Print version
+  
+  '''
+# ---
+# name: test_help[jupyter --help]
+  '''
+  Manage the Solite Jupyter kernel
+  
+  Usage: solite jupyter <COMMAND>
+  
+  Commands:
+    install  
+    up       
+    help     Print this message or the help of the given subcommand(s)
   
   Options:
     -h, --help  Print help
   
   '''
 # ---
-# name: test_help[jupyter --help]
-  '''
-  Jupyter
-  
-  Usage: solite jupyter [OPTIONS]
-  
-  Options:
-        --install                  Install the Solite Jupyter kernel
-        --connection <CONNECTION>  Connection file, supplied by Jupyter
-    -h, --help                     Print help
-  
-  '''
-# ---
 # name: test_help[query --help]
   '''
-  execute sql
+  Run a read-only SQL query and output results to a file
   
-  Usage: solite query [OPTIONS] [DATABASE] <SQL STATEMENT>
+  Usage: solite query [OPTIONS] <STATEMENT> [DATABASE]
   
   Arguments:
-    [DATABASE]       Path to SQLite database
-    <SQL STATEMENT>  statement
+    <STATEMENT>  
+    [DATABASE]   
   
   Options:
-    -p <PARAMETERS> <PARAMETERS>      parameter
-    -f <FORMAT>                       Output format
-    -o <PATH>                         Output file
-    -h, --help                        Print help
+    -o, --output <OUTPUT>
+            
+    -f, --format <FORMAT>
+            [possible values: csv, tsv, json, ndjson, value, clipboard]
+    -p, --parameters <PARAMETERS> <PARAMETERS>
+            
+    -h, --help
+            Print help
   
   '''
 # ---
 # name: test_help[repl --help]
   '''
-  reh pull
+  Start a REPL on a SQLite database
   
   Usage: solite repl [DATABASE]
   
   Arguments:
-    [DATABASE]  Path to SQLite database
+    [DATABASE]  
   
   Options:
     -h, --help  Print help
@@ -64,17 +76,18 @@
 # ---
 # name: test_help[run --help]
   '''
-  Run SQL or PRQL scripts 
+  Run SQL scripts
   
-  Usage: solite run [OPTIONS] [DATABASE] <SCRIPT>
+  Usage: solite run [OPTIONS] [DATABASE] [SCRIPT]
   
   Arguments:
-    [DATABASE]  Path to SQLite database
-    <SCRIPT>    Path to SQL or PRQL file
+    [DATABASE]  
+    [SCRIPT]    
   
   Options:
-        --verbose <verbose>  
-    -h, --help               Print help
+    -p, --parameters <PARAMETERS> <PARAMETERS>  
+        --trace <TRACE>                         
+    -h, --help                                  Print help
   
   '''
 # ---

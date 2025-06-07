@@ -10,8 +10,8 @@ use sqlite_url::sqlite3_url_init;
 use sqlite_vec::sqlite3_vec_init;
 use std::ffi::{c_char, c_uint};
 //use sqlite_fastrand::sqlite3_fastrand_init;
-use sqlite_xsv::sqlite3_xsv_init;
 use sqlite_str::sqlite3_str_init;
+use sqlite_xsv::sqlite3_xsv_init;
 
 include!(concat!(env!("OUT_DIR"), "/builtins.rs"));
 

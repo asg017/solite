@@ -1,80 +1,29 @@
-// Modified from deno project, original declaration:
-
-// Copyright 2018-2023 the Deno authors. All rights reserved. MIT license.
-
-// This file is forked/ported from <https://github.com/evcxr/evcxr>
-// Copyright 2020 The Evcxr Authors. MIT license.
-
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use crate::jupyter::html::html_escape;
-use crate::jupyter::jupyer_msg::{Connection, JupyterMessage};
-use anyhow::Error as AnyError;
-use futures::channel::mpsc;
-use futures::StreamExt;
-use serde::Deserialize;
+use anyhow::{Context as _, Result};
+use jupyter_protocol::{
+    datatable::{TableSchema, TableSchemaField},
+    ClearOutput, CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput,
+    ExecuteReply, ExecutionCount, HelpLink, HistoryReply, InspectReply, IsCompleteReply,
+    IsCompleteReplyStatus, JupyterMessage, JupyterMessageContent, KernelInfoReply, LanguageInfo,
+    Media, MediaType, ReplyStatus, Status, StreamContent, TabularDataResource,
+};
+use runtimelib::{KernelIoPubConnection, KernelShellConnection};
 use serde_json::json;
-use solite_core::dot::DotCommand;
-use solite_core::sqlite::{self, Statement, ValueRefXValue};
-use solite_core::{Runtime, StepError, StepResult};
-use tokio::sync::oneshot;
-use tokio::sync::Mutex;
-use zeromq::SocketRecv;
-use zeromq::SocketSend;
+use solite_core::{
+    dot::{DotCommand, LoadCommandSource},
+    sqlite::{self, Statement, ValueRefXValue},
+    Runtime, StepError, StepResult,
+};
+use std::path::PathBuf;
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
-pub struct ConnectionSpec {
-    pub(crate) ip: String,
-    pub(crate) transport: String,
-    pub(crate) control_port: u32,
-    pub(crate) shell_port: u32,
-    pub(crate) stdin_port: u32,
-    pub(crate) hb_port: u32,
-    pub(crate) iopub_port: u32,
-    pub(crate) key: String,
-}
-
-pub enum StdioMsg {
-    Stdout(String),
-    #[allow(dead_code)]
-    Stderr(String),
-}
-
-enum Command {
-    Execute(String),
-}
-
-#[derive(Debug, Deserialize)]
-struct UiResponse {
+pub struct UiResponse {
     text: String,
     html: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct UiError {
-    ename: String,
-    evalue: String,
-}
-impl UiError {
-    fn new<S: Into<String>>(ename: S, evalue: S) -> Self {
-        UiError {
-            ename: ename.into(),
-            evalue: evalue.into(),
-        }
-    }
-}
-pub struct JupyterServer {
-    execution_count: usize,
-    last_execution_request: Arc<Mutex<Option<JupyterMessage>>>,
-    // This is Arc<Mutex<>>, so we don't hold RefCell borrows across await
-    // points.
-    iopub_socket: Arc<Mutex<Connection<zeromq::PubSocket>>>,
-    solite_runtime:
-        tokio::sync::mpsc::Sender<(Command, oneshot::Sender<Result<UiResponse, UiError>>)>,
-}
-
-fn render_statement(stmt: &Statement) -> Result<UiResponse, UiError> {
+pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> {
     //let mut text = String::new();
     let mut rows = vec![];
     let mut html = String::new();
@@ -86,13 +35,12 @@ fn render_statement(stmt: &Statement) -> Result<UiResponse, UiError> {
     html.push_str("<tr style=\"text-align: center;\">\n");
     let column_names = stmt
         .column_names()
-        .map_err(|_e| UiError::new("error", "Error getting column names"))?;
+        .map_err(|_e| anyhow::anyhow!("Could not get column names"))?;
     let column_count = column_names.len();
     let mut row_count = 0;
     for column in &column_names {
         html.push_str("<th>\n");
-        let cleaned =
-            html_escape(column).map_err(|_e| UiError::new("Some formatting error", ""))?;
+        let cleaned = html_escape(column)?;
         html.push_str(cleaned.as_str());
         html.push_str("\n</th>\n");
     }
@@ -135,8 +83,7 @@ fn render_statement(stmt: &Statement) -> Result<UiResponse, UiError> {
                             },
                         };
                         //let raw = value.as_str().to_string();
-                        let value = html_escape(&raw)
-                            .map_err(|_e| UiError::new("Some formatting error", ""))?;
+                        let value = html_escape(&raw)?;
 
                         html.push_str(format!("<td {}>\n", style).as_str());
                         html.push_str(value.as_str());
@@ -146,7 +93,7 @@ fn render_statement(stmt: &Statement) -> Result<UiResponse, UiError> {
                 }
                 None => break,
             },
-            Err(error) => return Err(UiError::new(error.code_description, error.message)),
+            Err(error) => return Err(anyhow::anyhow!(error)),
         }
     }
     html.push_str("</tbody>\n");
@@ -168,51 +115,106 @@ fn render_statement(stmt: &Statement) -> Result<UiResponse, UiError> {
 
     Ok(UiResponse {
         text: crate::ui::ui_table(column_names, rows)
-            .display()
-            .map_err(|_e| UiError::new("Error displaying table", ""))?
+            .display()?
             .to_string(),
         html: Some(html),
     })
 }
-fn handle_code(runtime: &mut Runtime, code: String) -> Result<UiResponse, UiError> {
-    runtime.enqueue("TODO", code.as_str(), solite_core::BlockSource::JupyerCell);
+
+async fn handle_code(
+    runtime: &mut Runtime,
+    response: mpsc::Sender<JupyterMessage>,
+    parent: &JupyterMessage,
+) -> anyhow::Result<()> {
     loop {
         match runtime.next_step() {
             Ok(Some(step)) => match step.result {
-                StepResult::SqlStatement{stmt, ..} => {
-                    if !runtime.has_next() {
-                        return render_statement(&stmt);
-                    } else {
-                        stmt.execute()
-                            .map_err(|e| UiError::new(e.code_description.clone(), e.to_string()))?;
+                StepResult::SqlStatement { stmt, .. } => match render_statementx(&stmt) {
+                    Ok(tbl) => {
+                        response
+                            .send(
+                                DisplayData::new(
+                                    vec![
+                                        MediaType::Plain(stmt.sql()),
+                                        MediaType::Html(tbl.html.unwrap()),
+                                    ]
+                                    .into(),
+                                )
+                                .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
                     }
-                }
+                    Err(err) => {
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Plain(format!("{:?}", err)))
+                                    .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
+                    }
+                },
                 StepResult::DotCommand(cmd) => match cmd {
-                    DotCommand::Print(_print_cmd) => {
-                        return Err(UiError::new(
-                            "Unsupported",
-                            "The .print command is not supported in Jupyter.",
-                        ))
-                    }
-                    DotCommand::Timer(_enabled) => {
-                        return Err(UiError::new(
-                            "Unsupported",
-                            "The .timer command is not supported in Jupyter.",
-                        ))
-                    }
-                    DotCommand::Parameter(param_cmd) => match param_cmd {
-                        solite_core::dot::ParameterCommand::Set { key, value } => {
-                            runtime.define_parameter(key, value).unwrap();
+                    DotCommand::Print(_print_cmd) => todo!(),
+                    DotCommand::Shell(sh_cmd) => {
+                        let rx = sh_cmd.execute();
+                        let mut out = String::new();
+                        while let Ok(msg) = rx.recv() {
+                            response
+                                .send(
+                                    StreamContent::stdout(&format!("{msg}\n")).as_child_of(parent),
+                                )
+                                .await
+                                .unwrap();
+                            out.push_str(msg.as_str());
+                            out.push('\n');
                         }
-                        solite_core::dot::ParameterCommand::Unset(_) => todo!(),
-                        solite_core::dot::ParameterCommand::List => todo!(),
-                        solite_core::dot::ParameterCommand::Clear => todo!(),
-                    },
+                    }
+                    DotCommand::Timer(_enabled) => todo!(),
+                    DotCommand::Parameter(cmd) => {
+                        let msg = match cmd {
+                            solite_core::dot::ParameterCommand::Set { key, value } => {
+                                runtime.define_parameter(key.clone(), value).unwrap();
+                                DisplayData::from(MediaType::Plain(format!(
+                                    "set parameter : {}",
+                                    key,
+                                )))
+                            }
+                            solite_core::dot::ParameterCommand::Unset(_) => todo!(),
+                            solite_core::dot::ParameterCommand::List => todo!(),
+                            solite_core::dot::ParameterCommand::Clear => todo!(),
+                        };
+
+                        response.send(msg.as_child_of(parent)).await.unwrap()
+                    }
                     DotCommand::Open(open_cmd) => {
                         open_cmd.execute(runtime);
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Plain(format!(
+                                    "Opened database at {}",
+                                    open_cmd.path
+                                )))
+                                .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap()
                     }
                     DotCommand::Load(load_cmd) => {
-                        load_cmd.execute(&mut runtime.connection);
+                        let msg = match load_cmd.execute(&mut runtime.connection) {
+                            Ok(LoadCommandSource::Path(v)) => {
+                                MediaType::Plain(format!("Loaded '{v}'"))
+                            }
+                            Ok(LoadCommandSource::Uv { directory, package }) => MediaType::Plain(
+                                format!("Loaded '{package}' with uv from {directory}"),
+                            ),
+                            Err(_) => todo!(),
+                        };
+                        response
+                            .send(DisplayData::from(msg).as_child_of(parent))
+                            .await
+                            .unwrap();
                     }
                     DotCommand::Tables(cmd) => {
                         cmd.execute(&runtime);
@@ -220,10 +222,7 @@ fn handle_code(runtime: &mut Runtime, code: String) -> Result<UiResponse, UiErro
                 },
             },
             Ok(None) => {
-                return Ok(UiResponse {
-                    text: "[no code]".to_string(),
-                    html: None,
-                })
+                return Ok(());
             }
             Err(error) => match error {
                 StepError::Prepare {
@@ -232,382 +231,399 @@ fn handle_code(runtime: &mut Runtime, code: String) -> Result<UiResponse, UiErro
                     src,
                     offset,
                 } => {
-                    let x =
+                    let error_string =
                         crate::errors::report_error_string(file_name.as_str(), &src, &error, None);
-                    return Err(UiError::new(error.code_description.clone(), x));
+                    response
+                        .send(DisplayData::from(MediaType::Plain(error_string)).as_child_of(parent))
+                        .await
+                        .unwrap();
                 }
                 StepError::ParseDot(error) => {
-                    return Err(UiError::new(
-                        "Error parsing dot command",
-                        &error.to_string(),
-                    ))
+                    todo!()
                 }
             },
         }
     }
 }
 
-impl JupyterServer {
-    pub async fn start(
-        spec: ConnectionSpec,
-        mut stdio_rx: mpsc::UnboundedReceiver<StdioMsg>,
-        runtime: Runtime,
-    ) -> Result<StdioMsg, AnyError> {
-        let mut heartbeat = bind_socket::<zeromq::RepSocket>(&spec, spec.hb_port).await?;
-        let shell_socket = bind_socket::<zeromq::RouterSocket>(&spec, spec.shell_port).await?;
-        let control_socket = bind_socket::<zeromq::RouterSocket>(&spec, spec.control_port).await?;
-        let _stdin_socket = bind_socket::<zeromq::RouterSocket>(&spec, spec.stdin_port).await?;
-        let iopub_socket = bind_socket::<zeromq::PubSocket>(&spec, spec.iopub_port).await?;
-        let iopub_socket = Arc::new(Mutex::new(iopub_socket));
-        let last_execution_request = Arc::new(Mutex::new(None));
+struct SoliteKernel {
+    execution_count: ExecutionCount,
+    iopub: KernelIoPubConnection,
+    runtime: mpsc::Sender<(String, JupyterMessage, mpsc::Sender<JupyterMessage>)>,
+    //runtime: mpsc::Sender<(String, mpsc::Sender<Option<Result<String, String>>>)>,
+}
 
-        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<(
-            Command,
-            oneshot::Sender<Result<UiResponse, UiError>>,
-        )>(1);
+impl SoliteKernel {
+    pub async fn start(connection_info: &ConnectionInfo) -> Result<()> {
+        let runtime = Runtime::new(None);
+        let session_id = Uuid::new_v4().to_string();
+
+        let mut heartbeat = runtimelib::create_kernel_heartbeat_connection(connection_info).await?;
+        let shell_connection =
+            runtimelib::create_kernel_shell_connection(connection_info, &session_id).await?;
+        let mut control_connection =
+            runtimelib::create_kernel_control_connection(connection_info, &session_id).await?;
+        let _stdin_connection =
+            runtimelib::create_kernel_stdin_connection(connection_info, &session_id).await?;
+        let iopub_connection =
+            runtimelib::create_kernel_iopub_connection(connection_info, &session_id).await?;
+
+        let (tx, mut rx) =
+            //mpsc::channel::<(String, mpsc::Sender<Option<Result<String, String>>>)>(10);
+            mpsc::channel::<(String, JupyterMessage, mpsc::Sender<JupyterMessage>)>(10);
+
         tokio::spawn(async move {
             let mut rt = runtime;
-            while let Some((cmd, response)) = cmd_rx.recv().await {
+            while let Some((cmd, parent, response)) = rx.recv().await {
                 match cmd {
-                    Command::Execute(code) => response.send(handle_code(&mut rt, code)).unwrap(),
+                    code => {
+                        rt.enqueue(
+                            "<anonymous>",
+                            code.as_str(),
+                            solite_core::BlockSource::JupyerCell,
+                        );
+                        handle_code(&mut rt, response, &parent).await.unwrap();
+                    }
                 }
             }
         });
 
-        let mut server = Self {
-            execution_count: 0,
-            iopub_socket: iopub_socket.clone(),
-            last_execution_request: last_execution_request.clone(),
-            solite_runtime: cmd_tx.clone(),
+        let mut solite_kernel = Self {
+            execution_count: Default::default(),
+            iopub: iopub_connection,
+            runtime: tx,
         };
 
-        let handle1 = tokio::task::spawn(async move {
-            if let Err(_err) = Self::handle_heartbeat(&mut heartbeat).await {}
+        let heartbeat_handle = tokio::spawn({
+            async move { while let Ok(()) = heartbeat.single_heartbeat().await {} }
         });
 
-        let handle2 = tokio::task::spawn(async move {
-            if let Err(_err) = Self::handle_control(control_socket).await {}
-        });
+        let control_handle = tokio::spawn({
+            async move {
+                while let Ok(message) = control_connection.read().await {
+                    if let JupyterMessageContent::KernelInfoRequest(_) = message.content {
+                        let sent = control_connection
+                            .send(Self::kernel_info().as_child_of(&message))
+                            .await;
 
-        let handle3 = tokio::task::spawn(async move {
-            if let Err(_err) = server.handle_shell(shell_socket).await {}
-        });
-
-        let handle4 = tokio::task::spawn(async move {
-            while let Some(stdio_msg) = stdio_rx.next().await {
-                Self::handle_stdio_msg(
-                    iopub_socket.clone(),
-                    last_execution_request.clone(),
-                    stdio_msg,
-                )
-                .await;
-            }
-        });
-
-        let join_fut = futures::future::try_join_all(vec![handle1, handle2, handle3, handle4]);
-
-        if let Ok(_result) = join_fut.await {}
-
-        Ok(StdioMsg::Stdout("yo".to_owned()))
-    }
-
-    async fn handle_stdio_msg<S: zeromq::SocketSend>(
-        iopub_socket: Arc<Mutex<Connection<S>>>,
-        last_execution_request: Arc<Mutex<Option<JupyterMessage>>>,
-        stdio_msg: StdioMsg,
-    ) {
-        let exec_request = last_execution_request.clone();
-
-        let (name, text) = match stdio_msg {
-            StdioMsg::Stdout(text) => ("stdout", text),
-            StdioMsg::Stderr(text) => ("stderr", text),
-        };
-
-        let mut x = exec_request.try_lock().unwrap();
-        let result = x
-            .as_mut()
-            .unwrap()
-            .new_message("stream")
-            .with_content(json!({
-                "name": name,
-                "text": text
-            }))
-            .send(&mut *iopub_socket.lock().await)
-            .await;
-
-        if let Err(_err) = result {}
-    }
-
-    async fn handle_heartbeat(
-        connection: &mut Connection<zeromq::RepSocket>,
-    ) -> Result<(), AnyError> {
-        loop {
-            connection.socket.recv().await?;
-            connection
-                .socket
-                .send(zeromq::ZmqMessage::from(b"ping".to_vec()))
-                .await?;
-        }
-    }
-
-    async fn handle_control(
-        mut connection: Connection<zeromq::RouterSocket>,
-    ) -> Result<(), AnyError> {
-        loop {
-            let msg = JupyterMessage::read(&mut connection).await?;
-
-            match msg.message_type() {
-                "kernel_info_request" => {
-                    msg.new_reply()
-                        .with_content(kernel_info())
-                        .send(&mut connection)
-                        .await?;
-                }
-                "shutdown_request" => {
-                    //cancel_handle.cancel();
-                }
-                "interrupt_request" => {
-                    eprintln!("Interrupt request currently not supported");
-                }
-                _ => {
-                    eprintln!("Unrecognized control message type: {}", msg.message_type());
-                }
-            }
-        }
-    }
-
-    async fn handle_shell(
-        &mut self,
-        mut connection: Connection<zeromq::RouterSocket>,
-    ) -> Result<(), AnyError> {
-        loop {
-            let msg = JupyterMessage::read(&mut connection).await?;
-            self.handle_shell_message(msg, &mut connection).await?;
-        }
-    }
-
-    async fn handle_shell_message(
-        &mut self,
-        msg: JupyterMessage,
-        connection: &mut Connection<zeromq::RouterSocket>,
-    ) -> Result<(), AnyError> {
-        msg.new_message("status")
-            .with_content(json!({"execution_state": "busy"}))
-            .send(&mut *self.iopub_socket.lock().await)
-            .await?;
-
-        match msg.message_type() {
-            "kernel_info_request" => {
-                msg.new_reply()
-                    .with_content(kernel_info())
-                    .send(connection)
-                    .await?;
-            }
-            "is_complete_request" => {
-                // TODO: also 'invalid' or 'unknown'
-                let status = if solite_core::sqlite::complete(msg.code()) {
-                    "complete"
-                } else {
-                    "incomplete"
-                };
-                msg.new_reply()
-                    .with_content(json!({"status": status}))
-                    .send(connection)
-                    .await?;
-            }
-            "execute_request" => {
-                self.handle_execution_request(msg.clone(), connection)
-                    .await?;
-            }
-            "comm_open" => {
-                msg.comm_close_message()
-                    .send(&mut *self.iopub_socket.lock().await)
-                    .await?;
-            }
-            "complete_request" => {
-                //let user_code = msg.code();
-                //let cursor_pos = msg.cursor_pos();
-            }
-            "comm_msg" | "comm_info_request" | "history_request" => {
-                // We don't handle these messages
-            }
-            _ => {}
-        }
-
-        msg.new_message("status")
-            .with_content(json!({"execution_state": "idle"}))
-            .send(&mut *self.iopub_socket.lock().await)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn handle_execution_request(
-        &mut self,
-        msg: JupyterMessage,
-        connection: &mut Connection<zeromq::RouterSocket>,
-    ) -> Result<(), AnyError> {
-        self.execution_count += 1;
-        //self.last_execution_request = Some(msg.clone());
-        let mut guard = self.last_execution_request.try_lock().unwrap();
-        *guard = Some(msg.clone());
-
-        msg.new_message("execute_input")
-            .with_content(json!({
-                "execution_count": self.execution_count,
-                "code": msg.code()
-            }))
-            .send(&mut *self.iopub_socket.lock().await)
-            .await?;
-
-        if msg.code().starts_with("! ") {
-            msg.new_message("execute_result")
-                .with_content(json!({
-                    "execution_count": self.execution_count,
-                    "data": {"text/plain": "aaaaa"},
-                    "metadata": {},
-                }))
-                .send(&mut *self.iopub_socket.lock().await)
-                .await?;
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            msg.new_message("execute_result")
-                .with_content(json!({
-                    "execution_count": self.execution_count,
-                    "data": {"text/plain": "bbbbb"},
-                    "metadata": {},
-                }))
-                .send(&mut *self.iopub_socket.lock().await)
-                .await?;
-            msg.new_reply()
-                .with_content(json!({
-                    "status": "ok",
-                    "execution_count": self.execution_count,
-                }))
-                .send(connection)
-                .await?;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        } else {
-            let mut data: HashMap<String, String> = HashMap::new();
-            let cmd_tx = self.solite_runtime.clone();
-            let code = msg.code().to_string();
-            let handle = tokio::spawn(async move {
-                let (resp_tx, resp_rx) = oneshot::channel();
-                cmd_tx
-                    .send((Command::Execute(code), resp_tx))
-                    .await
-                    .ok()
-                    .unwrap();
-                resp_rx.await.unwrap()
-            });
-
-            match handle.await {
-                Ok(result) => match result {
-                    Ok(response) => {
-                        data.insert("text/plain".to_string(), response.text);
-                        if let Some(html) = response.html {
-                            data.insert("text/html".to_string(), html);
+                        match sent {
+                            Ok(_) => {}
+                            Err(err) => eprintln!("Error on control {}", err),
                         }
-                        msg.new_message("execute_result")
-                            .with_content(json!({
-                                "execution_count": self.execution_count,
-                                "data": data,
-                                "metadata": {},
-                            }))
-                            .send(&mut *self.iopub_socket.lock().await)
-                            .await?;
                     }
-                    Err(error) => {
-                        msg.new_message("error")
-                            .with_content(json!({
-                              "ename": error.ename,
-                              "evalue": error.evalue,
-                              "traceback": [
-
-                              ]
-                            }))
-                            .send(&mut *self.iopub_socket.lock().await)
-                            .await?;
-                    }
-                },
-                Err(err) => {
-                    msg.new_message("error")
-                        .with_content(json!({
-                          "ename": "some sort of error",
-                          "evalue": err.to_string(),
-                          "traceback": []
-                        }))
-                        .send(&mut *self.iopub_socket.lock().await)
-                        .await?;
                 }
             }
+        });
 
-            /*match todo!() {
-                Ok(stmt) => {
-                    let value = stmt.unwrap().next().unwrap().unwrap();
-                    data.insert("text/plain".to_string(), value.get(0).unwrap().x_as_text());
-                    msg.new_message("execute_result")
-                        .with_content(json!({
-                            "execution_count": self.execution_count,
-                            "data": data,
-                            "metadata": {},
-                        }))
-                        .send(&mut *self.iopub_socket.lock().await)
-                        .await?;
-                }
-                Err(_) => {
-                    msg.new_message("error")
-                        .with_content(json!({
-                          "ename": "prepare eror TODO",
-                          "evalue": " ",
-                          "traceback": []
-                        }))
-                        .send(&mut *self.iopub_socket.lock().await)
-                        .await?;
-                }
-            }*/
+        let shell_handle = tokio::spawn(async move {
+            if let Err(err) = solite_kernel.handle_shell(shell_connection).await {
+                eprintln!("Shell error: {}\nBacktrace:\n{}", err, err.backtrace());
+            }
+        });
 
-            msg.new_reply()
-                .with_content(json!({
-                    "status": "ok",
-                    "execution_count": self.execution_count,
-                }))
-                .send(connection)
-                .await?;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        let join_fut =
+            futures::future::try_join_all(vec![heartbeat_handle, control_handle, shell_handle]);
+
+        join_fut.await?;
 
         Ok(())
     }
+
+    async fn clear_output_after_next_output(
+        &mut self,
+        parent: &JupyterMessage,
+    ) -> anyhow::Result<()> {
+        self.iopub
+            .send(ClearOutput { wait: true }.as_child_of(parent))
+            .await
+    }
+
+    async fn send_markdown(
+        &mut self,
+        markdown: &str,
+        parent: &JupyterMessage,
+    ) -> anyhow::Result<()> {
+        self.iopub
+            .send(DisplayData::from(MediaType::Markdown(markdown.to_string())).as_child_of(parent))
+            .await
+    }
+    async fn send_plaintext(
+        &mut self,
+        message: &str,
+        parent: &JupyterMessage,
+    ) -> anyhow::Result<()> {
+        self.iopub
+            .send(DisplayData::from(MediaType::Plain(message.to_string())).as_child_of(parent))
+            .await
+    }
+
+    async fn send_table(&mut self, markdown: &str, parent: &JupyterMessage) -> anyhow::Result<()> {
+        let dt = MediaType::DataTable(Box::new(TabularDataResource {
+            path: None,
+            data: Some(vec![serde_json::json!({
+              "a": 1
+            })]),
+            schema: TableSchema {
+                fields: vec![TableSchemaField {
+                    name: "a".to_string(),
+                    title: None,
+                    description: None,
+                    example: None,
+                    field_type: jupyter_protocol::datatable::FieldType::Number,
+                    format: None,
+                    constraints: None,
+                    rdf_type: None,
+                }],
+                primary_key: None,
+                foreign_keys: None,
+                missing_values: None,
+            },
+            title: Some("aaa".to_string()),
+            description: None,
+            homepage: None,
+            sources: None,
+            licenses: None,
+            dialect: None,
+            format: None,
+            mediatype: None,
+            encoding: None,
+            bytes: None,
+            hash: None,
+        }));
+        self.iopub
+            .send(DisplayData::from(dt).as_child_of(parent))
+            .await?;
+
+        let vl4 = MediaType::VegaLiteV4(
+            json!({
+              "$schema": "https://vega.github.io/schema/vega-lite/v2.0.json",
+              "description": "A simple bar chart with embedded data.",
+              "data": {
+                "values": [
+                  {"a": "A", "b": 28},
+                  {"a": "B", "b": 55},
+                  {"a": "C", "b": 43},
+                  {"a": "D", "b": 91},
+                  {"a": "E", "b": 81},
+                  {"a": "F", "b": 53},
+                  {"a": "G", "b": 19},
+                  {"a": "H", "b": 87},
+                  {"a": "I", "b": 52}
+                ]
+              },
+              "mark": "bar",
+              "encoding": {
+                "x": {"field": "a", "type": "ordinal"},
+                "y": {"field": "b", "type": "quantitative"}
+              }
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+        self.iopub
+            .send(DisplayData::from(vl4).as_child_of(parent))
+            .await?;
+        //self.send_plaintext("<vegalite>", parent).await?;
+
+        //self.iopub
+        //    .send(DisplayData::from(MediaType::VegaLiteV6(json!({}))).as_child_of(parent))
+        //    .await?;
+
+        //self.io
+        Ok(())
+    }
+
+    async fn send_error(
+        &mut self,
+        ename: &str,
+        evalue: &str,
+        parent: &JupyterMessage,
+    ) -> anyhow::Result<()> {
+        self.iopub
+            .send(
+                ErrorOutput {
+                    ename: ename.to_string(),
+                    evalue: evalue.to_string(),
+                    traceback: Default::default(),
+                }
+                .as_child_of(parent),
+            )
+            .await
+    }
+
+    async fn push_stdout(&mut self, text: &str, parent: &JupyterMessage) -> anyhow::Result<()> {
+        self.iopub
+            .send(StreamContent::stdout(text).as_child_of(parent))
+            .await
+    }
+
+    async fn command(&mut self, command: &str, parent: &JupyterMessage) -> anyhow::Result<()> {
+        println!("command: {command}");
+        anyhow::Ok(())
+    }
+
+    async fn execute(&mut self, request: &JupyterMessage) -> anyhow::Result<()> {
+        let code = match &request.content {
+            JupyterMessageContent::ExecuteRequest(req) => req.code.clone(),
+            _ => return Err(anyhow::anyhow!("Invalid message type for execution")),
+        };
+
+        let cmd_tx = self.runtime.clone();
+        let parent = request.clone();
+        let handle = tokio::spawn(async move {
+            let (resp_tx, resp_rx) = mpsc::channel(10);
+            cmd_tx.send((code, parent, resp_tx)).await.unwrap();
+            resp_rx
+        });
+        let mut x = handle.await.unwrap();
+        while let Some(x) = x.recv().await {
+            self.iopub.send(x).await?;
+        }
+        // Clear the progress message after the first tokens come in
+        //self.clear_output_after_next_output(request).await?;
+
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        anyhow::Ok(())
+    }
+
+    pub async fn handle_shell(&mut self, mut connection: KernelShellConnection) -> Result<()> {
+        loop {
+            let msg = connection.read().await?;
+            match self.handle_shell_message(&msg, &mut connection).await {
+                Ok(_) => {}
+                Err(err) => eprintln!("Error on shell: {}", err),
+            }
+        }
+    }
+
+    pub async fn handle_shell_message(
+        &mut self,
+        parent: &JupyterMessage,
+        shell: &mut KernelShellConnection,
+    ) -> Result<()> {
+        // Even with messages like `kernel_info_request`, you're required to send a busy and idle message
+        self.iopub.send(Status::busy().as_child_of(parent)).await?;
+
+        match &parent.content {
+            JupyterMessageContent::CommInfoRequest(_) => {
+                // Just tell the frontend we don't have any comms
+                let reply = CommInfoReply {
+                    status: ReplyStatus::Ok,
+                    comms: Default::default(),
+                    error: None,
+                }
+                .as_child_of(parent);
+                shell.send(reply).await?;
+            }
+
+            JupyterMessageContent::ExecuteRequest(_) => {
+                // Respond back with reply immediately
+                let reply = ExecuteReply {
+                    status: ReplyStatus::Ok,
+                    execution_count: self.one_up_execution_count(),
+                    user_expressions: Default::default(),
+                    payload: Default::default(),
+                    error: None,
+                }
+                .as_child_of(parent);
+                shell.send(reply).await?;
+
+                if let Err(err) = self.execute(parent).await {
+                    self.send_error("OllamaFailure", &err.to_string(), parent)
+                        .await?;
+                }
+            }
+            JupyterMessageContent::HistoryRequest(_) => {
+                let reply = HistoryReply {
+                    history: Default::default(),
+                    status: ReplyStatus::Ok,
+                    error: None,
+                }
+                .as_child_of(parent);
+                shell.send(reply).await?;
+            }
+            JupyterMessageContent::InspectRequest(_) => {
+                // Would be really cool to have the model inspect at the word,
+                // kind of like an editor.
+
+                let reply = InspectReply {
+                    found: false,
+                    data: Media::default(),
+                    metadata: Default::default(),
+                    status: ReplyStatus::Ok,
+                    error: None,
+                }
+                .as_child_of(parent);
+
+                shell.send(reply).await?;
+            }
+            JupyterMessageContent::IsCompleteRequest(_) => {
+                // true, unconditionally
+                let reply = IsCompleteReply {
+                    status: IsCompleteReplyStatus::Complete,
+                    indent: "".to_string(),
+                }
+                .as_child_of(parent);
+
+                shell.send(reply).await?;
+            }
+            JupyterMessageContent::KernelInfoRequest(_) => {
+                let reply = Self::kernel_info().as_child_of(parent);
+
+                shell.send(reply).await?;
+            }
+            // Not implemented for shell includes DebugRequest
+            // Not implemented for control (and sometimes shell...) includes InterruptRequest, ShutdownRequest
+            _ => {}
+        };
+
+        self.iopub.send(Status::idle().as_child_of(parent)).await?;
+
+        Ok(())
+    }
+
+    fn kernel_info() -> KernelInfoReply {
+        KernelInfoReply {
+            status: ReplyStatus::Ok,
+            protocol_version: "5.3".to_string(),
+            implementation: "Solite kernel".to_string(),
+            implementation_version: "TODO".to_string(),
+            language_info: LanguageInfo {
+                name: "sqlite".to_string(),
+                version: "TODO".to_string(),
+                mimetype: "text/x.sqlite".to_string(),
+                file_extension: ".sql".to_string(),
+                pygments_lexer: "sqlite".to_string(),
+                codemirror_mode: CodeMirrorMode::Simple("sql".to_string()),
+                nbconvert_exporter: "script".to_string(),
+            },
+            banner: "Solite Kernel".to_string(),
+            help_links: vec![HelpLink {
+                text: "TODO".to_string(),
+                url: "https://github.com/asg017/solite".to_string(),
+            }],
+            debugger: false,
+            error: None,
+        }
+    }
+
+    fn one_up_execution_count(&mut self) -> ExecutionCount {
+        self.execution_count.0 += 1;
+        self.execution_count
+    }
 }
 
-async fn bind_socket<S: zeromq::Socket>(
-    config: &ConnectionSpec,
-    port: u32,
-) -> Result<Connection<S>, AnyError> {
-    let endpoint = format!("{}://{}:{}", config.transport, config.ip, port);
-    let mut socket = S::new();
-    socket.bind(&endpoint).await?;
-    Ok(Connection::new(socket, &config.key))
-}
+pub async fn start_kernel(connection_filepath: PathBuf) -> anyhow::Result<()> {
+    let conn_file = std::fs::read_to_string(&connection_filepath)
+        .with_context(|| format!("Couldn't read connection file: {:?}", connection_filepath))?;
+    let spec: ConnectionInfo = serde_json::from_str(&conn_file).with_context(|| {
+        format!(
+            "Connection file is not a valid JSON: {:?}",
+            connection_filepath
+        )
+    })?;
 
-fn kernel_info() -> serde_json::Value {
-    json!({
-      "status": "ok",
-      "protocol_version": "5.3",
-      "implementation_version": "TODO",
-      "implementation": "Solite kernel",
-      "language_info": {
-        "name": "sqlite",
-        "version": "TODO",
-        "mimetype": "text/x.sqlite",
-        "file_extension": ".sql",
-        "pygments_lexer": "sql",
-        "nb_converter": "script"
-      },
-      "help_links": [{
-        "text": "TODO",
-        "url": "https://github.com/asg017/solite"
-      }],
-      "banner": "Welcome to the Solite kernel!",
-    })
+    SoliteKernel::start(&spec).await?;
+    anyhow::Ok(())
 }

@@ -64,7 +64,7 @@ fn build_sqlite_org_extension(
         .flag("-O3")
         .warnings(false)
         .include(amalgammation_src_dir);
-        //.includes(zlib.include_paths);
+    //.includes(zlib.include_paths);
     if cfg!(feature = "static") {
         build.define("SQLITE_CORE", None);
     }
@@ -139,13 +139,11 @@ fn main() {
         "sha1",
         "shathree",
         "spellfix",
-        
         /* temporary, until windows zlib stuff is fixed
         "compress",
         "zipfile", //"stmt",
         "sqlar",
          */
-
         "series",
         "uuid",
         "completion",
@@ -184,7 +182,11 @@ fn main() {
     //let zlib = pkg_config::probe_library("zlib").unwrap();
 
     for ext in sqlite_org_extensions {
-        build_sqlite_org_extension(ext, &out_dir, &amalgammation_src_dir /*, zlib.clone() */);
+        build_sqlite_org_extension(
+            ext,
+            &out_dir,
+            &amalgammation_src_dir, /*, zlib.clone() */
+        );
     }
 
     let mut build = cc::Build::new();

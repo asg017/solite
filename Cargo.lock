@@ -2651,7 +2651,7 @@ dependencies = [
 
 [[package]]
 name = "solite-cli"
-version = "0.0.1-alpha.9"
+version = "0.0.1-alpha.10"
 dependencies = [
  "anyhow",
  "arboard",

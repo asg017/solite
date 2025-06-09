@@ -195,8 +195,8 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
     let mut timer = true;
 
     loop {
-        match rt.next_step() {
-            Ok(Some(step)) => {
+        match rt.next_stepx() {
+            Some(Ok(step)) => {
                 match step.result {
                     StepResult::SqlStatement { stmt, .. } => {
                         /*
@@ -422,8 +422,8 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
                     },
                 }
             }
-            Ok(None) => break,
-            Err(step_error) => match step_error {
+            None => break,
+            Some(Err(step_error)) => match step_error {
                 StepError::Prepare {
                     error,
                     file_name,

@@ -317,6 +317,9 @@ impl Validator for ReplValidator {
         if input.trim_start().starts_with('.') {
             return Ok(ValidationResult::Valid(None));
         }
+        if input.trim_start().starts_with('!') {
+            return Ok(ValidationResult::Valid(None));
+        }
         Ok(ValidationResult::Incomplete)
     }
 }
@@ -377,8 +380,8 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
     runtime.enqueue("[repl]", code, BlockSource::Repl);
 
     loop {
-        match runtime.next_step() {
-            Ok(Some(step)) => match step.result {
+        match runtime.next_stepx() {
+            Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => match cmd {
                     DotCommand::Tables(cmd) => cmd.execute(runtime),
                     DotCommand::Print(print_cmd) => print_cmd.execute(),
@@ -406,6 +409,12 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                         solite_core::dot::ParameterCommand::List => todo!(),
                         solite_core::dot::ParameterCommand::Clear => todo!(),
                     },
+                    DotCommand::Shell(shell_cmd) => {
+                      let rx = shell_cmd.execute();
+                      while let Ok(msg) = rx.recv() {
+                          println!("{}", msg);
+                      }
+                    }
                     _ => todo!(),
                 },
                 StepResult::SqlStatement { stmt, .. } => {
@@ -423,8 +432,8 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                     }
                 }
             },
-            Ok(None) => break,
-            Err(error) => match error {
+            None => break,
+            Some(Err(error)) => match error {
                 StepError::Prepare {
                     error,
                     file_name,

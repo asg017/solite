@@ -1,0 +1,6 @@
+---
+source: crates/solite-core/src/lib.rs
+expression: step
+snapshot_kind: text
+---
+~

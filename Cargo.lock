@@ -2654,14 +2654,11 @@ name = "solite-cli"
 version = "0.0.1-alpha.10"
 dependencies = [
  "anyhow",
- "arboard",
  "clap 4.5.4",
  "cli-table",
  "codespan-reporting",
  "console",
  "crossterm",
- "csv",
- "flate2",
  "futures",
  "hex",
  "indicatif",
@@ -2690,7 +2687,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "uuid",
- "zstd 0.13.1",
 ]
 
 [[package]]
@@ -2698,6 +2694,9 @@ name = "solite-core"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arboard",
+ "csv",
+ "flate2",
  "indicatif",
  "insta",
  "libsqlite3-sys",
@@ -2705,8 +2704,10 @@ dependencies = [
  "ropey",
  "rusqlite",
  "serde",
+ "serde_json",
  "solite-stdlib",
  "thiserror 1.0.59",
+ "zstd 0.13.1",
 ]
 
 [[package]]

@@ -124,7 +124,6 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
             .max()
             .unwrap()
             + 1;
-        dbg!(longest);
         println!("{sql}:");
         println!(
             "  Time  (mean ± σ ):  {} ± {}",

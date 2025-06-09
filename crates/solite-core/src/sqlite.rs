@@ -14,6 +14,54 @@ pub const JSON_SUBTYPE: u32 = 74;
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/vdbeapi.c#L212
 pub const POINTER_SUBTYPE: u32 = 112;
 
+/// Abstraction of a SQLite error.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SQLiteError {
+    pub result_code: i32,
+    pub code_description: String,
+    pub message: String,
+    pub offset: Option<usize>,
+}
+
+impl SQLiteError {
+  pub fn from_latest(db: *mut sqlite3, result_code: i32) -> Self {
+        let message = unsafe {
+        let message = sqlite3_errmsg(db);
+        let message = CStr::from_ptr(message);
+        message.to_string_lossy().to_string()
+      };
+
+      let code_description = unsafe {
+          let code_description = sqlite3_errstr(result_code);
+          let code_description = CStr::from_ptr(code_description);
+          code_description.to_string_lossy().to_string()
+      };
+      let offset = unsafe {
+          match sqlite3_error_offset(db) {
+              -1 => None,
+              offset => Some(offset as usize),
+          }
+      };
+      Self {
+          result_code,
+          code_description,
+          message,
+          offset,
+      }
+    }
+}
+
+impl fmt::Display for SQLiteError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "[{}] {}: {}",
+            self.result_code, self.code_description, self.message
+        )
+    }
+}
+
+
 fn escape_identifier(identifer: &str) -> String {
     let n = identifer.len();
     let s = CString::new(identifer).unwrap();
@@ -205,7 +253,7 @@ impl Statement {
                 }
                 Ok(Some(row))
             }
-            rc => Err(latest_error(
+            rc => Err(SQLiteError::from_latest(
                 unsafe { sqlite3_db_handle(self.statement) },
                 rc,
             )),
@@ -221,7 +269,7 @@ impl Statement {
                 statement: self.statement,
                 phantom: std::marker::PhantomData,
             })),
-            rc => Err(latest_error(
+            rc => Err(SQLiteError::from_latest(
                 unsafe { sqlite3_db_handle(self.statement) },
                 rc,
             )),
@@ -240,7 +288,7 @@ impl Statement {
                 SQLITE_DONE => break,
                 SQLITE_ROW => continue,
                 _ => {
-                    return Err(latest_error(
+                    return Err(SQLiteError::from_latest(
                         unsafe { sqlite3_db_handle(self.statement) },
                         rc,
                     ))
@@ -418,7 +466,7 @@ impl Connection {
                 owned: true,
             })
         } else {
-            let err = latest_error(connection, rc);
+            let err = SQLiteError::from_latest(connection, rc);
             unsafe {
                 sqlite3_close(connection);
             }
@@ -443,7 +491,7 @@ impl Connection {
                 owned: true,
             })
         } else {
-            let err = latest_error(connection, rc);
+            let err = SQLiteError::from_latest(connection, rc);
             unsafe {
                 sqlite3_close(connection);
             }
@@ -549,7 +597,7 @@ impl Connection {
                 Ok((rest, Some(Statement { statement: stmt })))
             }
         } else {
-            Err(latest_error(self.connection, rc))
+            Err(SQLiteError::from_latest(self.connection, rc))
         }
     }
 
@@ -570,47 +618,6 @@ impl Drop for Connection {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SQLiteError {
-    pub result_code: i32,
-    pub code_description: String,
-    pub message: String,
-    pub offset: Option<usize>,
-}
-impl fmt::Display for SQLiteError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "[{}] {}: {}",
-            self.result_code, self.code_description, self.message
-        )
-    }
-}
-fn latest_error(db: *mut sqlite3, result_code: i32) -> SQLiteError {
-    let message = unsafe {
-        let message = sqlite3_errmsg(db);
-        let message = CStr::from_ptr(message);
-        message.to_string_lossy().to_string()
-    };
-
-    let code_description = unsafe {
-        let code_description = sqlite3_errstr(result_code);
-        let code_description = CStr::from_ptr(code_description);
-        code_description.to_string_lossy().to_string()
-    };
-    let offset = unsafe {
-        match sqlite3_error_offset(db) {
-            -1 => None,
-            offset => Some(offset as usize),
-        }
-    };
-    SQLiteError {
-        result_code,
-        code_description,
-        message,
-        offset,
-    }
-}
 
 /// https://www.sqlite.org/c3ref/complete.html
 pub fn complete(sql: &str) -> bool {

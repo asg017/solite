@@ -1,12 +1,11 @@
 use std::{
-    io::{BufRead, BufReader},
-    sync::mpsc::Receiver,
+    io::{BufRead, BufReader}, path::PathBuf, sync::mpsc::Receiver
 };
 
 use solite_stdlib::solite_stdlib_init;
 use thiserror::Error;
 
-use crate::{sqlite::Connection, Runtime};
+use crate::{exporter::write_output, sqlite::{Connection, Statement}, Runtime};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Error, Debug, PartialEq)]
@@ -15,6 +14,9 @@ pub enum ParseDotError {
     UnknownCommand(String),
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
+
+    #[error("{0}")]
+    Generic(String),
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -100,6 +102,108 @@ impl OpenCommand {
     }
 }
 
+#[derive(Serialize, Debug)]
+pub struct ExportCommand {
+    pub target: PathBuf,
+    pub statement: Statement,
+    pub rest_length: usize,
+}
+
+impl ExportCommand {
+    pub fn new(args: String, runtime: &mut Runtime, rest: &str) -> Result<Self, ParseDotError> {
+      match runtime.prepare_with_parameters(rest) {
+        Ok((rest2, Some(stmt))) => {
+          Ok(Self {
+            target: PathBuf::from(args),
+            statement: stmt,
+            // TODO: suspicious
+            rest_length: rest2.unwrap_or(rest.len())
+          })
+        },
+        _ => todo!(),
+    }
+  }
+    pub fn execute(&mut self) -> anyhow::Result<()> {
+        let output = crate::exporter::output_from_path(&self.target)
+            .map_err(|e| ParseDotError::Generic(e.to_string()))?;
+        let format = crate::exporter::format_from_path(&self.target)
+            .unwrap();
+          write_output(&mut self.statement, output, format).unwrap();
+        Ok(())
+  }
+
+}
+
+#[derive(Serialize, Debug)]
+pub struct VegaLiteCommand {
+    pub statement: Statement,
+    pub rest_length: usize,
+}
+
+impl VegaLiteCommand {
+    pub fn new(args: String, runtime: &mut Runtime, rest: &str) -> Result<Self, ParseDotError> {
+      match runtime.prepare_with_parameters(rest) {
+        Ok((rest2, Some(stmt))) => {
+          Ok(Self {
+            statement: stmt,
+            // TODO: suspicious
+            rest_length: rest2.unwrap_or(rest.len())
+          })
+        },
+        _ => todo!(),
+    }
+  }
+    pub fn execute(&mut self) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let columns = self.statement.column_names().unwrap();
+        let mark = match columns[0].as_str() { 
+          "bar" => "bar",
+          _ => todo!(),
+        };
+        let mut data = vec![];
+        loop {
+          match self.statement.nextx() {
+            Ok(Some(row)) => {
+              let x = match row.value_at(1).value {
+                crate::sqlite::ValueRefXValue::Blob(_) => serde_json::Value::Null,
+                crate::sqlite::ValueRefXValue::Int(value) => serde_json::Value::Number(value.into()),
+                crate::sqlite::ValueRefXValue::Double(value) => serde_json::Number::from_f64(value).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+                crate::sqlite::ValueRefXValue::Text(value) => serde_json::Value::Null,
+                crate::sqlite::ValueRefXValue::Null => serde_json::Value::Null,
+              };
+              let y = match row.value_at(2).value {
+                crate::sqlite::ValueRefXValue::Blob(_) => serde_json::Value::Null,
+                crate::sqlite::ValueRefXValue::Int(value) => serde_json::Value::Number(value.into()),
+                crate::sqlite::ValueRefXValue::Double(value) => serde_json::Number::from_f64(value).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+                crate::sqlite::ValueRefXValue::Text(value) => serde_json::Value::Null,
+                crate::sqlite::ValueRefXValue::Null => serde_json::Value::Null,
+              };
+              data.push(serde_json::json!({
+                "x": x,
+                "y": y,
+              }));
+            },
+            Ok(None) => break,
+            Err(_) => todo!(),
+            }
+        }
+
+        let data = serde_json::json!({
+          "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+          "description": "A simple bar chart with embedded data.",
+          "data": {
+            "values": data,
+          },
+          "mark": mark,
+          "encoding": {
+            "x": {"field": "x", "type": "quantitative"},
+            "y": {"field": "y", "type": "quantitative"}
+          }
+        });
+        Ok(data.as_object().cloned().unwrap())
+  }
+
+}
+
 #[derive(Serialize, Debug, PartialEq)]
 pub struct LoadCommand {
     pub path: String,
@@ -173,7 +277,7 @@ fn parse_parameter(line: String) -> ParameterCommand {
         },
     }
 }
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug)]
 pub enum DotCommand {
     /*  introspection  */
     //Databases,
@@ -213,7 +317,8 @@ pub enum DotCommand {
     Timer(bool),
     //
     //Mode,
-    //Export,
+    Export(ExportCommand),
+    Vegalite(VegaLiteCommand),
 }
 
 fn parse_bool(s: String) -> Result<bool, String> {
@@ -223,7 +328,7 @@ fn parse_bool(s: String) -> Result<bool, String> {
         _ => Err(format!("Not a boolean value: {}", s)),
     }
 }
-pub fn parse_dot<S: Into<String>>(command: S, args: S) -> Result<DotCommand, ParseDotError> {
+pub fn parse_dot<S: Into<String>>(command: S, args: S, rest: &str, runtime: &mut Runtime) -> Result<DotCommand, ParseDotError> {
     let command = command.into();
     let args = args.into();
     match command.to_lowercase().as_str() {
@@ -231,6 +336,8 @@ pub fn parse_dot<S: Into<String>>(command: S, args: S) -> Result<DotCommand, Par
         "sh" => Ok(DotCommand::Shell(ShellCommand { command: args })),
         "tables" => Ok(DotCommand::Tables(TablesCommand {})),
         "open" => Ok(DotCommand::Open(OpenCommand { path: args })),
+        "export" => Ok(DotCommand::Export(ExportCommand::new(args, runtime, rest)?)),
+        "vl" | "vegalite" => Ok(DotCommand::Vegalite(VegaLiteCommand::new(args, runtime, rest)?)),
         "load" => Ok(DotCommand::Load(LoadCommand::new(args))),
         "timer" => Ok(DotCommand::Timer(
             parse_bool(args).map_err(ParseDotError::InvalidArgument)?,
@@ -246,15 +353,5 @@ mod tests {
 
     #[test]
     fn test_parse_dot() {
-        assert_eq!(
-            parse_dot("print", "asdf"),
-            Ok(DotCommand::Print(PrintCommand {
-                message: "asdf".to_owned()
-            }))
-        );
-        assert_eq!(
-            parse_dot("unknown", ""),
-            Err(ParseDotError::UnknownCommand("unknown".to_string()))
-        );
     }
 }

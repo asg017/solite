@@ -1,6 +1,7 @@
 use std::{collections::HashMap, env, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
+use solite_core::exporter::ExportFormat;
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -47,6 +48,19 @@ pub enum QueryFormat {
     Ndjson,
     Value,
     Clipboard,
+}
+
+impl Into<ExportFormat> for QueryFormat {
+    fn into(self) -> ExportFormat {
+        match self {
+            QueryFormat::Csv => ExportFormat::Csv,
+            QueryFormat::Tsv => ExportFormat::Tsv,
+            QueryFormat::Json => ExportFormat::Json,
+            QueryFormat::Ndjson => ExportFormat::Ndjson,
+            QueryFormat::Value => ExportFormat::Value,
+            QueryFormat::Clipboard => ExportFormat::Clipboard,
+        }
+    }
 }
 
 #[derive(Args, Debug)]

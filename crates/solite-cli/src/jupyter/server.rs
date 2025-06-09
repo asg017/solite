@@ -127,8 +127,8 @@ async fn handle_code(
     parent: &JupyterMessage,
 ) -> anyhow::Result<()> {
     loop {
-        match runtime.next_step() {
-            Ok(Some(step)) => match step.result {
+        match runtime.next_stepx() {
+            Some(Ok(step)) => match step.result {
                 StepResult::SqlStatement { stmt, .. } => match render_statementx(&stmt) {
                     Ok(tbl) => {
                         response
@@ -156,7 +156,15 @@ async fn handle_code(
                     }
                 },
                 StepResult::DotCommand(cmd) => match cmd {
-                    DotCommand::Print(_print_cmd) => todo!(),
+                    DotCommand::Print(print_cmd) => {
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Plain(print_cmd.message))
+                                    .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
+                    }
                     DotCommand::Shell(sh_cmd) => {
                         let rx = sh_cmd.execute();
                         let mut out = String::new();
@@ -219,27 +227,68 @@ async fn handle_code(
                     DotCommand::Tables(cmd) => {
                         cmd.execute(&runtime);
                     }
+                    DotCommand::Vegalite(mut vegalite_command) => match vegalite_command.execute() {
+                        Ok(data) => {
+                            
+                            response
+                              .send(ClearOutput { wait: true }.as_child_of(parent))
+                              .await;
+                            response
+                                .send(DisplayData::from(MediaType::VegaLiteV4(data)).as_child_of(parent))
+                                .await
+                                .unwrap();
+                            response
+                              .send(ClearOutput { wait: true }.as_child_of(parent))
+                              .await;
+                        }
+                        Err(_) => todo!(),
+                    },
+                    DotCommand::Export(mut export_command) => match export_command.execute() {
+                        Ok(()) => {
+                            response
+                                .send(
+                                    DisplayData::from(MediaType::Plain(format!(
+                                        "export successfully to {}",
+                                        export_command.target.to_string_lossy()
+                                    )))
+                                    .as_child_of(parent),
+                                )
+                                .await
+                                .unwrap();
+                        }
+                        Err(_) => todo!(),
+                    },
                 },
             },
-            Ok(None) => {
+            None => {
                 return Ok(());
             }
-            Err(error) => match error {
+            Some(Err(error)) => match error {
                 StepError::Prepare {
                     error,
                     file_name,
                     src,
                     offset,
                 } => {
-                    let error_string =
-                        crate::errors::report_error_string(file_name.as_str(), &src, &error, None);
+                    let error_string = crate::errors::report_error_string(
+                        file_name.as_str(),
+                        &src,
+                        &error,
+                        Some(offset),
+                    );
                     response
                         .send(DisplayData::from(MediaType::Plain(error_string)).as_child_of(parent))
                         .await
                         .unwrap();
                 }
                 StepError::ParseDot(error) => {
-                    todo!()
+                    response
+                        .send(
+                            DisplayData::from(MediaType::Plain(error.to_string()))
+                                .as_child_of(parent),
+                        )
+                        .await
+                        .unwrap();
                 }
             },
         }
@@ -424,13 +473,6 @@ impl SoliteKernel {
         self.iopub
             .send(DisplayData::from(vl4).as_child_of(parent))
             .await?;
-        //self.send_plaintext("<vegalite>", parent).await?;
-
-        //self.iopub
-        //    .send(DisplayData::from(MediaType::VegaLiteV6(json!({}))).as_child_of(parent))
-        //    .await?;
-
-        //self.io
         Ok(())
     }
 

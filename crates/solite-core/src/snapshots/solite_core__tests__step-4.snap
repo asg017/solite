@@ -1,0 +1,16 @@
+---
+source: crates/solite-core/src/lib.rs
+expression: step
+snapshot_kind: text
+---
+Ok:
+  preamble: "\n/* inline! */ "
+  result:
+    SqlStatement:
+      stmt: {}
+      raw_sql: select 4;
+  reference:
+    block_name: "[input]"
+    line_number: 7
+    column_number: 15
+    region: []

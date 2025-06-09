@@ -1,0 +1,15 @@
+---
+source: crates/solite-core/src/lib.rs
+expression: step
+snapshot_kind: text
+---
+Err:
+  Prepare:
+    file_name: "[input]"
+    src: "\n-- preamble1\nselect 1;\nselect 2;\n-- another preamble\nselect 3.1;select 3.2;\n/* inline! */ select 4;\n\n-- what!\nselect not_exist();"
+    offset: 111
+    error:
+      result_code: 1
+      code_description: SQL logic error
+      message: "no such function: not_exist"
+      offset: 7

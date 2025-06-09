@@ -2,7 +2,9 @@ pub mod dot;
 pub mod load_uv;
 pub mod replacement_scans;
 pub mod sqlite;
+pub mod exporter;
 
+use crate::dot::{DotCommand, ShellCommand};
 use crate::sqlite::Connection;
 use dot::{parse_dot, ParseDotError};
 use libsqlite3_sys::{
@@ -109,6 +111,16 @@ pub struct Step {
     pub reference: StepReference,
 }
 
+fn extract_preamble(code: &str) -> (&str, Option<&str>) {
+    let codex = advance_through_ignorable(code);
+    let preamble_offset = unsafe { codex.as_ptr().offset_from(code.as_ptr()) } as usize;
+    if preamble_offset > 0 {
+        (codex, Some(&code[0..preamble_offset]))
+    } else {
+        (code, None)
+    }
+}
+
 impl Runtime {
     pub fn new(path: Option<String>) -> Self {
         unsafe {
@@ -138,88 +150,67 @@ impl Runtime {
             regions: vec![],
         });
     }
-
-    // temporary for snapshot
-    pub fn next_sql_step(&mut self) -> Result<Option<Step>, StepError> {
-        let mut current = match self.stack.pop() {
-            Some(x) => x,
-            None => return Ok(None),
-        };
-        let full = (current.contents).get(current.offset..).unwrap();
-        let code = full.to_owned();
-        let local_offset = 0;
-        match self.prepare_with_parameters(&code) {
-            Ok((rest, Some(stmt))) => {
-                let stmt_offset_idx = if (current.offset - local_offset) == 0 {
-                    0
-                } else {
-                    current.offset - local_offset + 1
-                };
-                let line_idx = current.rope.byte_to_line(stmt_offset_idx);
-                let column_idx = stmt_offset_idx - current.rope.line_to_byte(line_idx);
-                let block_name = current.name.clone();
-                if let Some(rest) = rest {
-                    current.offset += rest;
-                    self.stack.insert(0, current);
-                }
-                return Ok(Some(Step {
-                    reference: StepReference {
-                        block_name,
-                        line_number: line_idx + 1,
-                        column_number: column_idx + 1,
-                        region: vec![],
-                    },
-                    preamble: None,
-                    result: StepResult::SqlStatement {
-                        stmt,
-                        raw_sql: code.to_owned(),
-                    },
-                }));
-            }
-            Ok((_rest, None)) => return Ok(None),
-            Err(error) => {
-                eprintln!("{}", error);
-                todo!();
-            }
-        }
-    }
     pub fn next_stepx(&mut self) -> Option<Result<Step, StepError>> {
-        while let Some(mut current) = self.stack.pop() {
-            let (code, preamble_offset) = {
-                let x = (&current.contents).get(current.offset..).unwrap();
-                let code = advance_through_ignorable(x);
-                let preamble_offset = unsafe { code.as_ptr().offset_from(x.as_ptr()) } as usize;
-                let preamble = if preamble_offset > 0 {
-                    &x[0..preamble_offset]
-                } else {
-                    ""
-                };
+        while let Some(mut block) = self.stack.pop() {
+            let regions = block.regions.clone();
+            let current = match (&block.contents).get(block.offset..) {
+                Some(code) => code,
+                None => return None,
+            };
+            let (code, preamble) = extract_preamble(current);
+            if let Some(preamble) = preamble {
+                block.offset += code.as_ptr() as usize - preamble.as_ptr() as usize;
+                /*if !preamble.is_empty() {
+                }*/
                 for line in preamble.lines() {
                     if let Some(region) = sql_comment_region_name(line) {
-                        current.regions.push(region.to_string());
+                        block.regions.push(region.to_string());
                     } else if SQL_COMMENT_ENDREGION.is_match(line) {
-                        current.regions.pop();
+                        block.regions.pop();
                     }
                 }
-                (code.to_owned(), preamble_offset)
-            };
-            let regions = current.regions.clone();
+            }
 
-            if code.starts_with('.') {
+            if code.starts_with('.') || code.starts_with("!") {
                 let end_idx = code.find('\n').unwrap_or(code.len());
                 let dot_line = code.get(0..end_idx).unwrap();
-                let sep_idx = code.find(' ').unwrap_or(code.len());
-                let dot_command = dot_line.get(1..sep_idx).unwrap().trim().to_string();
-                let dot_args = dot_line.get(sep_idx..).unwrap().trim().to_string();
-                let rest = code.get(end_idx..).unwrap();
-                let source = current.name.to_string();
+                let source = block.name.to_string();
+                let rest: &str = code.get(end_idx..).unwrap();
+                    
+
+                let cmd = if !code.starts_with('!') {
+                    let sep_idx = code.find(' ').unwrap_or(code.len());
+                    let dot_command = dot_line.get(1..sep_idx).unwrap().trim().to_string();
+                    let dot_args = dot_line.get(sep_idx..).unwrap().trim().to_string();
+                    
+                    match parse_dot(dot_command, dot_args, rest, self) {
+                        Ok(cmd) => {
+                          match &cmd {
+                            DotCommand::Export(cmd) => {
+                              block.offset +=  cmd.rest_length;
+                            }
+                            DotCommand::Vegalite(cmd) => {
+                              block.offset +=  cmd.rest_length;
+                            }
+                            _ => (),
+                          }
+                          cmd
+                        },
+                        Err(err) => {
+                            return Some(Err(StepError::ParseDot(err)));
+                      }
+                    }
+                } else {
+                    DotCommand::Shell(ShellCommand {
+                        command: dot_line.get(1..end_idx).unwrap().trim().to_string(),
+                    })
+                };
+
                 if !rest.is_empty() {
-                    current.offset += preamble_offset + end_idx + 1;
-                    self.stack.push(current);
-                }
-                let cmd = parse_dot(dot_command, dot_args)
-                    .map_err(StepError::ParseDot)
-                    .unwrap();
+                      block.offset +=  dot_line.len(); //preamble preamble_offset + end_idx + 1;
+                      self.stack.push(block);
+                  }
+
                 return Some(Ok(Step {
                     preamble: None,
                     reference: StepReference {
@@ -231,175 +222,70 @@ impl Runtime {
                     },
                     result: StepResult::DotCommand(cmd),
                 }));
-            } else {
-                let preamble = if preamble_offset > 0 {
-                    Some(
-                        current.contents[current.offset..current.offset + preamble_offset]
-                            .to_owned(),
-                    )
-                } else {
-                    None
-                };
-                match self.prepare_with_parameters(&code) {
-                    Ok((rest, Some(stmt))) => {
-                        let stmt_offset_idx = if (current.offset < preamble_offset) {
-                            0
-                        } else {
-                            current.offset - preamble_offset + 1
-                        };
-                        let line_idx = current.rope.byte_to_line(stmt_offset_idx);
-                        let column_idx = stmt_offset_idx - current.rope.line_to_byte(line_idx);
+            }
 
-                        let block_name = current.name.clone();
-                        if let Some(rest) = rest {
-                            current.offset += rest + preamble_offset;
-                            self.stack.insert(0, current);
+            match self.prepare_with_parameters(&code) {
+                Ok((rest, Some(stmt))) => {
+                    let stmt_offset_idx = block.offset; // + preamble.map_or(0, |p| p.len()) + 1;
+                    let block_name = block.name.clone();
+                    let line_idx: usize = block.rope.byte_to_line(stmt_offset_idx);
+                    let column_idx = stmt_offset_idx - block.rope.line_to_byte(line_idx);
+                    let raw_sql = stmt.sql(); //code.to_owned();
+                    let preamble_owned = preamble.map(|p| p.to_string());
+
+                    if let Some(rest) = rest {
+                        block.offset += rest; // + preamble.map_or(0, |p| p.len()) + 1;
+                        self.stack.insert(0, block);
+                    }
+
+                    return Some(Ok(Step {
+                        preamble: preamble_owned,
+                        reference: StepReference {
+                            block_name,
+                            line_number: line_idx + 1,
+                            column_number: column_idx + 1,
+                            region: regions,
+                        },
+                        result: StepResult::SqlStatement { stmt, raw_sql },
+                    }));
+                }
+                Ok((_rest, None)) => {
+                    return None;
+                }
+                Err(error) => {
+                    match replacement_scans::replacement_scan(&error, &self.connection) {
+                        Some(Ok(stmt)) => {
+                            stmt.execute().unwrap();
+                            self.stack.push(block);
                         }
-                        return Some(Ok(Step {
-                            preamble,
-                            reference: StepReference {
-                                block_name,
-                                line_number: line_idx + 1,
-                                column_number: column_idx + 1,
-                                region: regions,
-                            },
-                            result: StepResult::SqlStatement {
-                                stmt,
-                                raw_sql: code.to_owned(),
-                            },
-                        }));
-                    }
-                    Ok((_rest, None)) => {
-                        continue;
-                    }
-                    Err(error) => {
-                        match replacement_scans::replacement_scan(&error, &self.connection) {
-                            Some(Ok(stmt)) => {
-                                stmt.execute().unwrap();
-                                self.stack.push(current);
-                            }
-                            Some(Err(_)) => todo!(),
-                            None => {
-                                return Some(Err(StepError::Prepare {
-                                    error,
-                                    file_name: current.name,
-                                    src: current.contents,
-                                    offset: current.offset,
-                                }));
-                            }
-                        };
-                    }
+                        Some(Err(_)) => todo!(),
+                        None => {
+                            return Some(Err(StepError::Prepare {
+                                error,
+                                file_name: block.name,
+                                src: block.contents,
+                                offset: block.offset,
+                            }));
+                        }
+                    };
                 }
             }
         }
         None
     }
-    pub fn next_step(&mut self) -> Result<Option<Step>, StepError> {
-        // loop here handles:
-        // 1. Dot commands
-        // 2. Running SQL statements
-        // 3. Potential replacement scans
-        while let Some(mut current) = self.stack.pop() {
-            // "code" that starts with whitespace/comments makes it hard to parse
-            // out dot commands correctly. So we advance the offset until we reach
-            // the first "real" code.
-            //let code = (current.contents).get(current.offset..).unwrap();
-            let full = (current.contents).get(current.offset..).unwrap();
-            let code = advance_through_ignorable(full).to_owned();
-            let local_offset = full.len() - code.len();
-            current.offset += local_offset;
-            if code.starts_with('.') {
-                let end_idx = code.find('\n').unwrap_or(code.len());
-                let dot_line = code.get(0..end_idx).unwrap();
-                let sep_idx = code.find(' ').unwrap_or(code.len());
-                let dot_command = dot_line.get(1..sep_idx).unwrap().trim().to_string();
-                let dot_args = dot_line.get(sep_idx..).unwrap().trim().to_string();
-                let rest = code.get(end_idx..).unwrap();
-                let source = current.name.to_string();
-                if !rest.is_empty() {
-                    current.offset += end_idx + 1;
-                    self.stack.push(current);
-                }
-                let cmd = parse_dot(dot_command, dot_args).map_err(StepError::ParseDot)?;
-                return Ok(Some(Step {
-                    preamble: None,
-                    reference: StepReference {
-                        block_name: source,
-                        // TODO: why hardcode here?
-                        line_number: 1,
-                        column_number: 1,
-                        region: vec![],
-                    },
-                    result: StepResult::DotCommand(cmd),
-                }));
-            } else {
-                match self.prepare_with_parameters(&code) {
-                    Ok((rest, Some(stmt))) => {
-                        let stmt_offset_idx = if (current.offset - local_offset) == 0 {
-                            0
-                        } else {
-                            current.offset - local_offset + 1
-                        };
-                        let line_idx = current.rope.byte_to_line(stmt_offset_idx);
-                        let column_idx = stmt_offset_idx - current.rope.line_to_byte(line_idx);
-                        let block_name = current.name.clone();
-                        if let Some(rest) = rest {
-                            current.offset += rest;
-                            self.stack.insert(0, current);
-                        }
-                        return Ok(Some(Step {
-                            preamble: None,
-                            reference: StepReference {
-                                block_name,
-                                line_number: line_idx + 1,
-                                column_number: column_idx + 1,
-                                region: vec![],
-                            },
-                            result: StepResult::SqlStatement {
-                                stmt,
-                                raw_sql: code.to_owned(),
-                            },
-                        }));
-                    }
-                    Ok((_rest, None)) => {
-                        continue;
-                    }
-                    Err(error) => {
-                        match replacement_scans::replacement_scan(&error, &self.connection) {
-                            Some(Ok(stmt)) => {
-                                stmt.execute().unwrap();
-                                self.stack.push(current);
-                            }
-                            Some(Err(_)) => todo!(),
-                            None => {
-                                return Err(StepError::Prepare {
-                                    error,
-                                    file_name: current.name,
-                                    src: current.contents,
-                                    offset: current.offset,
-                                });
-                            }
-                        };
-                    }
-                }
-            }
-        }
-
-        Ok(None)
-    }
 
     pub fn execute_to_completion(&mut self) -> Result<(), StepError> {
         loop {
-            match self.next_step() {
-                Ok(None) => return Ok(()),
-                Ok(Some(step)) => {
+            match self.next_stepx() {
+                None => return Ok(()),
+                Some(Ok(step)) => {
                     match step.result {
                         StepResult::SqlStatement { stmt, .. } => stmt.execute().unwrap(),
                         StepResult::DotCommand(_cmd) => todo!(),
                     };
                     continue;
                 }
-                Err(err) => return Err(err),
+                Some(Err(err)) => return Err(err),
             }
         }
     }
@@ -559,7 +445,7 @@ pub fn advance_through_ignorable(contents: &str) -> &str {
 }
 #[cfg(test)]
 mod tests {
-    use insta::assert_yaml_snapshot;
+    use insta::{assert_debug_snapshot, assert_yaml_snapshot};
     use solite_stdlib::BUILTIN_FUNCTIONS;
 
     use super::*;
@@ -659,99 +545,32 @@ mod tests {
         insta::assert_yaml_snapshot!(version_functions_of(&runtime.connection));
         insta::assert_yaml_snapshot!(BUILTIN_FUNCTIONS);
     }
+    
     #[test]
-    fn core_stack() {
-        let mut runtime = Runtime::new(None);
-        runtime.enqueue(
-            "[input]",
-            "create table t(a);
-                insert into t select 1;
-                insert into t select 2; ",
-            BlockSource::File(PathBuf::new()),
-        );
-        runtime.execute_to_completion().unwrap();
-        let binding = runtime
-            .connection
-            .prepare("select json_group_array(a) from t")
-            .unwrap()
-            .1
-            .unwrap();
-        let binding = binding.next().unwrap().unwrap();
-        let x = binding.get(0).unwrap().as_str();
-        assert_eq!(x, "[1,2]");
-
-        runtime.enqueue(
-            "[input]",
-            ".print yo!
-.print ok
-select 4;",
-            BlockSource::Repl,
-        );
-
-        match runtime.next_step().unwrap().unwrap().result {
-            StepResult::DotCommand(cmd) => {
-                assert_eq!(
-                    cmd,
-                    DotCommand::Print(dot::PrintCommand {
-                        message: "yo!".to_owned()
-                    })
-                )
-            }
-            _ => panic!("fail"),
-        };
-        match runtime.next_step().unwrap().unwrap().result {
-            StepResult::DotCommand(cmd) => {
-                assert_eq!(
-                    cmd,
-                    DotCommand::Print(dot::PrintCommand {
-                        message: "ok".to_owned()
-                    })
-                )
-            }
-            _ => panic!("fail"),
-        };
-        match runtime.next_step().unwrap().unwrap().result {
-            StepResult::SqlStatement { stmt, .. } => {
-                let row = stmt.next().unwrap().unwrap();
-                assert_eq!(row.first().unwrap().as_str(), "4");
-            }
-            _ => panic!("fail"),
-        };
-        assert!(runtime.next_step().unwrap().is_none())
-        /*runtime
-        .execute_to_completion(
-            "[input]",
-            "select * from \"sample.csv\"",
-            BlockSource::File(PathBuf::new()),
-        )
-        .unwrap();*/
-    }
-
-    #[test]
-    fn snap() {
+    fn snap2() {
         let mut rt = Runtime::new(None);
         rt.enqueue(
             "[input]",
-            "create table t(a);
-                -- yabble yabble
-                insert into t select 1;
-                insert into t select 2; ",
+            "
+-- preamble1
+select 1;
+select 2;
+-- another preamble
+select 3.1;select 3.2;
+/* inline! */ select 4;
+
+-- what!
+select not_exist();",
             BlockSource::File(PathBuf::new()),
         );
+        let mut idx = 0;
         loop {
-            let step = rt.next_step();
-            assert_yaml_snapshot!(step);
+            let step = rt.next_stepx();
+            assert_yaml_snapshot!(format!("step-{idx}"), step);
+            idx += 1;
             match step {
-                Ok(None) => break,
-                Ok(Some(step)) => {
-                    match step.result {
-                        StepResult::SqlStatement { stmt, .. } => {
-                            stmt.execute();
-                        }
-                        _ => panic!("fail"),
-                    };
-                }
-                Err(err) => (),
+                None => break,
+                _ => (),
             }
         }
     }

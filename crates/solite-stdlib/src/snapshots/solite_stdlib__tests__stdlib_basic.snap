@@ -1,5 +1,5 @@
 ---
-source: solite-stdlib/src/lib.rs
+source: crates/solite-stdlib/src/lib.rs
 expression: base_functions
 snapshot_kind: text
 ---
@@ -160,6 +160,8 @@ snapshot_kind: text
 - typeof
 - unhex
 - unicode
+- unistr
+- unistr_quote
 - unixepoch
 - unlikely
 - upper

@@ -4,8 +4,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const VERSION: &str = "3.49.1";
-const AMALGAMATION: (&str, &str) = ("2025", "3490100");
+const VERSION: &str = "3.50.1";
+const AMALGAMATION: (&str, &str) = ("2025", "3500100");
 
 fn generate_builtins() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();

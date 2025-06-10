@@ -1,5 +1,5 @@
 ---
-source: solite-core/src/lib.rs
+source: crates/solite-core/src/lib.rs
 expression: functions_of(&runtime.connection)
 snapshot_kind: text
 ---
@@ -231,6 +231,8 @@ snapshot_kind: text
 - ulid_with_prefix
 - unhex
 - unicode
+- unistr
+- unistr_quote
 - unixepoch
 - unlikely
 - upper

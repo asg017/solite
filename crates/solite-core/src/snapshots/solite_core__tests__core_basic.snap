@@ -231,6 +231,8 @@ snapshot_kind: text
 - ulid_with_prefix
 - unhex
 - unicode
+- unistr
+- unistr_quote
 - unixepoch
 - unlikely
 - upper

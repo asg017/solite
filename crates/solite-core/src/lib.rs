@@ -535,7 +535,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             stmt.next().unwrap().unwrap().get(0).unwrap().as_str(),
-            "3.49.1"
+            "3.50.1"
         );
         insta::assert_yaml_snapshot!(functions_of(&runtime.connection));
         insta::assert_yaml_snapshot!(modules_of(&runtime.connection));

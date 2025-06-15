@@ -12,4 +12,4 @@ snapshot_kind: text
 - ulid_version == v0.2.2-alpha.1
 - url_version == xv0.1.0
 - vec_version == v0.1.6
-- xsv_version == v0.2.1-alpha.11
+- xsv_version == v0.2.1-alpha.13

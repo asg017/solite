@@ -47,6 +47,7 @@ statistical = "1.0.0"
 runtimelib = { version = "0.25.0", features = ["tokio-runtime"] }
 jupyter-protocol = "0.6.0"
 nbformat = "0.11.0"
+html-builder = "0.5.1"
 
 
 #[features]

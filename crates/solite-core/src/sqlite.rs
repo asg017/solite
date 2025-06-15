@@ -24,30 +24,30 @@ pub struct SQLiteError {
 }
 
 impl SQLiteError {
-  pub fn from_latest(db: *mut sqlite3, result_code: i32) -> Self {
+    pub fn from_latest(db: *mut sqlite3, result_code: i32) -> Self {
         let message = unsafe {
-        let message = sqlite3_errmsg(db);
-        let message = CStr::from_ptr(message);
-        message.to_string_lossy().to_string()
-      };
+            let message = sqlite3_errmsg(db);
+            let message = CStr::from_ptr(message);
+            message.to_string_lossy().to_string()
+        };
 
-      let code_description = unsafe {
-          let code_description = sqlite3_errstr(result_code);
-          let code_description = CStr::from_ptr(code_description);
-          code_description.to_string_lossy().to_string()
-      };
-      let offset = unsafe {
-          match sqlite3_error_offset(db) {
-              -1 => None,
-              offset => Some(offset as usize),
-          }
-      };
-      Self {
-          result_code,
-          code_description,
-          message,
-          offset,
-      }
+        let code_description = unsafe {
+            let code_description = sqlite3_errstr(result_code);
+            let code_description = CStr::from_ptr(code_description);
+            code_description.to_string_lossy().to_string()
+        };
+        let offset = unsafe {
+            match sqlite3_error_offset(db) {
+                -1 => None,
+                offset => Some(offset as usize),
+            }
+        };
+        Self {
+            result_code,
+            code_description,
+            message,
+            offset,
+        }
     }
 }
 
@@ -60,7 +60,6 @@ impl fmt::Display for SQLiteError {
         )
     }
 }
-
 
 fn escape_identifier(identifer: &str) -> String {
     let n = identifer.len();
@@ -196,6 +195,13 @@ impl<'a> Row<'a> {
     }
 }
 
+pub struct ColumnMeta {
+    pub name: String,
+    pub origin_database: Option<String>,
+    pub origin_table: Option<String>,
+    pub origin_column: Option<String>,
+    pub decltype: Option<String>,
+}
 /// https://www.sqlite.org/c3ref/stmt.html
 #[derive(Serialize, Debug)]
 pub struct Statement {
@@ -234,6 +240,37 @@ impl Statement {
                 columns.push(s.to_str()?.to_string());
             }
             Ok(columns)
+        }
+    }
+
+    pub fn column_meta(&self) -> Vec<ColumnMeta> {
+        unsafe {
+            let mut columns = vec![];
+            let n = sqlite3_column_count(self.statement);
+            for i in 0..n {
+                let name = CStr::from_ptr(sqlite3_column_name(self.statement, i));
+                let origin_database = sqlite3_column_database_name(self.statement, i);
+                let origin_table = sqlite3_column_table_name(self.statement, i);
+                let origin_column = sqlite3_column_origin_name(self.statement, i);
+
+                let decltype = sqlite3_column_decltype(self.statement, i);
+                columns.push(ColumnMeta {
+                    name: name.to_string_lossy().to_string(),
+                    origin_database: origin_database
+                        .as_ref()
+                        .map(|s| CStr::from_ptr(s).to_string_lossy().to_string()),
+                    origin_table: origin_table
+                        .as_ref()
+                        .map(|s| CStr::from_ptr(s).to_string_lossy().to_string()),
+                    origin_column: origin_column
+                        .as_ref()
+                        .map(|s| CStr::from_ptr(s).to_string_lossy().to_string()),
+                    decltype: decltype
+                        .as_ref()
+                        .map(|s| CStr::from_ptr(s).to_string_lossy().to_string()),
+                });
+            }
+            columns
         }
     }
     pub fn next(&self) -> Result<Option<Vec<ValueRefX>>, SQLiteError> {
@@ -617,7 +654,6 @@ impl Drop for Connection {
         unsafe { sqlite3_close(self.connection) };
     }
 }
-
 
 /// https://www.sqlite.org/c3ref/complete.html
 pub fn complete(sql: &str) -> bool {

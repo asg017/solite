@@ -179,7 +179,7 @@ impl Runtime {
                     
 
                 let cmd = if !code.starts_with('!') {
-                    let sep_idx = code.find(' ').unwrap_or(code.len());
+                    let sep_idx = dot_line.find(' ').unwrap_or(dot_line.len());
                     let dot_command = dot_line.get(1..sep_idx).unwrap().trim().to_string();
                     let dot_args = dot_line.get(sep_idx..).unwrap().trim().to_string();
                     
@@ -538,7 +538,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             stmt.next().unwrap().unwrap().get(0).unwrap().as_str(),
-            "3.49.1"
+            "3.50.1"
         );
         insta::assert_yaml_snapshot!(functions_of(&runtime.connection));
         insta::assert_yaml_snapshot!(modules_of(&runtime.connection));

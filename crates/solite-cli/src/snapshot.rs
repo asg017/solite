@@ -607,7 +607,7 @@ fn snapshot_file(state: &mut SnapshotState, script: &PathBuf) -> Result<(), ()> 
                             state.results.push(result);
                         }
                     } else {
-                        println!("{}", &snapshot_path.display());
+                        println!("Reviewing {} from {}", &snapshot_path.display(), step.reference);
                         let result = if state.is_review {
                             print_diff("", &snapshot_contents);
                             print_decision();
@@ -685,6 +685,7 @@ fn snapshot_file(state: &mut SnapshotState, script: &PathBuf) -> Result<(), ()> 
                     offset,
                 } => {
                     crate::errors::report_error(file_name.as_str(), &src, &error, Some(offset));
+                    return Err(());
                 }
                 StepError::ParseDot(_error) => {
                     todo!("no dot")

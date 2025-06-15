@@ -1,5 +1,5 @@
-use crate::jupyter::html::html_escape;
 use anyhow::{Context as _, Result};
+use html_builder::*;
 use jupyter_protocol::{
     datatable::{TableSchema, TableSchemaField},
     ClearOutput, CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput,
@@ -11,9 +11,10 @@ use runtimelib::{KernelIoPubConnection, KernelShellConnection};
 use serde_json::json;
 use solite_core::{
     dot::{DotCommand, LoadCommandSource},
-    sqlite::{self, Statement, ValueRefXValue},
+    sqlite::{self, ColumnMeta, Statement, ValueRefX, ValueRefXValue},
     Runtime, StepError, StepResult,
 };
+use std::fmt::Write;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -23,101 +24,132 @@ pub struct UiResponse {
     html: Option<String>,
 }
 
-pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> {
-    //let mut text = String::new();
-    let mut rows = vec![];
-    let mut html = String::new();
-
-    html.push_str("<div>\n");
-    html.push_str("<style>td {text-align: right;}</style>");
-    html.push_str("<table>\n");
-    html.push_str("<thead>\n");
-    html.push_str("<tr style=\"text-align: center;\">\n");
-    let column_names = stmt
-        .column_names()
-        .map_err(|_e| anyhow::anyhow!("Could not get column names"))?;
-    let column_count = column_names.len();
-    let mut row_count = 0;
-    for column in &column_names {
-        html.push_str("<th>\n");
-        let cleaned = html_escape(column)?;
-        html.push_str(cleaned.as_str());
-        html.push_str("\n</th>\n");
+fn html_tr_from_row<'a>(tbody: &'a mut Node, row: &[ValueRefX]) -> anyhow::Result<Node<'a>> {
+    let mut tr = tbody.tr();
+    for value in row {
+        //tr.
+        let raw: String = match value.value {
+            ValueRefXValue::Null => "".to_owned(),
+            ValueRefXValue::Int(value) => value.to_string(),
+            ValueRefXValue::Double(value) => value.to_string(),
+            ValueRefXValue::Text(value) => unsafe { String::from_utf8_unchecked(value.to_vec()) },
+            ValueRefXValue::Blob(value) => format!("Blob<{}>", value.len()),
+        };
+        let style: String = match value.value {
+            ValueRefXValue::Double(_) | ValueRefXValue::Int(_) | ValueRefXValue::Null => {
+                "".to_owned()
+            }
+            ValueRefXValue::Text(_) => match value.subtype() {
+                Some(sqlite::JSON_SUBTYPE) => "color: red".to_owned(),
+                Some(_) | None => "text-align: left".to_owned(),
+            },
+            ValueRefXValue::Blob(_) => match value.subtype() {
+                Some(223) | Some(224) | Some(225) => "color: blue".to_owned(),
+                Some(_) | None => "".to_owned(),
+            },
+        };
+        let mut td = tr.td().attr(format!("style=\"{}\"", style).as_str());
+        writeln!(td, "{}", raw)?;
     }
-    html.push_str("</tr>\n");
-    html.push_str("</thead>\n");
+    Ok(tr)
+}
 
-    html.push_str("<tbody>\n");
+fn html_thead_from_stmt(thead: &mut Node, columns: &Vec<ColumnMeta>) -> anyhow::Result<()> {
+    let mut tr = thead.tr().attr("style=\"text-align: center;\"");
+    for column in columns {
+        let title = format!(
+            "{} {}",
+            // column type
+            match column.decltype {
+                Some(ref t) => format!("{t} • "),
+                None => "".to_string(),
+            },
+            // "db.table.column"
+            format!(
+                "{}{}{}",
+                match &column.origin_database {
+                    None => "".to_string(),
+                    Some(db) =>
+                        if db == "main" {
+                            "".to_string()
+                        } else {
+                            format!("{db}.")
+                        },
+                },
+                match &column.origin_table {
+                    None => "".to_string(),
+                    Some(table) => format!("{table}."),
+                },
+                column.origin_column.as_ref().map_or("", |v| v)
+            )
+        )
+        .replace("\"", "&quot;");
+        let mut th = tr.th().attr(format!("title=\"{}\"", title).as_str());
+        writeln!(th, "{}", column.name)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> {
+    let mut txt_rows = vec![];
+
+    let mut buf = Buffer::new();
+    let mut htmlx = buf.html();
+
+    let mut root = htmlx.div();
+    writeln!(root.style(), "td {{text-align: right;}}")?;
+    let mut table = root.table();
+
+    let columns = stmt.column_meta();
+    html_thead_from_stmt(&mut table.thead(), &columns)?;
+
+    let mut row_count = 0;
+    let column_count = columns.len();
+
+    let mut tbody = table.tbody();
     loop {
         match stmt.next() {
             Ok(result) => match result {
                 Some(row) => {
                     row_count += 1;
-
-                    rows.push(crate::ui::ui_row(&row, false));
-
-                    html.push_str("<tr>\n");
-                    for value in row {
-                        let raw: String = match value.value {
-                            ValueRefXValue::Null => "".to_owned(),
-                            ValueRefXValue::Int(value) => value.to_string(),
-                            ValueRefXValue::Double(value) => value.to_string(),
-                            ValueRefXValue::Text(value) => unsafe {
-                                String::from_utf8_unchecked(value.to_vec())
-                            },
-                            ValueRefXValue::Blob(value) => format!("Blob<{}>", value.len()),
-                        };
-                        let style: String = match value.value {
-                            ValueRefXValue::Double(_)
-                            | ValueRefXValue::Int(_)
-                            | ValueRefXValue::Null => "".to_owned(),
-                            ValueRefXValue::Text(_) => match value.subtype() {
-                                Some(sqlite::JSON_SUBTYPE) => "style=\"color: red\"".to_owned(),
-                                Some(_) | None => "".to_owned(),
-                            },
-                            ValueRefXValue::Blob(_) => match value.subtype() {
-                                Some(223) | Some(224) | Some(225) => {
-                                    "style=\"color: blue\"".to_owned()
-                                }
-                                Some(_) | None => "".to_owned(),
-                            },
-                        };
-                        //let raw = value.as_str().to_string();
-                        let value = html_escape(&raw)?;
-
-                        html.push_str(format!("<td {}>\n", style).as_str());
-                        html.push_str(value.as_str());
-                        html.push_str("\n</td>\n");
+                    if row_count <= 20 {
+                      txt_rows.push(crate::ui::ui_row(&row, false));
+                        html_tr_from_row(&mut tbody, &row)?;
                     }
-                    html.push_str("</tr>\n");
                 }
                 None => break,
             },
             Err(error) => return Err(anyhow::anyhow!(error)),
         }
     }
-    html.push_str("</tbody>\n");
-    html.push_str("</table>\n");
 
-    html.push_str("<div>\n");
-    html.push_str(
-        format!(
-            "{} column{} \u{00d7} {} row{}",
-            column_count,
-            if column_count < 2 { "" } else { "s" },
-            row_count,
-            if row_count < 2 { "" } else { "s" },
-        )
-        .as_str(),
-    );
-    html.push_str("\n</div>\n");
-    html.push_str("</div>\n");
+    // TODO: warning for text version as well
+    if row_count > 20 {
+        writeln!(
+            tbody
+                .tr()
+                .attr("style=\"background: red\"")
+                .td()
+                .attr(format!("colspan=\"{column_count}\"").as_str()),
+            "WARNING"
+        )?;
+    }
+
+    writeln!(
+        root.div(),
+        "{} column{} \u{00d7} {} row{}",
+        column_count,
+        if column_count < 2 { "" } else { "s" },
+        row_count,
+        if row_count < 2 { "" } else { "s" },
+    )?;
 
     Ok(UiResponse {
-        text: crate::ui::ui_table(column_names, rows)
+        text: crate::ui::ui_table(columns.iter().map(|c| c.name.clone()).collect(), txt_rows)
             .display()?
             .to_string(),
-        html: Some(html),
+        html: Some(buf.finish()),
     })
 }
 
@@ -227,22 +259,28 @@ async fn handle_code(
                     DotCommand::Tables(cmd) => {
                         cmd.execute(&runtime);
                     }
-                    DotCommand::Vegalite(mut vegalite_command) => match vegalite_command.execute() {
-                        Ok(data) => {
-                            
-                            response
-                              .send(ClearOutput { wait: true }.as_child_of(parent))
-                              .await;
-                            response
-                                .send(DisplayData::from(MediaType::VegaLiteV4(data)).as_child_of(parent))
-                                .await
-                                .unwrap();
-                            response
-                              .send(ClearOutput { wait: true }.as_child_of(parent))
-                              .await;
+                    DotCommand::Vegalite(mut vegalite_command) => {
+                        match vegalite_command.execute() {
+                            Ok(data) => {
+                                response
+                                    .send(ClearOutput { wait: true }.as_child_of(parent))
+                                    .await
+                                    .unwrap();
+                                response
+                                    .send(
+                                        DisplayData::from(MediaType::VegaLiteV4(data))
+                                            .as_child_of(parent),
+                                    )
+                                    .await
+                                    .unwrap();
+                                response
+                                    .send(ClearOutput { wait: true }.as_child_of(parent))
+                                    .await
+                                    .unwrap();
+                            }
+                            Err(_) => todo!(),
                         }
-                        Err(_) => todo!(),
-                    },
+                    }
                     DotCommand::Export(mut export_command) => match export_command.execute() {
                         Ok(()) => {
                             response

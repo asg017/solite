@@ -1143,6 +1143,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "html-builder"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9153fa5f4adf77e28538b2b98b680bb89435ec3f9861e58daa540effec5a898e"
+dependencies = [
+ "html-escape",
+]
+
+[[package]]
+name = "html-escape"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d1ad449764d627e22bfd7cd5e8868264fc9236e07c752972b4080cd351cb476"
+dependencies = [
+ "utf8-width",
+]
+
+[[package]]
 name = "http"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2661,6 +2679,7 @@ dependencies = [
  "crossterm",
  "futures",
  "hex",
+ "html-builder",
  "indicatif",
  "insta",
  "jiff",
@@ -2842,8 +2861,8 @@ dependencies = [
 
 [[package]]
 name = "sqlite-xsv"
-version = "0.2.1-alpha.11"
-source = "git+https://github.com/asg017/sqlite-xsv.git?branch=main#02949c0ecb074885413904b823fa8061c14c3478"
+version = "0.2.1-alpha.13"
+source = "git+https://github.com/asg017/sqlite-xsv.git?branch=main#9b53544869a0f5ccc2938faf8564876b6d8d645e"
 dependencies = [
  "cbindgen",
  "csv",
@@ -3248,6 +3267,12 @@ dependencies = [
  "idna",
  "percent-encoding",
 ]
+
+[[package]]
+name = "utf8-width"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86bd8d4e895da8537e5315b8254664e6b769c4ff3db18321b297a1e7004392e3"
 
 [[package]]
 name = "utf8parse"

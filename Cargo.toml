@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.dependencies]
-libsqlite3-sys = {version="0.26.0", features=["bundled"]}
+libsqlite3-sys = {version="0.26.0"}
 insta = { version = "1.38.0", features = ["yaml"] }
 rusqlite = {version="0.29", features=["bundled"]}
 indicatif = "0.17"

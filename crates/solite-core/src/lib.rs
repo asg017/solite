@@ -123,9 +123,6 @@ fn extract_preamble(code: &str) -> (&str, Option<&str>) {
 
 impl Runtime {
     pub fn new(path: Option<String>) -> Self {
-        unsafe {
-            //libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(solite_stdlib_init as *const (),)));
-        }
         let connection = match path {
             Some(path) => Connection::open(path.as_str()).unwrap(),
             None => Connection::open_in_memory().unwrap(),

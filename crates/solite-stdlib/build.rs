@@ -131,6 +131,10 @@ fn main() {
         .flag("-DSQLITE_ENABLE_COLUMN_METADATA ")
         .warnings(false)
         .compile("sqlite");
+    
+    // hopefully libsqlite3-sys finds this to fix windows builds?
+    env::set_var("SQLITE3_LIB_DIR", env::var("OUT_DIR").unwrap());
+    env::set_var("SQLITE3_INCLUDE_DIR", amalgammation_src_dir.clone());
 
     let sqlite_org_extensions = vec![
         "base64", // "base85", // TODO re-add base85 at some point

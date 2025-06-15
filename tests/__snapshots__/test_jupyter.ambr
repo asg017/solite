@@ -4,27 +4,32 @@
 # ---
 # name: test_hello.1
   '''
-  <div>
-  <style>td {text-align: right;}</style><table>
-  <thead>
-  <tr style="text-align: center;">
-  <th>
+  <html>
+   <div>
+    <style>
+  td {text-align: right;}
+    </style>
+    <table>
+     <thead>
+      <tr style="text-align: center;">
+       <th title=" ">
   1 + 1
-  </th>
-  </tr>
-  </thead>
-  <tbody>
-  <tr>
-  <td >
+       </th>
+      </tr>
+     </thead>
+     <tbody>
+      <tr>
+       <td style="">
   2
-  </td>
-  </tr>
-  </tbody>
-  </table>
-  <div>
+       </td>
+      </tr>
+     </tbody>
+    </table>
+    <div>
   1 column × 1 row
-  </div>
-  </div>
+    </div>
+   </div>
+  </html>
   
   '''
 # ---

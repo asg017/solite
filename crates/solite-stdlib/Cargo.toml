@@ -10,7 +10,7 @@ sqlite-ulid = "0.2.2-alpha.1"
 sqlite-regex = "0.2.4-alpha.1"
 sqlite-http = {git="https://github.com/asg017/sqlite-http.git", rev="9a738f796ae72513fa150c9c816a8b66da7f50d1"}
 sqlite-path = {git="https://github.com/asg017/sqlite-path.git", branch="rust"}
-sqlite-xsv = {git="https://github.com/asg017/sqlite-xsv.git", branch="main"}
+sqlite-xsv = {git="https://github.com/asg017/sqlite-xsv.git", rev="02949c0ecb074885413904b823fa8061c14c3478"}
 sqlite-url = {git="https://github.com/asg017/sqlite-url.git", rev="b0d6757139d0b462768aa5e382333437afc2e6d2"}
 sqlite-str = {git="https://github.com/asg017/sqlite-str.git", rev="5b41ba22ec4bbac7552446eda38faba00a74d528"}
 sqlite-vec = "0.1.6"

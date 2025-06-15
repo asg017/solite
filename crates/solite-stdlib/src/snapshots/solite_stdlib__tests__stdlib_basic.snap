@@ -160,8 +160,6 @@ snapshot_kind: text
 - typeof
 - unhex
 - unicode
-- unistr
-- unistr_quote
 - unixepoch
 - unlikely
 - upper

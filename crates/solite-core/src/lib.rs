@@ -1,5 +1,4 @@
 pub mod dot;
-pub mod load_uv;
 pub mod replacement_scans;
 pub mod sqlite;
 pub mod exporter;
@@ -104,7 +103,7 @@ pub enum StepResult {
 #[derive(Serialize, Debug)]
 
 pub struct Step {
-    preamble: Option<String>,
+    pub preamble: Option<String>,
     /// Dot command or SQL
     pub result: StepResult,
 
@@ -187,6 +186,9 @@ impl Runtime {
                               block.offset +=  cmd.rest_length;
                             }
                             DotCommand::Vegalite(cmd) => {
+                              block.offset +=  cmd.rest_length;
+                            }
+                            DotCommand::Bench(cmd) => {
                               block.offset +=  cmd.rest_length;
                             }
                             _ => (),
@@ -442,11 +444,11 @@ pub fn advance_through_ignorable(contents: &str) -> &str {
 }
 #[cfg(test)]
 mod tests {
-    use insta::{assert_debug_snapshot, assert_yaml_snapshot};
+    use insta::assert_yaml_snapshot;
     use solite_stdlib::BUILTIN_FUNCTIONS;
 
     use super::*;
-    use crate::{dot::DotCommand, sqlite::Connection};
+    use crate::sqlite::Connection;
 
     #[test]
     fn test_advance_through_ignorable() {

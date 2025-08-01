@@ -37,7 +37,11 @@
   dict({
     'data': dict({
       'text/plain': '''
-        error[1]: incomplete input
+        error[1]: SQL logic error
+          ┌─ <anonymous>:1:1
+          │
+        1 │ select 1 + 
+          │ ^ incomplete input
         
   
       ''',

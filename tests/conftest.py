@@ -12,6 +12,9 @@ from tempfile import TemporaryFile
 from pathlib import Path
 import re
 from dataclasses import dataclass
+from fastmcp import Client
+from fastmcp.client.transports import StdioTransport
+import pytest_asyncio
 
 
 def ensure_sync(func: Any) -> Any:
@@ -33,7 +36,7 @@ class Kernel:
                 return reply
 
     def execute(self, code: str):
-        msg_id = self.client.execute(
+        self.client.execute(
             code=code, silent=False, store_history=False, stop_on_error=False
         )
         reply = self.get_non_kernel_info_reply()
@@ -62,6 +65,16 @@ def solite_kernel():
     yield Kernel(km, kc)
     kc.stop_channels()
     km.shutdown_kernel()
+
+
+@pytest_asyncio.fixture
+async def mcp_client():
+    client = Client(
+        transport=StdioTransport(command=str(CLI_PATH), args=["mcp", "up"]),
+    )
+    async with client:
+        await client.ping()
+        yield client
 
 
 CLI_PATH = Path(__file__).parent.parent / "target" / "debug" / "solite"

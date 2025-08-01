@@ -9,7 +9,7 @@ pub fn replacement_scan(
         None => return None,
     };
 
-    /** TODO:
+    /* TODO:
      * - [ ] .csv.gz, ztsd, zip, etc
      * - [ ] JSON, .gz, etc
      * - [ ] NDJSON/JSONL

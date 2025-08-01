@@ -1,6 +1,6 @@
 use crate::cli::ReplArgs;
 use crate::colors::bold;
-use crate::run::format_duration;
+use crate::commands::run::format_duration;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -383,7 +383,12 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
         match runtime.next_stepx() {
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => match cmd {
-                    DotCommand::Tables(cmd) => cmd.execute(runtime),
+                    DotCommand::Tables(cmd) => {
+                      let tables = cmd.execute(runtime);
+                      for table in tables {
+                        println!("{table}");
+                      }
+                    },
                     DotCommand::Print(print_cmd) => print_cmd.execute(),
                     DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
                     DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {

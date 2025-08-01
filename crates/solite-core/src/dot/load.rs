@@ -1,4 +1,7 @@
-use crate::sqlite::Connection;
+use serde::Serialize;
+use crate::{
+    Connection
+};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -66,11 +69,57 @@ fn find_sitepackages_uv_tool(package: &str) -> anyhow::Result<Option<PathBuf>> {
 
     Ok(Some(site_package_directory.to_path_buf()))
 }
-pub(crate) fn load(
+pub(crate) fn uv_load(
     connection: &mut Connection,
     package: &str,
     entrypoint: &Option<String>,
 ) -> anyhow::Result<String> {
     let site_package_directory = find_sitepackages_uv_tool(package)?.unwrap();
     load_extension_from_sitepackages(&site_package_directory, connection, package, entrypoint)
+}
+
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LoadCommand {
+    pub path: String,
+    pub entrypoint: Option<String>,
+    pub is_uv: bool,
+}
+
+pub enum LoadCommandSource {
+    Path(String),
+    Uv { directory: String, package: String },
+}
+
+impl LoadCommand {
+    pub fn new(args: String) -> Self {
+        let (args, is_uv) = match args.strip_prefix("uv:") {
+            Some(args) => (args, true),
+            None => (args.as_str(), false),
+        };
+
+        let (path, entrypoint) = match args.split_once(' ') {
+            Some((path, entrypoint)) => (path.to_string(), Some(entrypoint.trim().to_string())),
+            None => (args.to_owned(), None),
+        };
+        Self {
+            path,
+            entrypoint,
+            is_uv,
+        }
+    }
+    pub fn execute(&self, connection: &mut Connection) -> anyhow::Result<LoadCommandSource> {
+        if self.is_uv {
+            uv_load(connection, &self.path, &self.entrypoint).map(|path| {
+                LoadCommandSource::Uv {
+                    directory: path,
+                    package: self.path.clone(),
+                }
+            })
+        } else {
+            connection
+                .load_extension(&self.path, &self.entrypoint)
+                .map(|_| LoadCommandSource::Path(self.path.clone()))
+        }
+    }
 }

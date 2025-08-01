@@ -6,6 +6,7 @@ members = [
     "crates/solite-core",
     "crates/solite-stdlib",
     "crates/solite-lexer",
+    "crates/solite-mcp",
 ]
 
 [workspace.dependencies]

@@ -9,8 +9,11 @@ use indicatif::HumanCount;
 use jiff::fmt::friendly::{FractionalUnit, SpanPrinter};
 use jiff::{SpanRound, Timestamp, ToSpan};
 use nbformat::{parse_notebook, Notebook};
-use solite_core::dot::DotCommand;
-use solite_core::{BlockSource, Runtime, StepError, StepResult};
+use solite_core::{
+    dot::DotCommand,
+    sqlite::{bytecode_steps, sqlite3_stmt},
+    BlockSource, Runtime, StepError, StepResult,
+};
 use std::ffi::OsStr;
 use std::fs::read_to_string;
 use std::io::stdout;
@@ -25,8 +28,6 @@ pub(crate) fn format_duration(duration: Duration) -> String {
         format!("{:.2}s", duration.as_secs_f32())
     }
 }
-
-use solite_core::sqlite::{bytecode_steps, sqlite3_stmt};
 
 #[derive(Debug)]
 enum InProgressStatementStatus {
@@ -115,14 +116,14 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
             match ext {
                 Some("sql") | Some("ipynb") => (None, input),
                 Some("db") | Some("sqlite") | Some("sqlite3") => {
-                    return crate::repl::repl(ReplArgs {
+                    return crate::commands::repl::repl(ReplArgs {
                         database: Some(input),
                     })
                 }
                 _ => todo!(),
             }
         }
-        (None, None) => return crate::repl::repl(ReplArgs { database: None }),
+        (None, None) => return crate::commands::repl::repl(ReplArgs { database: None }),
     };
 
     let mut rt = Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()));
@@ -390,7 +391,12 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
                         }
                     }
                     StepResult::DotCommand(cmd) => match cmd {
-                        DotCommand::Tables(cmd) => cmd.execute(&rt),
+                        DotCommand::Tables(cmd) => {
+                            let tables = cmd.execute(&rt);
+                            for table in tables {
+                                println!("{table}");
+                            }
+                        }
                         DotCommand::Print(print_cmd) => print_cmd.execute(),
                         DotCommand::Load(load_cmd) => match load_cmd.execute(&mut rt.connection) {
                             Ok(_) => {
@@ -418,7 +424,27 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
                             solite_core::dot::ParameterCommand::List => todo!(),
                             solite_core::dot::ParameterCommand::Clear => todo!(),
                         },
-                        _ => todo!(),
+                        DotCommand::Export(mut cmd) => match cmd.execute() {
+                            Ok(()) => {
+                                println!(
+                                    "{} exported results to {}",
+                                    colors::green("✓"),
+                                    cmd.target.to_string_lossy()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Error exporting results to {}\n {}",
+                                    cmd.target.to_string_lossy(),
+                                    e
+                                );
+                            }
+                        },
+                        DotCommand::Shell(shell_command) => todo!(),
+                        DotCommand::Vegalite(vega_lite_command) => todo!(),
+                        DotCommand::Bench(cmd) => {
+                            todo!();
+                        }
                     },
                 }
             }

@@ -3,7 +3,7 @@ use std::path::Path;
 use crossterm::style::Stylize;
 use indicatif::ProgressBar;
 use jiff::{Span, SpanRound, Unit};
-use solite_core::{sqlite::bytecode_steps, Runtime};
+use solite_core::{sqlite::{bytecode_steps, Connection}, Runtime};
 
 use crate::cli::BenchArgs;
 
@@ -57,14 +57,7 @@ fn format_runtime(span: jiff::Span) -> String {
 }
 
 pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
-    let runtime = Runtime::new(None);
-    /*let connection = match path {
-        Some(path) => Connection::open(path.as_str()).unwrap(),
-        None => Connection::open_in_memory().unwrap(),
-    };
-    unsafe {
-        solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
-    }*/
+    let mut runtime = Runtime::new(None);
 
     if let Some(extensions) = args.load_extension {
         for extension in extensions {
@@ -84,8 +77,14 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
         )
         .unwrap(),
     );
-    for sql in args.sql {
-        let mut sql = sql;
+    for (idx, sql) in args.sql.iter().enumerate() {
+      if let Some(databases) = &args.database {
+            let conn = Connection::open(databases.get(idx).unwrap().as_os_str().to_str().unwrap()).unwrap();
+            runtime.connection = conn;
+        } else {
+            pb.set_message("Using in-memory database".to_string());
+        }
+        let mut sql = sql.to_owned();
         if sql.ends_with(".sql") && Path::new(sql.as_str()).exists() {
             sql = std::fs::read_to_string(sql).unwrap();
             pb.set_message(format!("Reading SQL file: {}", sql));
@@ -127,13 +126,13 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
         println!("{sql}:");
         println!(
             "  Time  (mean ± σ ):  {} ± {}",
-            avg.clone().green().bold(),
-            stddev.clone().green(),
+            avg.green().bold(),
+            stddev.green(),
         );
         println!(
             "  Range (min … max):  {} … {}",
-            mn.clone().cyan(),
-            mx.clone().magenta(),
+            mn.cyan(),
+            mx.magenta(),
         );
     }
 

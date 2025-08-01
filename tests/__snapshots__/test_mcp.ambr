@@ -1,0 +1,30 @@
+# serializer version: 1
+# name: test_mcp[list_prompts]
+  list([
+  ])
+# ---
+# name: test_mcp[list_resources]
+  list([
+  ])
+# ---
+# name: test_mcp[list_tools]
+  list([
+    'echo',
+    'execute_sql',
+    'export_database',
+  ])
+# ---
+# name: test_mcp[select * from t]
+  '''
+  value: 1
+  value: 2
+  value: 3
+  
+  '''
+# ---
+# name: test_mcp[select 1 + 1]
+  '''
+  1 + 1: 2
+  
+  '''
+# ---

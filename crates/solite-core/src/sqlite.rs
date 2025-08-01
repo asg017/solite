@@ -195,6 +195,7 @@ impl<'a> Row<'a> {
     }
 }
 
+#[derive(Serialize, Debug, Clone)]
 pub struct ColumnMeta {
     pub name: String,
     pub origin_database: Option<String>,
@@ -381,6 +382,19 @@ impl Statement {
             bind_parameters
         }
     }
+
+    pub fn parameter_info(&self) -> Vec<String> {
+        unsafe {
+            let n = sqlite3_bind_parameter_count(self.statement);
+            let mut bind_parameters = vec![];
+            for i in 0..n {
+                let name = sqlite3_bind_parameter_name(self.statement, i + 1);
+                let name = CStr::from_ptr(name).to_string_lossy().to_string();
+                bind_parameters.push(format!("{}", name));
+            }
+            bind_parameters
+        }
+    }
     pub fn reset(&self) {
         unsafe { sqlite3_reset(self.statement) };
     }
@@ -510,9 +524,10 @@ impl Connection {
             Err(err)
         }
     }
+
     pub fn open_in_memory() -> Result<Self, SQLiteError> {
         let mut connection: *mut sqlite3 = ptr::null_mut();
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX;
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE;
         let filename = CString::new(":memory:").unwrap();
         let rc =
             unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };
@@ -599,6 +614,20 @@ impl Connection {
                     //&*boxed_handler as *const F as *mut _,
                 );
             }
+        }
+    }
+
+    pub fn serialize(&self) -> Result<Vec<u8>, SQLiteError> {
+        unsafe {
+          let mut sz: sqlite3_int64  = 0;
+          let ptr= sqlite3_serialize(self.connection, c"main".as_ptr(), &mut sz, 0);
+          if ptr.is_null() {
+              return Err(SQLiteError::from_latest(self.connection, sqlite3_errcode(self.connection)));
+          }
+          let slice = std::slice::from_raw_parts(ptr as *const u8, sz as usize);
+          let vec = slice.to_vec();
+          sqlite3_free(ptr.cast());
+          Ok(vec)
         }
     }
 

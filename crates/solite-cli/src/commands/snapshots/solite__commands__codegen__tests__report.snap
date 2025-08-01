@@ -1,0 +1,27 @@
+---
+source: crates/solite-cli/src/commands/codegen.rs
+expression: result
+snapshot_kind: text
+---
+setup: []
+exports:
+  - name: xxx
+    parameters: []
+    columns:
+      - name: "1"
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~
+      - name: "2"
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~
+      - name: "3"
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~
+    sql: "select 1, 2, 3;"
+    result_type: Rows

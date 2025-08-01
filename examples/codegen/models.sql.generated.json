@@ -1,0 +1,165 @@
+{
+  "setup": [
+    "create table students(\n    id integer primary key autoincrement,\n    name text not null,\n    age integer not null,\n    grade integer not null\n);"
+  ],
+  "exports": [
+    {
+      "name": "highSchoolStudents",
+      "parameters": [],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "id",
+          "decltype": "INTEGER"
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "name",
+          "decltype": "TEXT"
+        },
+        {
+          "name": "age",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "age",
+          "decltype": "INTEGER"
+        },
+        {
+          "name": "grade",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "grade",
+          "decltype": "INTEGER"
+        }
+      ],
+      "sql": "select * from students\nwhere grade between 9 and 12;",
+      "result_type": "Rows"
+    },
+    {
+      "name": "lookupStudent",
+      "parameters": [
+        {
+          "full_name": ":query",
+          "name": "query",
+          "annotated_type": null
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "id",
+          "decltype": "INTEGER"
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "name",
+          "decltype": "TEXT"
+        },
+        {
+          "name": "age",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "age",
+          "decltype": "INTEGER"
+        },
+        {
+          "name": "grade",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "grade",
+          "decltype": "INTEGER"
+        }
+      ],
+      "sql": "select * from students\nwhere name like :query;",
+      "result_type": "Rows"
+    },
+    {
+      "name": "insertStudent",
+      "parameters": [
+        {
+          "full_name": ":name",
+          "name": "name",
+          "annotated_type": null
+        },
+        {
+          "full_name": ":age",
+          "name": "age",
+          "annotated_type": null
+        },
+        {
+          "full_name": ":grade",
+          "name": "grade",
+          "annotated_type": null
+        }
+      ],
+      "columns": [],
+      "sql": "insert into students (name, age, grade)\nvalues (:name, :age, :grade);",
+      "result_type": "Void"
+    },
+    {
+      "name": "lookupStudent24",
+      "parameters": [
+        {
+          "full_name": "$query::text",
+          "name": "query",
+          "annotated_type": "text"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "id",
+          "decltype": "INTEGER"
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "name",
+          "decltype": "TEXT"
+        },
+        {
+          "name": "age",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "age",
+          "decltype": "INTEGER"
+        },
+        {
+          "name": "grade",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "grade",
+          "decltype": "INTEGER"
+        }
+      ],
+      "sql": "select * from students\nwhere name like $query::text;",
+      "result_type": "Rows"
+    },
+    {
+      "name": "distinctGrades",
+      "parameters": [],
+      "columns": [
+        {
+          "name": "grade",
+          "origin_database": "main",
+          "origin_table": "students",
+          "origin_column": "grade",
+          "decltype": "INTEGER"
+        }
+      ],
+      "sql": "select distinct grade from students order by 1;",
+      "result_type": "List"
+    }
+  ]
+}

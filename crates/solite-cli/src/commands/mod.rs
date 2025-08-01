@@ -1,0 +1,9 @@
+pub mod repl;
+pub mod run;
+pub mod query;
+pub mod docs;
+pub mod mcp;
+pub mod bench;
+pub mod jupyter;
+pub mod snapshot;
+pub mod codegen;

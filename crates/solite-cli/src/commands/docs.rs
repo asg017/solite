@@ -6,7 +6,7 @@ use std::{
 use crate::{
     cli::{DocsCommand, DocsInlineArgs, DocsNamespace},
     errors::{report_error, report_error_string},
-    snapshot::{ValueCopy, ValueCopyValue},
+    commands::snapshot::{ValueCopy, ValueCopyValue},
     ui::{BORDER, SEPARATOR},
 };
 use cli_table::{Cell, CellStruct, Table};
@@ -118,7 +118,7 @@ fn inline(args: DocsInlineArgs) -> Result<(), ()> {
                                             Ok(Some(row)) => {
                                                 let row = row
                                                     .iter()
-                                                    .map(|v| crate::snapshot::copy(v))
+                                                    .map(|v| crate::commands::snapshot::copy(v))
                                                     .collect();
                                                 results.push(row);
                                             }
@@ -141,7 +141,7 @@ fn inline(args: DocsInlineArgs) -> Result<(), ()> {
                                             new_value.push_str(
                                                 format!(
                                                     "-- {}",
-                                                    crate::snapshot::snapshot_value(&results[0][0])
+                                                    crate::commands::snapshot::snapshot_value(&results[0][0])
                                                 )
                                                 .as_str(),
                                             );

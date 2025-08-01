@@ -101,9 +101,36 @@ pub struct ReplArgs {
 #[derive(Args, Debug)]
 pub struct BenchArgs {
     pub sql: Vec<String>,
+    #[arg(long)]
+    pub database: Option<Vec<PathBuf>>,
+
+    #[arg(long, num_args = 2, value_names = ["PATH", "NAME"])]
+    pub attach: Option<Vec<PathBuf>>,
 
     #[arg(long)]
     pub load_extension: Option<Vec<PathBuf>>,
+}
+#[derive(Args, Debug)]
+pub struct CodegenArgs {
+    pub file: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct McpNamespace {
+    #[command(subcommand)]
+    pub command: McpCommand,
+}
+#[derive(Subcommand, Debug)]
+pub enum McpCommand {
+    Up(McpUpArgs),
+    Install(McpInstallArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct McpUpArgs {
+}
+#[derive(Args, Debug)]
+pub struct McpInstallArgs {
 }
 
 #[derive(Args, Debug)]
@@ -207,6 +234,12 @@ pub enum Commands {
 
     /// Run benchmarks on SQL statements
     Bench(BenchArgs),
+
+    /// MCP
+    Mcp(McpNamespace),
+    
+    /// Codegen SQL queries into an intermediate representation
+    Codegen(CodegenArgs)
 }
 
 #[derive(Parser)]

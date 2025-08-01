@@ -1,0 +1,54 @@
+---
+source: crates/solite-cli/src/commands/codegen.rs
+expression: "report_from_file(src, &PathBuf::from(\"[fake]\")).unwrap()"
+snapshot_kind: text
+---
+setup:
+  - "create table t(a,b text,c int);"
+exports:
+  - name: getA
+    parameters: []
+    columns:
+      - name: a
+        origin_database: main
+        origin_table: t
+        origin_column: a
+        decltype: ~
+    sql: select a from t;
+    result_type: Rows
+  - name: getB
+    parameters: []
+    columns:
+      - name: b
+        origin_database: main
+        origin_table: t
+        origin_column: b
+        decltype: TEXT
+    sql: select b from t;
+    result_type: Rows
+  - name: getC
+    parameters: []
+    columns:
+      - name: c
+        origin_database: main
+        origin_table: t
+        origin_column: c
+        decltype: INT
+    sql: select c from t;
+    result_type: Rows
+  - name: withParams
+    parameters:
+      - full_name: "$a::text"
+        name: a
+        annotated_type: text
+      - full_name: "$b::text"
+        name: b
+        annotated_type: text
+    columns:
+      - name: c
+        origin_database: main
+        origin_table: t
+        origin_column: c
+        decltype: INT
+    sql: "select c from t where a = $a::text and b = $b::text;"
+    result_type: List

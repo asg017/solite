@@ -1,0 +1,31 @@
+[package]
+name = "solite-mcp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+solite-core = {path="../solite-core"}
+rmcp = {version="0.3.0", features = [
+    "server",
+    "transport-io",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = {version="0.3", features = [
+    "env-filter",
+    "std",
+    "fmt",
+]}
+tokio = { version = "1", features = [
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "io-std",
+    "signal",
+] }
+axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22.1"
+tempfile = "3.20.0"
+schemars = "1.0.4"

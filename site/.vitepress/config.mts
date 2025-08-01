@@ -8,17 +8,34 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
-      { text: 'Examples', link: '/markdown-examples' }
     ],
 
     sidebar: [
       {
-        text: 'Examples',
+        text: 'Getting Started',
         items: [
-          { text: 'Markdown Examples', link: '/markdown-examples' },
-          { text: 'Runtime API Examples', link: '/api-examples' }
+          { text: 'Installation', link: '/installing' },
         ]
-      }
+      },
+      {
+        text: 'Guides',
+        items: [
+          { text: 'REPL', link: '/repl' },
+          { text: 'SQL Scripts', link: '/sql-scripts' },
+          { text: 'Jupyter Kernel', link: '/jupyter' },
+          { text: 'Command Line SQL', link: '/command-line' },
+          { text: 'Standard Library', link: '/stdlib' },
+          { text: 'SQLite Extensions', link: '/sqlite-extensions' },
+        ]
+      },
+      {
+        text: 'Reference',
+        items: [
+          { text: 'CLI Reference', link: '/reference/cli' },
+          { text: 'SQL Standard Library', link: '/reference/sql' },
+          { text: 'Dot Commands', link: '/reference/dot' },
+        ]
+      },
     ],
 
     socialLinks: [

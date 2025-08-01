@@ -23,7 +23,11 @@
 # ---
 # name: test_query_fails[table DNE]
   '''
-  error[1]: no such table: does_not_exist
+  error[1]: SQL logic error
+    ┌─ [input]:1:1
+    │
+  1 │ select * from does_not_exist
+    │ ^ no such table: does_not_exist
   
   
   '''
@@ -53,7 +57,7 @@
 # ---
 # name: test_query_output_formats[a.json contents]
   '''
-  [{"atom":null,"fullkey":"$","id":0,"key":null,"parent":null,"path":"$","type":"array","value":[1,2,3,4]},{"atom":1,"fullkey":"$[0]","id":1,"key":0,"parent":0,"path":"$","type":"integer","value":1},{"atom":2,"fullkey":"$[1]","id":3,"key":1,"parent":0,"path":"$","type":"integer","value":2},{"atom":3,"fullkey":"$[2]","id":5,"key":2,"parent":0,"path":"$","type":"integer","value":3},{"atom":4,"fullkey":"$[3]","id":7,"key":3,"parent":0,"path":"$","type":"integer","value":4}]
+  [{"key":null,"value":[1,2,3,4],"type":"array","atom":null,"id":0,"parent":null,"fullkey":"$","path":"$"},{"key":0,"value":1,"type":"integer","atom":1,"id":1,"parent":0,"fullkey":"$[0]","path":"$"},{"key":1,"value":2,"type":"integer","atom":2,"id":3,"parent":0,"fullkey":"$[1]","path":"$"},{"key":2,"value":3,"type":"integer","atom":3,"id":5,"parent":0,"fullkey":"$[2]","path":"$"},{"key":3,"value":4,"type":"integer","atom":4,"id":7,"parent":0,"fullkey":"$[3]","path":"$"}]
   
   '''
 # ---
@@ -70,17 +74,17 @@
 # ---
 # name: test_query_output_formats[basic-default]
   '''
-  [{"atom":null,"fullkey":"$","id":0,"key":null,"parent":null,"path":"$","type":"array","value":[1,2,3,4]},{"atom":1,"fullkey":"$[0]","id":1,"key":0,"parent":0,"path":"$","type":"integer","value":1},{"atom":2,"fullkey":"$[1]","id":3,"key":1,"parent":0,"path":"$","type":"integer","value":2},{"atom":3,"fullkey":"$[2]","id":5,"key":2,"parent":0,"path":"$","type":"integer","value":3},{"atom":4,"fullkey":"$[3]","id":7,"key":3,"parent":0,"path":"$","type":"integer","value":4}]
+  [{"key":null,"value":[1,2,3,4],"type":"array","atom":null,"id":0,"parent":null,"fullkey":"$","path":"$"},{"key":0,"value":1,"type":"integer","atom":1,"id":1,"parent":0,"fullkey":"$[0]","path":"$"},{"key":1,"value":2,"type":"integer","atom":2,"id":3,"parent":0,"fullkey":"$[1]","path":"$"},{"key":2,"value":3,"type":"integer","atom":3,"id":5,"parent":0,"fullkey":"$[2]","path":"$"},{"key":3,"value":4,"type":"integer","atom":4,"id":7,"parent":0,"fullkey":"$[3]","path":"$"}]
   
   '''
 # ---
 # name: test_query_output_formats[basic-ndjson]
   '''
-  {"atom":null,"fullkey":"$","id":0,"key":null,"parent":null,"path":"$","type":"array","value":[1,2,3,4]}
-  {"atom":1,"fullkey":"$[0]","id":1,"key":0,"parent":0,"path":"$","type":"integer","value":1}
-  {"atom":2,"fullkey":"$[1]","id":3,"key":1,"parent":0,"path":"$","type":"integer","value":2}
-  {"atom":3,"fullkey":"$[2]","id":5,"key":2,"parent":0,"path":"$","type":"integer","value":3}
-  {"atom":4,"fullkey":"$[3]","id":7,"key":3,"parent":0,"path":"$","type":"integer","value":4}
+  {"key":null,"value":[1,2,3,4],"type":"array","atom":null,"id":0,"parent":null,"fullkey":"$","path":"$"}
+  {"key":0,"value":1,"type":"integer","atom":1,"id":1,"parent":0,"fullkey":"$[0]","path":"$"}
+  {"key":1,"value":2,"type":"integer","atom":2,"id":3,"parent":0,"fullkey":"$[1]","path":"$"}
+  {"key":2,"value":3,"type":"integer","atom":3,"id":5,"parent":0,"fullkey":"$[2]","path":"$"}
+  {"key":3,"value":4,"type":"integer","atom":4,"id":7,"parent":0,"fullkey":"$[3]","path":"$"}
   
   '''
 # ---

@@ -75,6 +75,6 @@ fn err_diagnostic_range(
             }
             Some(start..idx)
         }
-        None => None,
+        None => Some(additional_offset.unwrap_or(0)..additional_offset.unwrap_or(0) + 1),
     }
 }

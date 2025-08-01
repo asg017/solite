@@ -257,7 +257,14 @@ async fn handle_code(
                             .unwrap();
                     }
                     DotCommand::Tables(cmd) => {
-                        cmd.execute(&runtime);
+                        let tables = cmd.execute(&runtime);
+                        response.send(
+                            DisplayData::from(MediaType::Plain(format!(
+                                "{}",
+                                tables.join("\n")
+                            )))
+                            .as_child_of(parent),
+                        ).await.unwrap();
                     }
                     DotCommand::Vegalite(mut vegalite_command) => {
                         match vegalite_command.execute() {
@@ -296,6 +303,32 @@ async fn handle_code(
                         }
                         Err(_) => todo!(),
                     },
+                    DotCommand::Bench(mut cmd) => {
+                      
+                      match cmd.execute(None) {
+                        Ok(result) => {
+                            response
+                                .send(
+                                    DisplayData::from(MediaType::Plain(format!(
+                                        "{}",
+                                        result.report()
+                                    )))
+                                    .as_child_of(parent),
+                                )
+                                .await
+                                .unwrap();
+                        }
+                        Err(_) => response
+                                .send(
+                                    DisplayData::from(MediaType::Plain(format!(
+                                        "Benchmark fail",
+                                    )))
+                                    .as_child_of(parent),
+                                )
+                                .await
+                                .unwrap()
+                    }
+                  },
                 },
             },
             None => {
@@ -443,77 +476,7 @@ impl SoliteKernel {
             .send(DisplayData::from(MediaType::Plain(message.to_string())).as_child_of(parent))
             .await
     }
-
-    async fn send_table(&mut self, markdown: &str, parent: &JupyterMessage) -> anyhow::Result<()> {
-        let dt = MediaType::DataTable(Box::new(TabularDataResource {
-            path: None,
-            data: Some(vec![serde_json::json!({
-              "a": 1
-            })]),
-            schema: TableSchema {
-                fields: vec![TableSchemaField {
-                    name: "a".to_string(),
-                    title: None,
-                    description: None,
-                    example: None,
-                    field_type: jupyter_protocol::datatable::FieldType::Number,
-                    format: None,
-                    constraints: None,
-                    rdf_type: None,
-                }],
-                primary_key: None,
-                foreign_keys: None,
-                missing_values: None,
-            },
-            title: Some("aaa".to_string()),
-            description: None,
-            homepage: None,
-            sources: None,
-            licenses: None,
-            dialect: None,
-            format: None,
-            mediatype: None,
-            encoding: None,
-            bytes: None,
-            hash: None,
-        }));
-        self.iopub
-            .send(DisplayData::from(dt).as_child_of(parent))
-            .await?;
-
-        let vl4 = MediaType::VegaLiteV4(
-            json!({
-              "$schema": "https://vega.github.io/schema/vega-lite/v2.0.json",
-              "description": "A simple bar chart with embedded data.",
-              "data": {
-                "values": [
-                  {"a": "A", "b": 28},
-                  {"a": "B", "b": 55},
-                  {"a": "C", "b": 43},
-                  {"a": "D", "b": 91},
-                  {"a": "E", "b": 81},
-                  {"a": "F", "b": 53},
-                  {"a": "G", "b": 19},
-                  {"a": "H", "b": 87},
-                  {"a": "I", "b": 52}
-                ]
-              },
-              "mark": "bar",
-              "encoding": {
-                "x": {"field": "a", "type": "ordinal"},
-                "y": {"field": "b", "type": "quantitative"}
-              }
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        );
-        self.iopub
-            .send(DisplayData::from(vl4).as_child_of(parent))
-            .await?;
-        Ok(())
-    }
-
+    
     async fn send_error(
         &mut self,
         ename: &str,

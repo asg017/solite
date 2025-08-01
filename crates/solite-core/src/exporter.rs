@@ -2,10 +2,10 @@ use arboard::Clipboard;
 use crate::{
     sqlite::{Statement, ValueRefX, ValueRefXValue},
 };
-use std::{fmt, path::PathBuf};
+use std::path::PathBuf;
 use std::{
     fs::File,
-    io::{stdout, BufWriter, Write},
+    io::{BufWriter, Write},
 };
 
 pub enum ExportFormat {

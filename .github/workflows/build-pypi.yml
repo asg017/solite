@@ -23,4 +23,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uvx maturin build -b bin --release --locked --out dist/
         working-directory: crates/solite-cli
-      - run: uv publish dist
+      - run: uv publish dist/*
+        working-directory: crates/solite-cli

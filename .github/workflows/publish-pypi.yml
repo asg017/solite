@@ -1,0 +1,22 @@
+name: "Publish PyPi wheels"
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  upload-solite-wheels:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: wheels_solite-*
+          path: wheels_solite
+          merge-multiple: true
+      - run: uv publish -v wheels_solite/*

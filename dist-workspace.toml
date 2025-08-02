@@ -19,6 +19,8 @@ install-updater = false
 local-artifacts-jobs = ["./build-pypi"]
 # Publish jobs to run in CI
 publish-jobs = ["./publish-pypi"]
+# Whether to publish prereleases to package managers
+publish-prereleases = true
 
 [dist.github-custom-runners]
 aarch64-apple-darwin = "macos-latest"

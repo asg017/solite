@@ -1,5 +1,6 @@
 import pytest
 from mcp import McpError
+from mcp.types import TextContent
 from fastmcp import Client
 
 class TestMcp:
@@ -9,7 +10,10 @@ class TestMcp:
     async def execute_sql(self, sql: str, snapshot=None, name: str | None = None):
         result = await self.mcp_client.call_tool("execute_sql", {"sql": sql})
         if snapshot is not None:
-            text_content = "\n".join([x.text for x in result.content])
+            text_content = ""
+            for x in result.content:
+                assert isinstance(x, TextContent)
+                text_content += x.text + "\n"
             assert text_content == snapshot(name=name)
         return result
 

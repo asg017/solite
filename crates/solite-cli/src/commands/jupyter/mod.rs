@@ -1,8 +1,5 @@
-mod html;
 mod server;
-
 use crate::cli::{JupyterCommand, JupyterInstallArgs, JupyterNamespace, JupyterUpArgs};
-
 use serde_json::json;
 use server::start_kernel;
 use std::env::current_exe;

@@ -1,14 +1,12 @@
 use anyhow::{Context as _, Result};
 use html_builder::*;
 use jupyter_protocol::{
-    datatable::{TableSchema, TableSchemaField},
     ClearOutput, CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput,
     ExecuteReply, ExecutionCount, HelpLink, HistoryReply, InspectReply, IsCompleteReply,
     IsCompleteReplyStatus, JupyterMessage, JupyterMessageContent, KernelInfoReply, LanguageInfo,
-    Media, MediaType, ReplyStatus, Status, StreamContent, TabularDataResource,
+    Media, MediaType, ReplyStatus, Status, StreamContent,
 };
 use runtimelib::{KernelIoPubConnection, KernelShellConnection};
-use serde_json::json;
 use solite_core::{
     dot::{DotCommand, LoadCommandSource},
     sqlite::{self, ColumnMeta, Statement, ValueRefX, ValueRefXValue},

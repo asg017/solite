@@ -5,7 +5,7 @@ import ast
 from pathlib import Path
 import hashlib
 from dataclasses import dataclass
-from typing import Union, Literal
+from typing import Literal
 
 def to_camel_case(snake_str):
     return "".join(x.capitalize() for x in snake_str.lower().split("_"))
@@ -37,9 +37,10 @@ class Export:
     columns: list[Column]
     parameters: list[Parameter]
     sql: str
-    result_type: Union[Literal['Void'] | Literal['Rows'] | Literal['Row'] | Literal['Value'] | Literal['List']]
+    result_type: Literal['Void'] | Literal['Rows'] | Literal['Row'] | Literal['Value'] | Literal['List']
     
-    def from_json(data):
+    @staticmethod
+    def from_json(data: dict):
         return Export(
             name=data['name'],
             columns=[Column(**column) for column in data["columns"]],
@@ -59,7 +60,9 @@ class Export:
 class Report:
     setup: list[str]
     exports: list[Export]
-    def from_json(data):
+
+    @staticmethod
+    def from_json(data: dict):
         return Report(
             setup=data.get('setup', []),
             exports=[Export.from_json(export) for export in data.get('exports', [])]
@@ -143,7 +146,7 @@ def generate_code(report: Report):
           case 'List':
             py_return_type = 'list[{}]'.format(py_type_from_decltype(export.columns[0].decltype))
         
-        func_lines.append(f"\n  def {func_name}(self{arguments}) -> {py_return_type}:")
+        func_lines.append(f"\n  def {func_name}(self{arguments}) -> Optional[{py_return_type}]:")
         func_lines.append(f'    sql = {sql_literal}')
         if len(export.parameters) > 0:
           gen_params = '{'
@@ -165,7 +168,7 @@ def generate_code(report: Report):
           case 'Row':
             func_lines.append(f'    return {class_name}(*(result.fetchone())) if result else None')
           case 'Value':
-            func_lines.append('    row = result.fetchone()')  
+            func_lines.append('    row = result.fetchone()')
             func_lines.append('    return row[0] if row else None')
           case 'List':
             func_lines.append('    return [row[0] for row in result.fetchall()]')
@@ -178,7 +181,7 @@ def generate_code(report: Report):
 
     lines = [
        "import sqlite3\n",
-        "from typing import Any\n",
+        "from typing import Any, Optional\n",
       ]
     if len(classes) > 0:
        lines.append("from dataclasses import dataclass\n")

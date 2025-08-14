@@ -41,12 +41,12 @@ async def test_mcp_export_database(mcp_client: Client, snapshot):
     contents = resource.resource
     assert isinstance(contents, BlobResourceContents)
     assert contents.uri.encoded_string() == "solite://aaa"
-    assert contents.mimeType == "application/x-sqlite3"
+    assert contents.mimeType == "application/vnd.sqlite3"
     body = base64.b64decode(contents.blob.encode())
     assert len(body) == 8192
     db = sqlite3.connect(":memory:")
     db.deserialize(body)
-    assert db.execute("SELECT * FROM sqlite_master;").fetchall() == []
+    assert db.execute("SELECT name FROM sqlite_master;").fetchall() == [('t',)]
     
 
 @pytest.mark.asyncio

@@ -58,6 +58,9 @@ pub enum Kind {
     All,
     And,
     As,
+    Between,
+    Descending,
+    Ascending,
 
     Drop,
     Index,
@@ -328,6 +331,9 @@ impl<'a> Lexer<'a> {
                         "blob" => Kind::Blob,
                         "bit" => Kind::Bit,
 
+                        "between" => Kind::Between,
+                        "ascending" | "asc" => Kind::Ascending,
+                        "descending" | "desc" => Kind::Descending,
                         "drop" => Kind::Drop,
                         "index" => Kind::Index,
                         "indexed" => Kind::Indexed,

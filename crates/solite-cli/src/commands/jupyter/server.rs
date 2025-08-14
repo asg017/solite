@@ -35,7 +35,7 @@ fn html_tr_from_row<'a>(tbody: &'a mut Node, row: &[ValueRefX]) -> anyhow::Resul
         };
         let style: String = match value.value {
             ValueRefXValue::Double(_) | ValueRefXValue::Int(_) | ValueRefXValue::Null => {
-                "".to_owned()
+                "font-family: monospace".to_owned()
             }
             ValueRefXValue::Text(_) => match value.subtype() {
                 Some(sqlite::JSON_SUBTYPE) => "color: red".to_owned(),
@@ -186,6 +186,7 @@ async fn handle_code(
                     }
                 },
                 StepResult::DotCommand(cmd) => match cmd {
+                  DotCommand::Ask(ask_cmd) => todo!(),
                     DotCommand::Print(print_cmd) => {
                         response
                             .send(

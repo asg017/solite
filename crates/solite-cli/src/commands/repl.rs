@@ -384,44 +384,49 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => match cmd {
                     DotCommand::Tables(cmd) => {
-                      let tables = cmd.execute(runtime);
-                      for table in tables {
-                        println!("{table}");
-                      }
-                    },
+                                      let tables = cmd.execute(runtime);
+                                      for table in tables {
+                                        println!("{table}");
+                                      }
+                                    },
                     DotCommand::Print(print_cmd) => print_cmd.execute(),
                     DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
                     DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
-                        Ok(source) => match source {
-                            LoadCommandSource::Path(path) => {
-                                println!("✓ loaded extension {}", path);
-                            }
-                            LoadCommandSource::Uv { directory, package } => {
-                                println!("✓ uv loaded extension {} from {}", package, directory);
-                            }
-                        },
-                        Err(e) => {
-                            eprintln!("✗ failed to load extension {}: {}", load_cmd.path, e);
-                        }
-                    },
+                                        Ok(source) => match source {
+                                            LoadCommandSource::Path(path) => {
+                                                println!("✓ loaded extension {}", path);
+                                            }
+                                            LoadCommandSource::Uv { directory, package } => {
+                                                println!("✓ uv loaded extension {} from {}", package, directory);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            eprintln!("✗ failed to load extension {}: {}", load_cmd.path, e);
+                                        }
+                                    },
                     DotCommand::Timer(enabled) => *timer = enabled,
                     DotCommand::Parameter(param_cmd) => match param_cmd {
-                        solite_core::dot::ParameterCommand::Set { key, value } => {
-                            runtime.define_parameter(key.clone(), value).unwrap();
-                            println!("✓ set '{key}' parameter");
-                        }
-                        solite_core::dot::ParameterCommand::Unset(_) => todo!(),
-                        solite_core::dot::ParameterCommand::List => todo!(),
-                        solite_core::dot::ParameterCommand::Clear => todo!(),
-                    },
+                                        solite_core::dot::ParameterCommand::Set { key, value } => {
+                                            runtime.define_parameter(key.clone(), value).unwrap();
+                                            println!("✓ set '{key}' parameter");
+                                        }
+                                        solite_core::dot::ParameterCommand::Unset(_) => todo!(),
+                                        solite_core::dot::ParameterCommand::List => todo!(),
+                                        solite_core::dot::ParameterCommand::Clear => todo!(),
+                                    },
                     DotCommand::Shell(shell_cmd) => {
-                      let rx = shell_cmd.execute();
-                      while let Ok(msg) = rx.recv() {
-                          println!("{}", msg);
-                      }
-                    }
-                    _ => todo!(),
-                },
+                                      let rx = shell_cmd.execute();
+                                      while let Ok(msg) = rx.recv() {
+                                          println!("{}", msg);
+                                      }
+                                    }
+                    DotCommand::Ask(ask_command) => {
+                      ask_command.execute(runtime);
+                    },
+                    DotCommand::Export(export_command) => todo!(),
+                    DotCommand::Vegalite(vega_lite_command) => todo!(),
+                    DotCommand::Bench(bench_command) => todo!(),
+                  },
                 StepResult::SqlStatement { stmt, .. } => {
                     let start = std::time::Instant::now();
 
@@ -447,7 +452,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                 } => {
                     crate::errors::report_error(&file_name, &src, &error, Some(offset));
                 }
-                StepError::ParseDot(_error) => eprintln!("todo parse dot error"),
+                StepError::ParseDot(error) => eprintln!("todo parse dot error {error:?}"),
             },
         }
     }

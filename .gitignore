@@ -7,3 +7,6 @@ dist/
 *.csv
 
 tests/latimes-place-totals.csv
+
+
+examples/codegen-python

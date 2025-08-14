@@ -391,6 +391,7 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
                         }
                     }
                     StepResult::DotCommand(cmd) => match cmd {
+                        DotCommand::Ask(cmd) => todo!(),
                         DotCommand::Tables(cmd) => {
                             let tables = cmd.execute(&rt);
                             for table in tables {
@@ -440,7 +441,12 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
                                 );
                             }
                         },
-                        DotCommand::Shell(shell_command) => todo!(),
+                        DotCommand::Shell(shell_command) => {
+                          let rx = shell_command.execute();
+                          while let Ok(msg) = rx.recv() {
+                              println!("{}", msg);
+                          }
+                        },
                         DotCommand::Vegalite(vega_lite_command) => todo!(),
                         DotCommand::Bench(cmd) => {
                             todo!();

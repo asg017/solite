@@ -1,3 +1,4 @@
+mod ask;
 mod bench;
 mod load;
 mod export;
@@ -25,7 +26,7 @@ pub use load::LoadCommandSource;
 use param::parse_parameter;
 use thiserror::Error;
 
-use crate::Runtime;
+use crate::{dot::ask::AskCommand, Runtime};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Error, Debug, PartialEq)]
@@ -72,6 +73,7 @@ pub enum DotCommand {
     /// TODO sqlpkg/spm support
     //Load,
     Print(PrintCommand),
+    Ask(AskCommand),
 
     Shell(ShellCommand),
     /// usage: .param set name 'alex garcia'
@@ -104,6 +106,7 @@ pub fn parse_dot<S: Into<String>>(
     let command = command.into();
     let args = args.into();
     match command.to_lowercase().as_str() {
+        "ask" => Ok(DotCommand::Ask(AskCommand { message: args })),
         "print" => Ok(DotCommand::Print(PrintCommand { message: args })),
         "sh" => Ok(DotCommand::Shell(ShellCommand { command: args })),
         "tables" => Ok(DotCommand::Tables(TablesCommand {})),

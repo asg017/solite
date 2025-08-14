@@ -50,7 +50,7 @@ impl Sandbox {
         &self,
         Parameters(ExecuteSqlRequest { sql }): Parameters<ExecuteSqlRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let mut connection = self.connection.lock().await;
+        let connection = self.connection.lock().await;
         let stmt = connection.prepare(&sql).map_err(|e| McpError::invalid_request(e.to_string(), None))?.1.unwrap();
         let columns = stmt.column_names().unwrap();
         /*if let Some(params) = parameters {
@@ -83,13 +83,18 @@ impl Sandbox {
         let connection = self.connection.lock().await;
         let buffer = connection.serialize().unwrap();
         let export_uri = format!("solite://aaa");
-        Ok(CallToolResult::success(vec![Content::resource(
-            ResourceContents::BlobResourceContents {
-                uri: export_uri,
-                mime_type: Some("application/vnd.sqlite3".to_owned()),
-                blob: base64::engine::general_purpose::STANDARD.encode(buffer),
-            },
-        )]))
+        Ok(CallToolResult::success(
+          vec![
+            Content::resource(
+              ResourceContents::BlobResourceContents {
+                  uri: export_uri,
+                  mime_type: Some("application/vnd.sqlite3".to_owned()),
+                  blob: base64::engine::general_purpose::STANDARD.encode(buffer),
+              },
+            )
+          ]
+        )
+    )
     }
 }
 #[tool_handler]

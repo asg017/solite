@@ -6,6 +6,8 @@ snapshot_kind: text
 setup: []
 exports:
   - name: xxx
+    result_type: Rows
+    sql: "select 1, 2, 3;"
     parameters: []
     columns:
       - name: "1"
@@ -23,5 +25,3 @@ exports:
         origin_table: ~
         origin_column: ~
         decltype: ~
-    sql: "select 1, 2, 3;"
-    result_type: Rows

@@ -56,3 +56,4 @@ html-builder = "0.5.1"
 #jupyer = []
 [dev-dependencies]
 insta.workspace = true
+ansi-to-html = "0.2.2"

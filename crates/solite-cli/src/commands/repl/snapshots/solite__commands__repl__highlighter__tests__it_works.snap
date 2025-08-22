@@ -1,0 +1,6 @@
+---
+source: crates/solite-cli/src/commands/repl/highlighter.rs
+expression: "sql_html(\"select 1, 'asdf', sqlite_version() from t;\").into()"
+extension: html
+snapshot_kind: binary
+---

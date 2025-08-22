@@ -9,6 +9,7 @@ use indicatif::HumanCount;
 use jiff::fmt::friendly::{FractionalUnit, SpanPrinter};
 use jiff::{SpanRound, Timestamp, ToSpan};
 use nbformat::{parse_notebook, Notebook};
+use solite_core::sqlite::Statement;
 use solite_core::{
     dot::DotCommand,
     sqlite::{bytecode_steps, sqlite3_stmt},
@@ -101,6 +102,275 @@ fn stmt_status(stmt: *mut sqlite3_stmt) -> InProgressStatementStatus {
 
     InProgressStatementStatus::Unknown
 }
+
+fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &mut bool) {
+    match cmd {
+        DotCommand::Ask(cmd) => todo!(),
+        DotCommand::Tables(cmd) => {
+            let tables = cmd.execute(&runtime);
+            for table in tables {
+                println!("{table}");
+            }
+        }
+        DotCommand::Print(print_cmd) => print_cmd.execute(),
+        DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
+            Ok(_) => {
+                println!("{} extension loaded", colors::green("✓"));
+            }
+            Err(err) => {
+                eprintln!("Error loading extension: {err}");
+            }
+        },
+        DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
+        DotCommand::Timer(enabled) => {
+            *timer = *enabled;
+            println!(
+                "{} timer set {}",
+                colors::green("✓"),
+                if *enabled { "on" } else { "off" }
+            );
+        }
+        DotCommand::Parameter(param_cmd) => match param_cmd {
+            solite_core::dot::ParameterCommand::Set { key, value } => {
+                runtime
+                    .define_parameter(key.clone(), value.to_owned())
+                    .unwrap();
+                println!("{} parameter {} set", colors::green("✓"), key);
+            }
+            solite_core::dot::ParameterCommand::Unset(_) => todo!(),
+            solite_core::dot::ParameterCommand::List => todo!(),
+            solite_core::dot::ParameterCommand::Clear => todo!(),
+        },
+        DotCommand::Export(cmd) => match cmd.execute() {
+            Ok(()) => {
+                println!(
+                    "{} exported results to {}",
+                    colors::green("✓"),
+                    cmd.target.to_string_lossy()
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "Error exporting results to {}\n {}",
+                    cmd.target.to_string_lossy(),
+                    e
+                );
+            }
+        },
+        DotCommand::Shell(shell_command) => {
+            let rx = shell_command.execute();
+            while let Ok(msg) = rx.recv() {
+                println!("{}", msg);
+            }
+        }
+        DotCommand::Vegalite(vega_lite_command) => todo!(),
+        DotCommand::Bench(cmd) => {
+            todo!();
+        }
+    }
+}
+
+fn handle_sql(
+    runtime: &mut Runtime,
+    stmt: &Statement,
+    step_reference: &str,
+    is_trace: bool,
+    timer: bool,
+) {
+    /*
+    println!(
+        "{} {}",
+        colors::green(step.reference.to_string()),
+        colors::gray(stmt.sql().trim())
+    );*/
+
+    /*
+     execute!(
+         stdout(),
+         SetForegroundColor(Color::Green),
+         Print(step.reference.to_string()),
+         Print(" "),
+         SetForegroundColor(Color::Blue),
+         Print(stmt.sql().replace("\n", " ").trim()),
+         //Print("\n"),
+         ResetColor
+     )
+     .unwrap();
+    */
+
+    let pb = indicatif::ProgressBar::new_spinner();
+    //pb.enable_steady_tick(Duration::from_millis(200));
+    pb.set_style(
+        indicatif::ProgressStyle::with_template("{spinner:.cyan} {elapsed} {wide_msg}")
+            .unwrap()
+            .tick_chars("⣾⣷⣯⣟⡿⢿⣻⣽"),
+    );
+
+    let trace_stmt_id = if is_trace {
+        let x = runtime
+            .connection
+            .prepare("INSERT INTO solite_trace.statements (sql) VALUES (?) RETURNING id")
+            .unwrap()
+            .1
+            .unwrap();
+        x.bind_text(1, stmt.sql());
+        let id = x.nextx().unwrap().unwrap().value_at(0).as_int64();
+        Some(id)
+    } else {
+        None
+    };
+
+    let mut x = 4;
+    //let xx = Rc::new(stmt);
+    //let safe_ptr = UnsafeSendPtr(stmt_ptr);
+    let preamble2 = stmt.sql();
+    let preamble2 = preamble2.replace("\n", " ");
+    let p = stmt.pointer();
+    let start = jiff::Timestamp::now();
+    let r = step_reference.to_string();
+    let pbx = pb.clone();
+    runtime.connection.set_progress_handler(
+        500_000,
+        Some(move |(stmt, start): &(*mut sqlite3_stmt, Timestamp)| {
+            if (*start - Timestamp::now())
+                .compare(42.milliseconds())
+                .unwrap()
+                .is_gt()
+            {
+                return false;
+            }
+            let msg = match stmt_status(*stmt) {
+                InProgressStatementStatus::Delete { num_deletes } => {
+                    format!("delete: {num_deletes}")
+                }
+                InProgressStatementStatus::Insert { num_inserts, name } => {
+                    format!(
+                        "inserting {} rows{}",
+                        HumanCount(num_inserts.try_into().unwrap()),
+                        match name {
+                            Some(name) => format!(" into {name}"),
+                            None => "".to_string(),
+                        }
+                    )
+                }
+                InProgressStatementStatus::Update { num_updates } => {
+                    format!("update: {num_updates}")
+                }
+                InProgressStatementStatus::Unknown => format!("unknown"),
+            };
+            ///std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            let duration = Timestamp::now() - *start;
+            let round = SpanRound::new();
+            round.largest(jiff::Unit::Millisecond);
+            //duration.round(round);
+            let mut printer = SpanPrinter::new()
+                .hours_minutes_seconds(true)
+                .fractional(Some(FractionalUnit::Second));
+            //printer;
+            let mut buf = String::new();
+            printer.print_span(&duration, &mut buf).unwrap();
+            pbx.clone()
+                .with_elapsed(Duration::from_millis(
+                    duration.total(jiff::Unit::Millisecond).unwrap() as u64,
+                ))
+                .with_message(format!("{r} {msg}"))
+                .tick();
+            /*
+              execute!(
+                  stdout(),
+                  cursor::MoveToColumn(0),
+                  Clear(ClearType::CurrentLine),
+                  Print(format!("◯ {r} ")),
+                  Print(format!("{buf} ")),
+                  SetForegroundColor(Color::Grey),
+                  Print(r.clone()),
+                  Print(" "),
+                  SetForegroundColor(Color::Blue),
+                  Print(&preamble2[0..10]),
+                  SetForegroundColor(Color::White),
+                  Print(msg),
+                  ResetColor
+              )
+              .unwrap();
+            */
+            false
+        }),
+        (p, start),
+    );
+
+    let start = std::time::Instant::now();
+    let table = crate::ui::table_from_statement(&stmt, true);
+    pb.finish_and_clear();
+
+    /*execute!(
+        stdout(),
+        cursor::MoveToColumn(0),
+        Clear(ClearType::CurrentLine),
+    )
+    .unwrap();*/
+    match table {
+        Ok(Some(table)) => print_stdout(table).unwrap(),
+        Ok(None) => {}
+        Err(err) => {
+            eprintln!("Error: {err}");
+        }
+    }
+
+    let status = stmt_status(stmt.pointer());
+    let msg = match status {
+        InProgressStatementStatus::Insert { num_inserts, name } => {
+            format!(
+                "inserted {} rows into {} ",
+                HumanCount(num_inserts as u64),
+                name.unwrap_or("???".to_string())
+            )
+        }
+        InProgressStatementStatus::Delete { num_deletes } => {
+            format!("deleted {} rows ", HumanCount(num_deletes as u64))
+        }
+        InProgressStatementStatus::Update { num_updates } => {
+            format!("updated {} rows ", HumanCount(num_updates as u64))
+        }
+        InProgressStatementStatus::Unknown => format!(""),
+    };
+
+    if timer {
+        execute!(
+            stdout(),
+            SetForegroundColor(Color::Green),
+            Print("✓ "),
+            SetForegroundColor(Color::Grey),
+            Print(format!("{} ", step_reference.to_string())),
+            SetForegroundColor(Color::White),
+            Print(msg),
+            Print(format!("in {}", format_duration(start.elapsed()))),
+            ResetColor,
+            Print("\n")
+        )
+        .unwrap();
+    }
+
+    /*if timer {
+        println!(
+            "{}",
+            colors::italic(format!(
+                "Finished in {}\n",
+                format_duration(start.elapsed())
+            ))
+        );
+    }*/
+    if let Some(trace_stmt_id) = trace_stmt_id {
+        let mut x = runtime.connection.prepare(r#"
+                          INSERT INTO solite_trace.steps (statement_id, addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle) 
+                          SELECT ?, addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle
+                          FROM bytecode(?)
+                          "#).unwrap().1.unwrap();
+        x.bind_int64(1, trace_stmt_id);
+        x.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer");
+        x.nextx().unwrap();
+    }
+}
+
 
 pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
     let (database, script) = match (flags.database, flags.script) {
@@ -197,264 +467,19 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
 
     loop {
         match rt.next_stepx() {
-            Some(Ok(step)) => {
-                match step.result {
-                    StepResult::SqlStatement { stmt, .. } => {
-                        /*
-                        println!(
-                            "{} {}",
-                            colors::green(step.reference.to_string()),
-                            colors::gray(stmt.sql().trim())
-                        );*/
-
-                        /*
-                         execute!(
-                             stdout(),
-                             SetForegroundColor(Color::Green),
-                             Print(step.reference.to_string()),
-                             Print(" "),
-                             SetForegroundColor(Color::Blue),
-                             Print(stmt.sql().replace("\n", " ").trim()),
-                             //Print("\n"),
-                             ResetColor
-                         )
-                         .unwrap();
-                        */
-
-                        let pb = indicatif::ProgressBar::new_spinner();
-                        //pb.enable_steady_tick(Duration::from_millis(200));
-                        pb.set_style(
-                            indicatif::ProgressStyle::with_template(
-                                "{spinner:.cyan} {elapsed} {wide_msg}",
-                            )
-                            .unwrap()
-                            .tick_chars("⣾⣷⣯⣟⡿⢿⣻⣽"),
-                        );
-
-                        let trace_stmt_id = if flags.trace.is_some() {
-                            let x = rt.connection.prepare("INSERT INTO solite_trace.statements (sql) VALUES (?) RETURNING id").unwrap().1.unwrap();
-                            x.bind_text(1, stmt.sql());
-                            let id = x.nextx().unwrap().unwrap().value_at(0).as_int64();
-                            Some(id)
-                        } else {
-                            None
-                        };
-
-                        let mut x = 4;
-                        //let xx = Rc::new(stmt);
-                        //let safe_ptr = UnsafeSendPtr(stmt_ptr);
-                        let preamble2 = stmt.sql();
-                        let preamble2 = preamble2.replace("\n", " ");
-                        let p = stmt.pointer();
-                        let start = jiff::Timestamp::now();
-                        let r = step.reference.to_string();
-                        let pbx = pb.clone();
-                        rt.connection.set_progress_handler(
-                            500_000,
-                            Some(move |(stmt, start): &(*mut sqlite3_stmt, Timestamp)| {
-                                if (*start - Timestamp::now())
-                                    .compare(42.milliseconds())
-                                    .unwrap()
-                                    .is_gt()
-                                {
-                                    return false;
-                                }
-                                let msg = match stmt_status(*stmt) {
-                                    InProgressStatementStatus::Delete { num_deletes } => {
-                                        format!("delete: {num_deletes}")
-                                    }
-                                    InProgressStatementStatus::Insert { num_inserts, name } => {
-                                        format!(
-                                            "inserting {} rows{}",
-                                            HumanCount(num_inserts.try_into().unwrap()),
-                                            match name {
-                                                Some(name) => format!(" into {name}"),
-                                                None => "".to_string(),
-                                            }
-                                        )
-                                    }
-                                    InProgressStatementStatus::Update { num_updates } => {
-                                        format!("update: {num_updates}")
-                                    }
-                                    InProgressStatementStatus::Unknown => format!("unknown"),
-                                };
-                                ///std::io::Write::flush(&mut std::io::stdout()).unwrap();
-                                let duration = Timestamp::now() - *start;
-                                let round = SpanRound::new();
-                                round.largest(jiff::Unit::Millisecond);
-                                //duration.round(round);
-                                let mut printer = SpanPrinter::new()
-                                    .hours_minutes_seconds(true)
-                                    .fractional(Some(FractionalUnit::Second));
-                                //printer;
-                                let mut buf = String::new();
-                                printer.print_span(&duration, &mut buf).unwrap();
-                                pbx.clone()
-                                    .with_elapsed(Duration::from_millis(
-                                        duration.total(jiff::Unit::Millisecond).unwrap() as u64,
-                                    ))
-                                    .with_message(format!("{r} {msg}"))
-                                    .tick();
-                                /*
-                                  execute!(
-                                      stdout(),
-                                      cursor::MoveToColumn(0),
-                                      Clear(ClearType::CurrentLine),
-                                      Print(format!("◯ {r} ")),
-                                      Print(format!("{buf} ")),
-                                      SetForegroundColor(Color::Grey),
-                                      Print(r.clone()),
-                                      Print(" "),
-                                      SetForegroundColor(Color::Blue),
-                                      Print(&preamble2[0..10]),
-                                      SetForegroundColor(Color::White),
-                                      Print(msg),
-                                      ResetColor
-                                  )
-                                  .unwrap();
-                                */
-                                false
-                            }),
-                            (p, start),
-                        );
-
-                        let start = std::time::Instant::now();
-                        let table = crate::ui::table_from_statement(&stmt, true);
-                        pb.finish_and_clear();
-
-                        /*execute!(
-                            stdout(),
-                            cursor::MoveToColumn(0),
-                            Clear(ClearType::CurrentLine),
-                        )
-                        .unwrap();*/
-                        match table {
-                            Ok(Some(table)) => print_stdout(table).unwrap(),
-                            Ok(None) => {}
-                            Err(err) => {
-                                eprintln!("Error: {err}");
-                            }
-                        }
-
-                        let status = stmt_status(stmt.pointer());
-                        let msg = match status {
-                            InProgressStatementStatus::Insert { num_inserts, name } => {
-                                format!(
-                                    "inserted {} rows into {} ",
-                                    HumanCount(num_inserts as u64),
-                                    name.unwrap_or("???".to_string())
-                                )
-                            }
-                            InProgressStatementStatus::Delete { num_deletes } => {
-                                format!("deleted {} rows ", HumanCount(num_deletes as u64))
-                            }
-                            InProgressStatementStatus::Update { num_updates } => {
-                                format!("updated {} rows ", HumanCount(num_updates as u64))
-                            }
-                            InProgressStatementStatus::Unknown => format!(""),
-                        };
-
-                        if timer {
-                            execute!(
-                                stdout(),
-                                SetForegroundColor(Color::Green),
-                                Print("✓ "),
-                                SetForegroundColor(Color::Grey),
-                                Print(format!("{} ", step.reference.to_string())),
-                                SetForegroundColor(Color::White),
-                                Print(msg),
-                                Print(format!("in {}", format_duration(start.elapsed()))),
-                                ResetColor,
-                                Print("\n")
-                            )
-                            .unwrap();
-                        }
-
-                        /*if timer {
-                            println!(
-                                "{}",
-                                colors::italic(format!(
-                                    "Finished in {}\n",
-                                    format_duration(start.elapsed())
-                                ))
-                            );
-                        }*/
-                        if let Some(trace_stmt_id) = trace_stmt_id {
-                            let mut x = rt.connection.prepare(r#"
-                          INSERT INTO solite_trace.steps (statement_id, addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle) 
-                          SELECT ?, addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle
-                          FROM bytecode(?)
-                          "#).unwrap().1.unwrap();
-                            x.bind_int64(1, trace_stmt_id);
-                            x.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer");
-                            x.nextx().unwrap();
-                        }
-                    }
-                    StepResult::DotCommand(cmd) => match cmd {
-                        DotCommand::Ask(cmd) => todo!(),
-                        DotCommand::Tables(cmd) => {
-                            let tables = cmd.execute(&rt);
-                            for table in tables {
-                                println!("{table}");
-                            }
-                        }
-                        DotCommand::Print(print_cmd) => print_cmd.execute(),
-                        DotCommand::Load(load_cmd) => match load_cmd.execute(&mut rt.connection) {
-                            Ok(_) => {
-                                println!("{} extension loaded", colors::green("✓"));
-                            }
-                            Err(err) => {
-                                eprintln!("Error loading extension: {err}");
-                            }
-                        },
-                        DotCommand::Open(open_cmd) => open_cmd.execute(&mut rt),
-                        DotCommand::Timer(enabled) => {
-                            timer = enabled;
-                            println!(
-                                "{} timer set {}",
-                                colors::green("✓"),
-                                if enabled { "on" } else { "off" }
-                            );
-                        }
-                        DotCommand::Parameter(param_cmd) => match param_cmd {
-                            solite_core::dot::ParameterCommand::Set { key, value } => {
-                                rt.define_parameter(key.clone(), value).unwrap();
-                                println!("{} parameter {} set", colors::green("✓"), key);
-                            }
-                            solite_core::dot::ParameterCommand::Unset(_) => todo!(),
-                            solite_core::dot::ParameterCommand::List => todo!(),
-                            solite_core::dot::ParameterCommand::Clear => todo!(),
-                        },
-                        DotCommand::Export(mut cmd) => match cmd.execute() {
-                            Ok(()) => {
-                                println!(
-                                    "{} exported results to {}",
-                                    colors::green("✓"),
-                                    cmd.target.to_string_lossy()
-                                );
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "Error exporting results to {}\n {}",
-                                    cmd.target.to_string_lossy(),
-                                    e
-                                );
-                            }
-                        },
-                        DotCommand::Shell(shell_command) => {
-                          let rx = shell_command.execute();
-                          while let Ok(msg) = rx.recv() {
-                              println!("{}", msg);
-                          }
-                        },
-                        DotCommand::Vegalite(vega_lite_command) => todo!(),
-                        DotCommand::Bench(cmd) => {
-                            todo!();
-                        }
-                    },
-                }
-            }
             None => break,
+            Some(Ok(step)) => match step.result {
+                StepResult::SqlStatement { stmt, .. } => handle_sql(
+                    &mut rt,
+                    &stmt,
+                    &step.reference.to_string(),
+                    flags.trace.is_some(),
+                    timer,
+                ),
+                StepResult::DotCommand(mut cmd) => {
+                    handle_dot_command(&mut rt, &mut cmd, &mut timer)
+                }
+            },
             Some(Err(step_error)) => match step_error {
                 StepError::Prepare {
                     error,

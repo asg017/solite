@@ -1,6 +1,6 @@
 use crate::{cli::CodegenArgs, errors::report_error};
-use solite_core::{sqlite::ColumnMeta, Runtime, StepError};
-use std::path::PathBuf;
+use solite_core::{sqlite::{ColumnMeta, Connection}, Runtime, StepError};
+use std::path::{self, PathBuf};
 
 #[derive(serde::Serialize, Debug)]
 struct Parameter {
@@ -21,10 +21,10 @@ enum ResultType {
 #[derive(serde::Serialize, Debug)]
 struct Export {
     name: String,
+    result_type: ResultType,
+    sql: String,
     parameters: Vec<Parameter>,
     columns: Vec<ColumnMeta>,
-    sql: String,
-    result_type: ResultType,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -55,12 +55,47 @@ fn parse_line(line: &str) -> Option<(String, Vec<String>)> {
     }
 }
 
-fn report_from_file(source: &str, filename: &PathBuf) -> anyhow::Result<Report> {
+enum BaseDatabaseType {
+  None,
+  Database(PathBuf),
+  SqlFile(PathBuf),
+}
+
+fn report_from_file(source: &str, filename: &PathBuf, base_db_type: BaseDatabaseType) -> anyhow::Result<Report> {
     let mut report = Report {
         setup: vec![],
         exports: vec![],
     };
+    
     let mut rt = Runtime::new(None);
+
+    let conn = match base_db_type {
+        BaseDatabaseType::None => Connection::open_in_memory().unwrap(),
+        BaseDatabaseType::Database(path) => {
+          let base_db = Connection::open(path.to_str().unwrap()).unwrap();
+            let db = Connection::open_in_memory().unwrap();
+
+            let stmt = base_db.prepare("select name, sql from sqlite_master where type = 'table'").unwrap()
+                .1.unwrap();
+              loop {
+                match stmt.nextx() {
+                  Ok(None) => break,
+                  Ok(Some(row)) => {
+                    let _name = row.value_at(0);
+                    let sql = row.value_at(1);
+                    db.execute(sql.as_str()).unwrap();
+                  }
+                  Err(_) => todo!(),
+                }
+              }
+            db
+        }
+        BaseDatabaseType::SqlFile(path) => {
+            let db = Connection::open_in_memory().unwrap();
+            db
+        } 
+    };
+    rt.connection = conn;
     rt.enqueue(
         &filename.to_string_lossy().to_string(),
         source,
@@ -149,8 +184,21 @@ fn report_from_file(source: &str, filename: &PathBuf) -> anyhow::Result<Report> 
 }
 
 pub(crate) fn codegen(cmd: CodegenArgs) -> Result<(), ()> {
+  let db_type = match cmd.schema {
+        Some(path) if path.extension().map_or(false, |ext| ext == "db") => {
+            BaseDatabaseType::Database(path)
+        }
+        Some(path) if path.extension().map_or(false, |ext| ext == "sql") => {
+            BaseDatabaseType::SqlFile(path)
+        }
+        Some(path) => {
+            eprintln!("Unsupported schema file type: {}", path.display());
+            return Err(());
+        }
+        _ => BaseDatabaseType::None,
+    };
     let src = std::fs::read_to_string(&cmd.file).unwrap();
-    let report = report_from_file(&src, &cmd.file).unwrap();
+    let report = report_from_file(&src, &cmd.file, db_type).unwrap();
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
     Ok(())
 }
@@ -162,12 +210,12 @@ mod tests {
     use super::*;
 
     fn snapshot(src: &str) {
-        assert_yaml_snapshot!(report_from_file(src, &PathBuf::from("[fake]")).unwrap());
+        assert_yaml_snapshot!(report_from_file(src, &PathBuf::from("[fake]"), BaseDatabaseType::None).unwrap());
     }
     #[test]
     fn test_report() {
         let result =
-            report_from_file("-- name: xxx\nselect 1, 2, 3;", &PathBuf::from("[fake]")).unwrap();
+            report_from_file("-- name: xxx\nselect 1, 2, 3;", &PathBuf::from("[fake]"), BaseDatabaseType::None).unwrap();
         assert_yaml_snapshot!(result);
         snapshot(
             r#"

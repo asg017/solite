@@ -3,7 +3,7 @@ pub mod replacement_scans;
 pub mod sqlite;
 pub mod exporter;
 
-use crate::dot::{DotCommand, ShellCommand};
+use crate::dot::{DotCommand, ShellCommand, AskCommand};
 use crate::sqlite::Connection;
 use dot::{parse_dot, ParseDotError};
 use libsqlite3_sys::{
@@ -167,14 +167,23 @@ impl Runtime {
                 }
             }
 
-            if code.starts_with('.') || code.starts_with("!") {
+            if code.starts_with('.') || code.starts_with("!")  || code.starts_with('?') {
                 let end_idx = code.find('\n').unwrap_or(code.len());
                 let dot_line = code.get(0..end_idx).unwrap();
                 let source = block.name.to_string();
                 let rest: &str = code.get(end_idx..).unwrap();
                     
 
-                let cmd = if !code.starts_with('!') {
+                let cmd = if code.starts_with('!') {
+                  DotCommand::Shell(ShellCommand {
+                        command: dot_line.get(1..end_idx).unwrap().trim().to_string(),
+                    })
+                }else if code.starts_with('?') {
+                  DotCommand::Ask(AskCommand {
+                        message: dot_line.get(1..end_idx).unwrap().trim().to_string(),
+                    })
+                }
+                else {
                     let sep_idx = dot_line.find(' ').unwrap_or(dot_line.len());
                     let dot_command = dot_line.get(1..sep_idx).unwrap().trim().to_string();
                     let dot_args = dot_line.get(sep_idx..).unwrap().trim().to_string();
@@ -199,10 +208,6 @@ impl Runtime {
                             return Some(Err(StepError::ParseDot(err)));
                       }
                     }
-                } else {
-                    DotCommand::Shell(ShellCommand {
-                        command: dot_line.get(1..end_idx).unwrap().trim().to_string(),
-                    })
                 };
 
                 if !rest.is_empty() {

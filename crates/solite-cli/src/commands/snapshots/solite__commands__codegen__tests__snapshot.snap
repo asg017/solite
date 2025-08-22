@@ -1,12 +1,14 @@
 ---
 source: crates/solite-cli/src/commands/codegen.rs
-expression: "report_from_file(src, &PathBuf::from(\"[fake]\")).unwrap()"
+expression: "report_from_file(src, &PathBuf::from(\"[fake]\"),\nBaseDatabaseType::None).unwrap()"
 snapshot_kind: text
 ---
 setup:
   - "create table t(a,b text,c int);"
 exports:
   - name: getA
+    result_type: Rows
+    sql: select a from t;
     parameters: []
     columns:
       - name: a
@@ -14,9 +16,9 @@ exports:
         origin_table: t
         origin_column: a
         decltype: ~
-    sql: select a from t;
-    result_type: Rows
   - name: getB
+    result_type: Rows
+    sql: select b from t;
     parameters: []
     columns:
       - name: b
@@ -24,9 +26,9 @@ exports:
         origin_table: t
         origin_column: b
         decltype: TEXT
-    sql: select b from t;
-    result_type: Rows
   - name: getC
+    result_type: Rows
+    sql: select c from t;
     parameters: []
     columns:
       - name: c
@@ -34,9 +36,9 @@ exports:
         origin_table: t
         origin_column: c
         decltype: INT
-    sql: select c from t;
-    result_type: Rows
   - name: withParams
+    result_type: List
+    sql: "select c from t where a = $a::text and b = $b::text;"
     parameters:
       - full_name: "$a::text"
         name: a
@@ -50,5 +52,3 @@ exports:
         origin_table: t
         origin_column: c
         decltype: INT
-    sql: "select c from t where a = $a::text and b = $b::text;"
-    result_type: List

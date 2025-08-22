@@ -10,3 +10,6 @@ tests/latimes-place-totals.csv
 
 
 examples/codegen-python
+
+.env
+.envrc

@@ -11,6 +11,7 @@ mod timer;
 mod vegalite;
 
 pub use crate::dot::{
+  ask::AskCommand,
   bench::BenchCommand,
   load::LoadCommand,
   sh::ShellCommand,
@@ -26,7 +27,7 @@ pub use load::LoadCommandSource;
 use param::parse_parameter;
 use thiserror::Error;
 
-use crate::{dot::ask::AskCommand, Runtime};
+use crate:: Runtime;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Error, Debug, PartialEq)]

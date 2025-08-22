@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{collections::HashMap, env, path::{Path, PathBuf}};
 
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::ExportFormat;
@@ -113,6 +113,8 @@ pub struct BenchArgs {
 #[derive(Args, Debug)]
 pub struct CodegenArgs {
     pub file: PathBuf,
+    #[arg(long)]
+    pub schema: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

@@ -1,6 +1,17 @@
 use serde::Serialize;
 use crate::Runtime;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
+
+/**
+ * Things that should be configurable:
+ * 
+ * 1. Prompt template
+ * 2. Model
+ * 3. Endpoint
+ * 4. API key
+ */
+
+
 static PROMPT: &str = r#"
 
 Given the following SQLite database schema,
@@ -21,33 +32,39 @@ pub struct AskCommand {
 }
 
 impl AskCommand {
-    pub fn execute(&self, runtime: &mut Runtime) {
-      let stmt = runtime.connection.prepare("select sql from sqlite_master where type = 'table'").unwrap().1.unwrap();
-      let mut schema = String::new();
-      loop {
-
-        match stmt.nextx() {
-          Ok(None) => break,
-          Ok(Some(row)) => {
-            schema += &format!("{}\n", row.value_at(0).as_str());
+    pub fn prompt(&self, runtime: &mut Runtime) -> String {
+        let schema = self.schema(runtime);
+        PROMPT.replace("{SCHEMA}", &schema).replace("{QUESTION}", &self.message)
+    }
+    pub fn schema(&self, runtime: &mut Runtime) -> String {
+        let stmt = runtime.connection.prepare("select sql from sqlite_master where type = 'table'").unwrap().1.unwrap();
+        let mut schema = String::new();
+        loop {
+          match stmt.nextx() {
+            Ok(None) => break,
+            Ok(Some(row)) => {
+              schema += &format!("{}\n", row.value_at(0).as_str());
+            }
+            Err (e) => todo!("{}", e),
+  
           }
-          Err (e) => todo!("{}", e),
-
         }
+        schema
       }
-
-      let prompt = PROMPT.replace("{SCHEMA}", &schema).replace("{QUESTION}", &self.message);
-        println!("{prompt}");
-      xxx(&prompt);
+    pub fn execute(&self, runtime: &mut Runtime) -> anyhow::Result<std::sync::mpsc::Receiver<anyhow::Result<String>>> {
+      let prompt = self.prompt(runtime);
+      open_router_completions(&prompt)
     }
 }
 
 use serde_json::Value;
 
-fn xxx(prompt: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = "TODO";
+fn open_router_completions(prompt: &str) -> anyhow::Result<std::sync::mpsc::Receiver<anyhow::Result<String>>> {
+    let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<String>>();
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .expect("OPENROUTER_API_KEY environment variable not set");
     let url = "https://openrouter.ai/api/v1/chat/completions";
-    let url = "http://127.0.0.1:8080/v1/chat/completions";
+    //let url = "http://127.0.0.1:8080/v1/chat/completions";
 
     let payload = serde_json::json!({
         "model": "openai/gpt-4o",
@@ -55,16 +72,14 @@ fn xxx(prompt: &str) -> Result<(), Box<dyn std::error::Error>> {
         "stream": true
     });
 
-    let resp = ureq::post(url)
+    std::thread::spawn(move || ->anyhow::Result<()> {
+      let resp = ureq::post(url)
         .header("Authorization", &format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream")
         .send(&payload.to_string())?;
 
     let reader = BufReader::new(resp.into_body().into_reader());
-    let stdout = std::io::stdout();
-    let mut handle = stdout.lock();
-
     for line in reader.lines() {
         let line = line?;
         let trimmed = line.trim();
@@ -85,13 +100,12 @@ fn xxx(prompt: &str) -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|d| d.get("content"))
                     .and_then(|c| c.as_str())
                 {
-                    write!(handle, "{}", content)?;
-                    handle.flush()?;
+                  tx.send(Ok(content.to_string()))?;
                 }
             }
         }
     }
-    println!("\n");
-
     Ok(())
+    });
+    Ok(rx)
 }

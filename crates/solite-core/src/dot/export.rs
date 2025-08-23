@@ -8,7 +8,6 @@ use crate::{
 use std::path::PathBuf;
 use regex::{Captures, Regex};
 
-
 #[derive(Serialize, Debug)]
 pub struct ExportCommand {
     pub target: PathBuf,
@@ -41,6 +40,10 @@ impl ExportCommand {
                     // TODO: suspicious
                     rest_length: rest2.unwrap_or(rest.len()),
                 })
+            }
+            Err(error) => {
+              eprintln!("Error preparing statement for export: {}", error);
+              todo!()
             }
             _ => todo!(),
         }

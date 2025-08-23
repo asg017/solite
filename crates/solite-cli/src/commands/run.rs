@@ -177,29 +177,7 @@ fn handle_sql(
     is_trace: bool,
     timer: bool,
 ) {
-    /*
-    println!(
-        "{} {}",
-        colors::green(step.reference.to_string()),
-        colors::gray(stmt.sql().trim())
-    );*/
-
-    /*
-     execute!(
-         stdout(),
-         SetForegroundColor(Color::Green),
-         Print(step.reference.to_string()),
-         Print(" "),
-         SetForegroundColor(Color::Blue),
-         Print(stmt.sql().replace("\n", " ").trim()),
-         //Print("\n"),
-         ResetColor
-     )
-     .unwrap();
-    */
-
     let pb = indicatif::ProgressBar::new_spinner();
-    //pb.enable_steady_tick(Duration::from_millis(200));
     pb.set_style(
         indicatif::ProgressStyle::with_template("{spinner:.cyan} {elapsed} {wide_msg}")
             .unwrap()
@@ -220,13 +198,9 @@ fn handle_sql(
         None
     };
 
-    let mut x = 4;
-    //let xx = Rc::new(stmt);
-    //let safe_ptr = UnsafeSendPtr(stmt_ptr);
-    let preamble2 = stmt.sql();
-    let preamble2 = preamble2.replace("\n", " ");
-    let p = stmt.pointer();
     let start = jiff::Timestamp::now();
+    let preamble2 = stmt.sql();
+    let p = stmt.pointer();
     let r = step_reference.to_string();
     let pbx = pb.clone();
     runtime.connection.set_progress_handler(
@@ -258,15 +232,12 @@ fn handle_sql(
                 }
                 InProgressStatementStatus::Unknown => format!("unknown"),
             };
-            ///std::io::Write::flush(&mut std::io::stdout()).unwrap();
             let duration = Timestamp::now() - *start;
             let round = SpanRound::new();
             round.largest(jiff::Unit::Millisecond);
-            //duration.round(round);
             let mut printer = SpanPrinter::new()
                 .hours_minutes_seconds(true)
                 .fractional(Some(FractionalUnit::Second));
-            //printer;
             let mut buf = String::new();
             printer.print_span(&duration, &mut buf).unwrap();
             pbx.clone()
@@ -275,39 +246,15 @@ fn handle_sql(
                 ))
                 .with_message(format!("{r} {msg}"))
                 .tick();
-            /*
-              execute!(
-                  stdout(),
-                  cursor::MoveToColumn(0),
-                  Clear(ClearType::CurrentLine),
-                  Print(format!("◯ {r} ")),
-                  Print(format!("{buf} ")),
-                  SetForegroundColor(Color::Grey),
-                  Print(r.clone()),
-                  Print(" "),
-                  SetForegroundColor(Color::Blue),
-                  Print(&preamble2[0..10]),
-                  SetForegroundColor(Color::White),
-                  Print(msg),
-                  ResetColor
-              )
-              .unwrap();
-            */
             false
         }),
         (p, start),
     );
 
     let start = std::time::Instant::now();
-    let table = crate::ui::table_from_statement(&stmt, true);
     pb.finish_and_clear();
+    let table = crate::ui::table_from_statement(&stmt, true);
 
-    /*execute!(
-        stdout(),
-        cursor::MoveToColumn(0),
-        Clear(ClearType::CurrentLine),
-    )
-    .unwrap();*/
     match table {
         Ok(Some(table)) => print_stdout(table).unwrap(),
         Ok(None) => {}

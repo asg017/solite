@@ -1,5 +1,5 @@
-mod highlighter;
 mod completer;
+mod highlighter;
 use crate::cli::ReplArgs;
 use crate::commands::repl::completer::ReplCompleter;
 use crate::commands::repl::highlighter::ReplHighlighter;
@@ -21,8 +21,6 @@ use std::borrow::Cow::{self, Borrowed, Owned};
 use std::cell::{RefCell, RefMut};
 use std::io::Write;
 use std::rc::Rc;
-
-
 
 fn is_all_whitespace(s: &str) -> bool {
     for c in s.chars() {
@@ -58,6 +56,20 @@ impl Validator for ReplValidator {
         }
         if solite_core::sqlite::complete(input) {
             return Ok(ValidationResult::Valid(None));
+        }
+        if input.trim_start().starts_with(".export") {
+            match input.trim_start().splitn(2, '\n').nth(1) {
+                Some(rest) => {
+                    if solite_core::sqlite::complete(rest) {
+                        return Ok(ValidationResult::Valid(None));
+                    } else {
+                        return Ok(ValidationResult::Incomplete);
+                    }
+                }
+                None => {
+                    return Ok(ValidationResult::Incomplete);
+                }
+            }
         }
         // dot commands and special prefixes
         if input.trim_start().starts_with(['.', '!', '?']) {
@@ -168,14 +180,19 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             }
             println!();
         }
-        DotCommand::Export(_export_command) => {
-          eprintln!("Export command is not supported in the REPL yet.");
+        DotCommand::Export(mut export_command) => match export_command.execute() {
+            Ok(_) => println!("✓ exported to {}", export_command.target.display()),
+            Err(e) => eprintln!(
+                "✗ failed to export to {}: {}",
+                export_command.target.display(),
+                e
+            ),
         },
         DotCommand::Vegalite(_vega_lite_command) => {
-          eprintln!("Vega-Lite command is not supported in the REPL yet.");
+            eprintln!("Vega-Lite command is not supported in the REPL yet.");
         }
         DotCommand::Bench(_bench_command) => {
-          eprintln!("Bench command is not supported in the REPL yet.");
+            eprintln!("Bench command is not supported in the REPL yet.");
         }
     }
 }
@@ -185,34 +202,32 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
 static REPL_SPECIAL_COMMANDS: [&str; 1] = ["\\e"];
 
 fn repl_editor_command() -> anyhow::Result<String> {
-  let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-  let mut tmpfile = std::env::temp_dir();
-  tmpfile.push("solite_repl.sql");
-  std::fs::write(&tmpfile, "").unwrap();
-  let status = std::process::Command::new(editor)
-      .arg(&tmpfile)
-      .status()
-      .unwrap();
-  if status.success() {
-      let code = std::fs::read_to_string(&tmpfile).unwrap();
-      let _ = std::fs::remove_file(&tmpfile);
-      Ok(code)
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let mut tmpfile = std::env::temp_dir();
+    tmpfile.push("solite_repl.sql");
+    std::fs::write(&tmpfile, "").unwrap();
+    let status = std::process::Command::new(editor)
+        .arg(&tmpfile)
+        .status()
+        .unwrap();
+    if status.success() {
+        let code = std::fs::read_to_string(&tmpfile).unwrap();
+        let _ = std::fs::remove_file(&tmpfile);
+        Ok(code)
     } else {
-    let _ = std::fs::remove_file(&tmpfile);
-    eprintln!("Editor exited with non-zero status");
-    Err(anyhow::anyhow!("Editor exited with non-zero status"))
-  }
+        let _ = std::fs::remove_file(&tmpfile);
+        eprintln!("Editor exited with non-zero status");
+        Err(anyhow::anyhow!("Editor exited with non-zero status"))
+    }
 }
 
 fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
-    
     // repl specific commands
     let mut code = code.to_owned();
     if REPL_SPECIAL_COMMANDS.contains(&code.trim()) {
         match code.trim() {
             "\\e" => {
-              code = repl_editor_command().unwrap();
-
+                code = repl_editor_command().unwrap();
             }
             _ => unreachable!(),
         }
@@ -254,7 +269,6 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
         }
     }
 }
-
 
 // possible arrows: › ❱ ❯
 // possible dots: •*

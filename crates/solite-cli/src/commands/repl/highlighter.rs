@@ -211,7 +211,7 @@ pub fn highlight_sql(copy: &mut String) -> String {
      */
 }
 pub fn highlight_dot(copy: &mut String) {
-    let keywords = ["load", "tables", "open"];
+    let keywords = ["load", "tables", "open", "export"];
     for kw in keywords.iter() {
         if let Some(s) = copy.find(kw) {
             //copy.replace_range(s..s + kw.len(), &format!("\x1b[1;34m{}\x1b[0m", kw));

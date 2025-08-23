@@ -14,7 +14,7 @@ lazy_static::lazy_static! {
   static ref TITLE_SEPARATOR: HorizontalLine = HorizontalLine::new('├', '┤', '┼', '─');
   pub static ref SEPARATOR: Separator =Separator::builder()
   .column(Some(*COLUMN_SEPARATOR))
-  .row(None)
+  .row(Some(HorizontalLine::new('├', '┤', '┼', '─')))
   .title(Some(*TITLE_SEPARATOR))
   .build();
 }
@@ -46,7 +46,7 @@ pub(crate) fn ui_row(row: &Vec<ValueRefX>, color: bool) -> Vec<CellStruct> {
             ValueRefXValue::Text(value) => (unsafe { String::from_utf8_unchecked(value.to_vec()) })
                 .cell()
                 .justify(Justify::Left)
-                .foreground_color(None),
+                .foreground_color(if color { Some(Color::Rgb(50,200,50)) } else { None }),
             ValueRefXValue::Blob(value) => format!("Blob<{}>", value.len())
                 .cell()
                 .justify(Justify::Center)

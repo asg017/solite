@@ -1,19 +1,38 @@
 use solite_core::{exporter::ExportFormat, replacement_scans::replacement_scan, Runtime};
 use std::{
     fmt,
-    io::{stdout, Write},
+    io::{Write, stdout}, path::PathBuf,
 };
 
 use crate::cli::QueryArgs;
 
 fn query_impl(args: QueryArgs, is_exec: bool) -> anyhow::Result<()> {
-    let mut runtime = Runtime::new(args.database.map(|p| p.to_string_lossy().to_string()));
+    let (db_path, sql) = match args.database {
+      None => (None, args.statement),
+      // determine if the 1st arg is a path or sql
+      Some(arg1) => {
+        let arg0 = args.statement;
+        if arg1.exists() {
+            (Some(arg1), arg0)
+        } else {
+            let p = PathBuf::from(arg0);
+            assert!(p.exists());
+            (Some(p), arg1.to_str().unwrap().to_string())
+        }
+      }
+    };
+    let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()));
+    if let Some(exts) = args.load_extension {
+        for ext in exts {
+            runtime.connection.load_extension(&ext.to_string_lossy(), &None)?;
+        }
+    }
     for chunk in args.parameters.chunks(2) {
         runtime
             .define_parameter(chunk[0].clone(), chunk[1].clone())
             .unwrap();
     }
-    let statement = args.statement;
+    let statement = sql;
     let mut stmt;
     loop {
         stmt = match runtime.prepare_with_parameters(statement.as_str()) {

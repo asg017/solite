@@ -7,3 +7,5 @@ pub mod bench;
 pub mod jupyter;
 pub mod snapshot;
 pub mod codegen;
+pub mod tui;
+pub mod rpc;

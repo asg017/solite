@@ -1,6 +1,117 @@
 use rustyline::highlight::Highlighter;
 use solite_stdlib::BUILTIN_FUNCTIONS;
-use std::borrow::Cow::{self, Borrowed, Owned};
+use std::{borrow::Cow::{self, Borrowed, Owned}, sync::LazyLock};
+
+#[derive(Clone)]
+pub (crate) struct SqlTheme {
+  keyword: SoliteColor,
+  dot: SoliteColor,
+  comment: SoliteColor,
+  parameter: SoliteColor,
+  types: SoliteColor,
+  string: SoliteColor,
+  function: SoliteColor,
+  builtin: SoliteColor,
+  paren: SoliteColor,
+  operator: SoliteColor,
+  number: SoliteColor,
+}
+
+pub(crate) static CTP_MOCHA_THEME: LazyLock<SqlTheme> = LazyLock::new(|| SqlTheme {
+  keyword: ctp_mocha_colors::MAUVE.clone(),
+  dot: ctp_mocha_colors::BLUE.clone(),
+  comment: ctp_mocha_colors::OVERLAY2.clone(),
+  parameter: ctp_mocha_colors::MAROON.clone(),
+  types: ctp_mocha_colors::YELLOW.clone(),
+  string: ctp_mocha_colors::GREEN.clone(),
+  function: ctp_mocha_colors::BLUE.clone(),
+  builtin: ctp_mocha_colors::BLUE.clone(),
+  paren: ctp_mocha_colors::OVERLAY2.clone(),
+  operator: ctp_mocha_colors::SKY.clone(),
+  number: ctp_mocha_colors::PEACH.clone(),
+});
+
+impl SqlTheme {
+  pub(crate) fn style_keyword(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.keyword.clone().into()));
+      style_spec.bold();
+      style_spec
+    }).to_string()
+  }
+  pub(crate) fn style_dot(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.dot.clone().into()));
+      style_spec
+    }).to_string()
+  }
+  fn style_comment(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.comment.clone().into()));
+      style_spec
+    }).to_string()
+  }
+  fn style_parameter(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.parameter.clone().into()));
+      style_spec
+    }).to_string()  
+  }
+  fn style_types(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.types.clone().into()));
+      style_spec
+    }).to_string()  
+  }
+  fn style_string(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.string.clone().into()));
+      style_spec
+    }).to_string()  
+  }
+  fn style_function(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.function.clone().into()));
+      style_spec
+    }).to_string()
+  }
+  fn style_builtin(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.builtin.clone().into())).set_bold(true);
+      style_spec
+    }).to_string()
+  }
+  fn style_paren(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.paren.clone().into()));
+      style_spec
+    }).to_string()
+  }
+  fn style_operator(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.operator.clone().into()));
+      style_spec
+    }).to_string()
+  }
+  fn style_number(&self, s: &str) -> String {
+    sql_highlighter::style(s, &{
+      let mut style_spec = termcolor::ColorSpec::new();
+      style_spec.set_fg(Some(self.number.clone().into()));
+      style_spec
+    }).to_string()
+  }
+  
+}
 
 pub mod sql_highlighter {
     use core::fmt;
@@ -20,7 +131,7 @@ pub mod sql_highlighter {
         ansi_writer.reset().unwrap();
         String::from_utf8_lossy(&v).into_owned()
     }
-
+    /*
     pub(crate) fn keyword<S: AsRef<str>>(s: S) -> impl fmt::Display {
         static KEYWORD: OnceLock<ColorSpec> = OnceLock::new();
         let k = KEYWORD.get_or_init(|| {
@@ -122,28 +233,38 @@ pub mod sql_highlighter {
         });
         style(s, k)
     }
+     */
 }
 
 use solite_lexer::{tokenize, Kind, Token};
+
+use crate::themes::{SoliteColor, ctp_mocha_colors};
 pub fn highlight_sql(copy: &mut String) -> String {
     let tokens = tokenize(copy.as_str());
     let mut hl = String::new();
     let mut iter = tokens.iter().peekable();
     let mut prevs: Vec<&Token> = vec![];
+    let theme = CTP_MOCHA_THEME.clone();
     while let Some(token) = iter.next() {
         let s = match token.kind {
-            Kind::Comment => sql_highlighter::comment(&copy[token.start..token.end]).to_string(),
+            Kind::Comment => theme.style_comment(
+                &copy[token.start..token.end]
+            ), //sql_highlighter::comment(&copy[token.start..token.end]).to_string(),
             Kind::Parameter => {
-                sql_highlighter::parameter(&copy[token.start..token.end]).to_string()
+                //sql_highlighter::parameter(&copy[token.start..token.end]).to_string()
+                theme.style_parameter(&copy[token.start..token.end])
             }
             Kind::Text | Kind::Int | Kind::Float | Kind::Blob | Kind::Bit => {
-                sql_highlighter::types(&copy[token.start..token.end]).to_string()
+                //sql_highlighter::types(&copy[token.start..token.end]).to_string()
+                theme.style_types(&copy[token.start..token.end])
             }
-            Kind::Number => sql_highlighter::number(&copy[token.start..token.end]).to_string(),
+            Kind::Number => theme.style_number(&copy[token.start..token.end]).to_string(),
             Kind::Plus | Kind::Minus | Kind::Eof | Kind::Pipe | Kind::Div | Kind::Lt | Kind::Gt => {
-                sql_highlighter::operator(&copy[token.start..token.end]).to_string()
+                //sql_highlighter::operator(&copy[token.start..token.end]).to_string()
+                theme.style_operator(&copy[token.start..token.end])
             }
-            Kind::String => sql_highlighter::string(&copy[token.start..token.end]).to_string(),
+            Kind::String => //sql_highlighter::string(&copy[token.start..token.end]).to_string(),
+                theme.style_string(&copy[token.start..token.end]),
             Kind::Asterisk
             | Kind::LBracket
             | Kind::RBracket
@@ -152,10 +273,13 @@ pub fn highlight_sql(copy: &mut String) -> String {
             | Kind::Dot
             | Kind::Unknown => (&copy[token.start..token.end]).to_string(),
             Kind::LParen | Kind::RParen => {
-                sql_highlighter::paren(&copy[token.start..token.end]).to_string()
+                //sql_highlighter::paren(&copy[token.start..token.end]).to_string()
+                theme.style_paren(&copy[token.start..token.end])
             }
             Kind::SingleArrowOperator | Kind::DoubleArrowOperator => {
-                sql_highlighter::builtin(&copy[token.start..token.end]).to_string()
+                //sql_highlighter::builtin(&copy[token.start..token.end]).to_string()
+                // TODO builtin
+                theme.style_operator(&copy[token.start..token.end])
             }
             Kind::Identifier => {
                 // if the next token is a '('
@@ -168,15 +292,22 @@ pub fn highlight_sql(copy: &mut String) -> String {
                         .position(|r| *r == (&copy[token.start..token.end]).trim())
                         .is_some()
                     {
-                        sql_highlighter::builtin(&copy[token.start..token.end]).to_string()
+                        //sql_highlighter::builtin(&copy[token.start..token.end]).to_string()
+                        theme.style_operator(&copy[token.start..token.end])
                     } else {
-                        sql_highlighter::function(&copy[token.start..token.end]).to_string()
+                        //sql_highlighter::function(&copy[token.start..token.end]).to_string()
+                        theme.style_function(
+                            &copy[token.start..token.end]
+                        ) 
                     }
                 } else {
                     (&copy[token.start..token.end]).to_string()
                 }
             }
-            _ => sql_highlighter::keyword(&copy[token.start..token.end]).to_string(),
+            _ => //sql_highlighter::keyword(&copy[token.start..token.end]).to_string(),
+                theme.style_keyword(
+                    &copy[token.start..token.end]
+                )
         };
         hl.push_str(s.as_str());
         prevs.push(token);
@@ -217,7 +348,8 @@ pub fn highlight_dot(copy: &mut String) {
             //copy.replace_range(s..s + kw.len(), &format!("\x1b[1;34m{}\x1b[0m", kw));
             copy.replace_range(
                 s..s + kw.len(),
-                sql_highlighter::dot(kw).to_string().as_str(),
+                CTP_MOCHA_THEME.style_dot(kw).as_str(),
+                //sql_highlighter::dot(kw).to_string().as_str(),
             );
         }
     }

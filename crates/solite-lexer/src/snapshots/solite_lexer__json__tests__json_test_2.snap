@@ -1,0 +1,231 @@
+---
+source: crates/solite-lexer/src/json.rs
+expression: result
+snapshot_kind: text
+---
+[
+    (
+        "{",
+        Token {
+            kind: LBrace,
+            start: 0,
+            end: 1,
+            string_context: None,
+            text: "{",
+        },
+    ),
+    (
+        "\"active\"",
+        Token {
+            kind: String,
+            start: 1,
+            end: 9,
+            string_context: Some(
+                Key,
+            ),
+            text: "\"active\"",
+        },
+    ),
+    (
+        ":",
+        Token {
+            kind: Colon,
+            start: 9,
+            end: 10,
+            string_context: Some(
+                Value,
+            ),
+            text: ":",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 10,
+            end: 11,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "true",
+        Token {
+            kind: True,
+            start: 11,
+            end: 15,
+            string_context: Some(
+                Value,
+            ),
+            text: "true",
+        },
+    ),
+    (
+        ",",
+        Token {
+            kind: Comma,
+            start: 15,
+            end: 16,
+            string_context: Some(
+                Value,
+            ),
+            text: ",",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 16,
+            end: 17,
+            string_context: Some(
+                Key,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "\"inactive\"",
+        Token {
+            kind: String,
+            start: 17,
+            end: 27,
+            string_context: Some(
+                Key,
+            ),
+            text: "\"inactive\"",
+        },
+    ),
+    (
+        ":",
+        Token {
+            kind: Colon,
+            start: 27,
+            end: 28,
+            string_context: Some(
+                Value,
+            ),
+            text: ":",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 28,
+            end: 29,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "false",
+        Token {
+            kind: False,
+            start: 29,
+            end: 34,
+            string_context: Some(
+                Value,
+            ),
+            text: "false",
+        },
+    ),
+    (
+        ",",
+        Token {
+            kind: Comma,
+            start: 34,
+            end: 35,
+            string_context: Some(
+                Value,
+            ),
+            text: ",",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 35,
+            end: 36,
+            string_context: Some(
+                Key,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "\"data\"",
+        Token {
+            kind: String,
+            start: 36,
+            end: 42,
+            string_context: Some(
+                Key,
+            ),
+            text: "\"data\"",
+        },
+    ),
+    (
+        ":",
+        Token {
+            kind: Colon,
+            start: 42,
+            end: 43,
+            string_context: Some(
+                Value,
+            ),
+            text: ":",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 43,
+            end: 44,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "null",
+        Token {
+            kind: Null,
+            start: 44,
+            end: 48,
+            string_context: Some(
+                Value,
+            ),
+            text: "null",
+        },
+    ),
+    (
+        "}",
+        Token {
+            kind: RBrace,
+            start: 48,
+            end: 49,
+            string_context: Some(
+                Value,
+            ),
+            text: "}",
+        },
+    ),
+    (
+        "",
+        Token {
+            kind: Eof,
+            start: 49,
+            end: 49,
+            string_context: None,
+            text: "",
+        },
+    ),
+]

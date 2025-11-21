@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result};
+use cli_table::format;
 use html_builder::*;
 use jupyter_protocol::{
     ClearOutput, CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput,
@@ -8,18 +9,110 @@ use jupyter_protocol::{
 };
 use runtimelib::{KernelIoPubConnection, KernelShellConnection};
 use solite_core::{
-    dot::{DotCommand, LoadCommandSource},
+    dot::{sh::ShellResult, DotCommand, LoadCommandSource},
     sqlite::{self, ColumnMeta, Statement, ValueRefX, ValueRefXValue},
     Runtime, StepError, StepResult,
 };
-use std::fmt::Write;
 use std::path::PathBuf;
+use std::{fmt::Write, sync::LazyLock};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub struct UiResponse {
     text: String,
     html: Option<String>,
+}
+
+use crate::themes::ctp_mocha_colors;
+
+fn html_json(tr: &mut Node, contents: &str) {
+    let mut td = tr.td().attr(&format!(
+        "style=\"color: {}; display: inline-block;\"",
+        ctp_mocha_colors::TEXT.clone().to_hex_string()
+    ));
+    let tokens = solite_lexer::json::tokenize(contents);
+    for token in tokens {
+        match token.kind {
+            solite_lexer::json::Kind::String => {
+                let color = if token.string_context == Some(solite_lexer::json::StringContext::Key)
+                {
+                    format!("color: {};", ctp_mocha_colors::BLUE.clone().to_hex_string())
+                } else {
+                    format!(
+                        "color: {};",
+                        ctp_mocha_colors::GREEN.clone().to_hex_string()
+                    )
+                };
+                let char_count = token.text.chars().count();
+                if false
+                /*char_count > 32*/
+                {
+                    let start: String = token.text.chars().take(16).collect();
+                    let middle: String =
+                        token.text.chars().skip(16).take(char_count - 32).collect();
+                    let end: String = token.text.chars().skip(char_count - 16).collect();
+                    let mut span = td.span().attr(format!("style=\"{}\"", color).as_str());
+                    write!(span.span(), "{}", start).unwrap();
+                    write!(span.span(), "…").unwrap();
+                    write!(span.span(), "{}", end).unwrap();
+                    //write!(span, "{}…{}", start, end).unwrap();
+                } else {
+                    let mut span = td.span().attr(format!("style=\"{}\"", color).as_str());
+                    write!(span, "{}", token.text).unwrap();
+                }
+            }
+            solite_lexer::json::Kind::Number => {
+                let mut span = td.span().attr(
+                    format!(
+                        "style=\"color: {};\"",
+                        ctp_mocha_colors::PEACH.clone().to_hex_string()
+                    )
+                    .as_str(),
+                );
+                write!(span, "{}", token.text).unwrap();
+            }
+            solite_lexer::json::Kind::Null => {
+                let mut span = td.span().attr(
+                    format!(
+                        "style=\"color: {};\"",
+                        ctp_mocha_colors::SUBTEXT1.clone().to_hex_string()
+                    )
+                    .as_str(),
+                );
+                write!(span, "{}", token.text).unwrap();
+            }
+            solite_lexer::json::Kind::True | solite_lexer::json::Kind::False => {
+                let mut span = td.span().attr(
+                    format!(
+                        "style=\"color: {};\"",
+                        ctp_mocha_colors::MAROON.clone().to_hex_string()
+                    )
+                    .as_str(),
+                );
+                write!(span, "{}", token.text).unwrap();
+            }
+
+            solite_lexer::json::Kind::Whitespace => {
+                let mut span = td.span();
+                write!(span, "").unwrap();
+            }
+
+            solite_lexer::json::Kind::LBrace
+            | solite_lexer::json::Kind::RBrace
+            | solite_lexer::json::Kind::LBracket
+            | solite_lexer::json::Kind::RBracket
+            | solite_lexer::json::Kind::Colon
+            | solite_lexer::json::Kind::Comma => {
+                let mut span = td.span();
+                write!(span, "{}", token.text).unwrap();
+            }
+
+            solite_lexer::json::Kind::Unknown => {
+                todo!()
+            }
+            solite_lexer::json::Kind::Eof => {}
+        }
+    }
 }
 
 fn html_tr_from_row<'a>(tbody: &'a mut Node, row: &[ValueRefX]) -> anyhow::Result<Node<'a>> {
@@ -38,7 +131,10 @@ fn html_tr_from_row<'a>(tbody: &'a mut Node, row: &[ValueRefX]) -> anyhow::Resul
                 "font-family: monospace".to_owned()
             }
             ValueRefXValue::Text(_) => match value.subtype() {
-                Some(sqlite::JSON_SUBTYPE) => "color: red".to_owned(),
+                Some(sqlite::JSON_SUBTYPE) => {
+                    html_json(&mut tr, &raw);
+                    continue;
+                }
                 Some(_) | None => "text-align: left".to_owned(),
             },
             ValueRefXValue::Blob(_) => match value.subtype() {
@@ -89,6 +185,185 @@ fn html_thead_from_stmt(thead: &mut Node, columns: &Vec<ColumnMeta>) -> anyhow::
     Ok(())
 }
 
+static JSON_OVERFLOW_CLASSNAME: &str = "solite-json-overflow";
+static STATEMENT_CELL_CSS: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r#"
+
+  td {{
+    text-align: right;
+  }}
+  .xxx {{
+    color: red;
+  }}
+  .{JSON_OVERFLOW_CLASSNAME} {{
+    font-size: 0;
+    color: transparent;
+  }}
+  .{JSON_OVERFLOW_CLASSNAME}::before {{
+    content: "…";
+    font-size: 1rem;
+    color: #666;
+  }}
+
+  .{JSON_OVERFLOW_CLASSNAME}::before::selection {{
+    color: transparent;
+    background: transparent;
+  }}
+
+
+"#
+    )
+});
+
+fn sql_html(sql: &str) -> String {
+    // Rewritten to use the lightweight HtmlDoc builder
+    let doc = crate::commands::jupyter::html::HtmlDoc::new();
+
+    let mut root = doc.div();
+    {
+        let style = STATEMENT_CELL_CSS.clone();
+        let style_el = root.child("style");
+        style_el.set_text(style);
+    }
+    //let pre = root.child("pre");
+    let mut code = root.child("pre");
+    code.attr("style", "font-family: monospace;");
+
+    let tokens = solite_lexer::tokenize(sql);
+    for token in tokens {
+        let color = match token.kind {
+            // End of file / nothing: use plain text color
+            solite_lexer::Kind::Eof => ctp_mocha_colors::TEXT.clone(),
+
+            // Numeric literals
+            solite_lexer::Kind::Number
+            | solite_lexer::Kind::Int
+            | solite_lexer::Kind::Float
+            | solite_lexer::Kind::Bit
+          | solite_lexer::Kind::Text
+            | solite_lexer::Kind::Blob
+             => ctp_mocha_colors::PEACH.clone(),
+
+            // String literals
+            solite_lexer::Kind::String => ctp_mocha_colors::GREEN.clone(),
+
+            // Parameters ( :foo )
+            solite_lexer::Kind::Parameter => ctp_mocha_colors::YELLOW.clone(),
+
+            // Punctuation & operators
+            solite_lexer::Kind::Plus
+            | solite_lexer::Kind::Minus
+            | solite_lexer::Kind::Asterisk
+            | solite_lexer::Kind::Div
+            | solite_lexer::Kind::Pipe
+            | solite_lexer::Kind::Lt
+            | solite_lexer::Kind::Gt
+            | solite_lexer::Kind::SingleArrowOperator
+            | solite_lexer::Kind::DoubleArrowOperator
+            | solite_lexer::Kind::LParen
+            | solite_lexer::Kind::RParen
+            | solite_lexer::Kind::LBracket
+            | solite_lexer::Kind::RBracket
+            | solite_lexer::Kind::Comma
+            | solite_lexer::Kind::Semicolon
+            | solite_lexer::Kind::Dot => ctp_mocha_colors::SKY.clone(),
+
+            // Comments
+            solite_lexer::Kind::Comment => ctp_mocha_colors::OVERLAY0.clone(),
+
+            // SQL keywords (grouped)
+            solite_lexer::Kind::Select
+            | solite_lexer::Kind::From
+            | solite_lexer::Kind::Where
+            | solite_lexer::Kind::Order
+            | solite_lexer::Kind::Group
+            | solite_lexer::Kind::By
+            | solite_lexer::Kind::Limit
+            | solite_lexer::Kind::With
+            | solite_lexer::Kind::Recursive
+            | solite_lexer::Kind::Values
+            | solite_lexer::Kind::Union
+            | solite_lexer::Kind::All
+            | solite_lexer::Kind::And
+            | solite_lexer::Kind::As
+            | solite_lexer::Kind::Between
+            | solite_lexer::Kind::Descending
+            | solite_lexer::Kind::Ascending
+            | solite_lexer::Kind::Drop
+            | solite_lexer::Kind::Index
+            | solite_lexer::Kind::Indexed
+            | solite_lexer::Kind::Inner
+            | solite_lexer::Kind::Left
+            | solite_lexer::Kind::Right
+            | solite_lexer::Kind::Full
+            | solite_lexer::Kind::Outer
+            | solite_lexer::Kind::Join
+            | solite_lexer::Kind::Match
+            | solite_lexer::Kind::Partition
+            | solite_lexer::Kind::Alter
+            | solite_lexer::Kind::Rename
+            | solite_lexer::Kind::Column
+            | solite_lexer::Kind::Add
+            | solite_lexer::Kind::Immediate
+            | solite_lexer::Kind::Exclusive
+            | solite_lexer::Kind::View
+            | solite_lexer::Kind::Window
+            | solite_lexer::Kind::Vacuum
+            | solite_lexer::Kind::Transaction
+            | solite_lexer::Kind::Distinct
+            | solite_lexer::Kind::Returning
+            | solite_lexer::Kind::Create
+            | solite_lexer::Kind::Temp
+            | solite_lexer::Kind::Table
+            | solite_lexer::Kind::Virtual
+            | solite_lexer::Kind::Using
+            | solite_lexer::Kind::Attach
+            | solite_lexer::Kind::Database
+            | solite_lexer::Kind::Begin
+            | solite_lexer::Kind::Commit
+            | solite_lexer::Kind::Like
+            | solite_lexer::Kind::Regexp
+            | solite_lexer::Kind::Or
+            | solite_lexer::Kind::Not
+            | solite_lexer::Kind::Is
+            | solite_lexer::Kind::Null
+            | solite_lexer::Kind::Insert
+            | solite_lexer::Kind::Into
+            | solite_lexer::Kind::Update
+            | solite_lexer::Kind::Delete
+            | solite_lexer::Kind::Primary
+            | solite_lexer::Kind::Key
+            | solite_lexer::Kind::Foreign
+            | solite_lexer::Kind::References
+            | solite_lexer::Kind::Rollback
+            | solite_lexer::Kind::Trigger
+            | solite_lexer::Kind::Explain
+            | solite_lexer::Kind::Query
+            | solite_lexer::Kind::Plan
+            | solite_lexer::Kind::Detach
+            | solite_lexer::Kind::Pragma
+            | solite_lexer::Kind::Reindex
+            | solite_lexer::Kind::Release
+            | solite_lexer::Kind::Savepoint
+            | solite_lexer::Kind::Analyze => ctp_mocha_colors::MAUVE.clone(),
+
+            // Type words / identifiers (remaining kinds)
+            
+            | solite_lexer::Kind::Identifier => ctp_mocha_colors::BLUE.clone(),
+
+            // Anything unknown -> highlight red for visibility
+            solite_lexer::Kind::Unknown => ctp_mocha_colors::RED.clone(),
+        };
+
+        let mut span = code.child("span");
+        span.style("color", color.to_hex_string());
+        span.set_text(token.contents);
+    }
+
+    root.to_html()
+}
+
 pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> {
     let mut txt_rows = vec![];
 
@@ -96,13 +371,17 @@ pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> 
     let mut htmlx = buf.html();
 
     let mut root = htmlx.div();
-    writeln!(root.style(), "td {{text-align: right;}}")?;
+    writeln!(root.style(), "{}", STATEMENT_CELL_CSS.clone())?;
     let mut table = root.table();
 
     let columns = stmt.column_meta();
     html_thead_from_stmt(&mut table.thead(), &columns)?;
 
     let mut row_count = 0;
+    let max_rows = match stmt.is_explain() {
+        None => Some(30),
+        Some(_) => None,
+    };
     let column_count = columns.len();
 
     let mut tbody = table.tbody();
@@ -111,8 +390,8 @@ pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> 
             Ok(result) => match result {
                 Some(row) => {
                     row_count += 1;
-                    if row_count <= 20 {
-                      txt_rows.push(crate::ui::ui_row(&row, false));
+                    if !max_rows.is_some_and(|max_rows| row_count > max_rows) {
+                        txt_rows.push(crate::ui::ui_row(&row, None));
                         html_tr_from_row(&mut tbody, &row)?;
                     }
                 }
@@ -123,7 +402,7 @@ pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> 
     }
 
     // TODO: warning for text version as well
-    if row_count > 20 {
+    if max_rows.is_some_and(|max_rows| row_count > max_rows) {
         writeln!(
             tbody
                 .tr()
@@ -149,6 +428,17 @@ pub(crate) fn render_statementx(stmt: &Statement) -> anyhow::Result<UiResponse> 
             .to_string(),
         html: Some(buf.finish()),
     })
+}
+
+async fn send_markdown_response(
+    response: &mpsc::Sender<JupyterMessage>,
+    content: String,
+    parent: &JupyterMessage,
+) -> Result<(), anyhow::Error> {
+    response
+        .send(DisplayData::from(MediaType::Markdown(content)).as_child_of(parent))
+        .await
+        .map_err(|e| anyhow::anyhow!(e))
 }
 
 async fn handle_code(
@@ -186,7 +476,55 @@ async fn handle_code(
                     }
                 },
                 StepResult::DotCommand(cmd) => match cmd {
-                  DotCommand::Ask(ask_cmd) => todo!(),
+                    DotCommand::Ask(ask_cmd) => todo!(),
+                    DotCommand::Graphviz(cmd) => {
+                        let dot = cmd.execute(runtime);
+                        response
+                            .send(DisplayData::from(MediaType::Plain(dot)).as_child_of(parent))
+                            .await
+                            .unwrap();
+                    }
+                    DotCommand::Dotenv(cmd) => {
+                        let result = cmd.execute();
+                        let mut output = String::new();
+                        let relative = result
+                            .path
+                            .strip_prefix(std::env::current_dir().unwrap())
+                            .unwrap_or(&result.path);
+                        if result.loaded.is_empty() {
+                            writeln!(
+                                &mut output,
+                                "No environment variables loaded from `{}`",
+                                relative.display()
+                            );
+                        } else if result.loaded.len() == 1 {
+                            writeln!(
+                                &mut output,
+                                "✓ Loaded `{}` from `{}`",
+                                result.loaded[0],
+                                relative.display()
+                            );
+                        } else {
+                            writeln!(
+                                &mut output,
+                                "✓ Loaded {} environment variables from `{}`:",
+                                result.loaded.len(),
+                                relative.display()
+                            );
+                            for key in result.loaded {
+                                writeln!(&mut output, "- `{}`", key);
+                            }
+                        }
+
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Markdown(output)).as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
+                    }
+                    DotCommand::Tui(cmd) => todo!(),
+                    DotCommand::Clear(cmd) => todo!(),
                     DotCommand::Print(print_cmd) => {
                         response
                             .send(
@@ -196,21 +534,45 @@ async fn handle_code(
                             .await
                             .unwrap();
                     }
-                    DotCommand::Shell(sh_cmd) => {
-                        let rx = sh_cmd.execute();
-                        let mut out = String::new();
-                        while let Ok(msg) = rx.recv() {
+                    DotCommand::Shell(shell_cmd) => match shell_cmd.execute() {
+                        ShellResult::Background(child) => {
                             response
                                 .send(
-                                    StreamContent::stdout(&format!("{msg}\n")).as_child_of(parent),
+                                    StreamContent::stdout(&format!(
+                                        "✓ started background process with PID {}",
+                                        child.id()
+                                    ))
+                                    .as_child_of(parent),
                                 )
                                 .await
                                 .unwrap();
-                            out.push_str(msg.as_str());
-                            out.push('\n');
                         }
+                        ShellResult::Stream(rx) => {
+                            let mut out = String::new();
+                            while let Ok(msg) = rx.recv() {
+                                response
+                                    .send(
+                                        StreamContent::stdout(&format!("{msg}\n"))
+                                            .as_child_of(parent),
+                                    )
+                                    .await
+                                    .unwrap();
+                                out.push_str(msg.as_str());
+                                out.push('\n');
+                            }
+                        }
+                    },
+                    DotCommand::Timer(_enabled) => {
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Plain(
+                                    "Timer command not yet implemented".to_string(),
+                                ))
+                                .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
                     }
-                    DotCommand::Timer(_enabled) => todo!(),
                     DotCommand::Parameter(cmd) => {
                         let msg = match cmd {
                             solite_core::dot::ParameterCommand::Set { key, value } => {
@@ -257,13 +619,31 @@ async fn handle_code(
                     }
                     DotCommand::Tables(cmd) => {
                         let tables = cmd.execute(&runtime);
-                        response.send(
-                            DisplayData::from(MediaType::Plain(format!(
-                                "{}",
-                                tables.join("\n")
-                            )))
-                            .as_child_of(parent),
-                        ).await.unwrap();
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Plain(format!(
+                                    "{}",
+                                    tables.join("\n")
+                                )))
+                                .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
+                    }
+                    DotCommand::Schema(cmd) => {
+                        let creates = cmd.execute(&runtime);
+                        response
+                            .send(
+                                DisplayData::from(MediaType::Html(format!(
+                                    "{}",
+                                    creates.iter().map(|s| format!("{}", sql_html(s)))
+                                        .collect::<Vec<String>>()
+                                        .join("\n")
+                                )))
+                                .as_child_of(parent),
+                            )
+                            .await
+                            .unwrap();
                     }
                     DotCommand::Vegalite(mut vegalite_command) => {
                         match vegalite_command.execute() {
@@ -302,9 +682,7 @@ async fn handle_code(
                         }
                         Err(_) => todo!(),
                     },
-                    DotCommand::Bench(mut cmd) => {
-                      
-                      match cmd.execute(None) {
+                    DotCommand::Bench(mut cmd) => match cmd.execute(None) {
                         Ok(result) => {
                             response
                                 .send(
@@ -318,16 +696,13 @@ async fn handle_code(
                                 .unwrap();
                         }
                         Err(_) => response
-                                .send(
-                                    DisplayData::from(MediaType::Plain(format!(
-                                        "Benchmark fail",
-                                    )))
+                            .send(
+                                DisplayData::from(MediaType::Plain(format!("Benchmark fail",)))
                                     .as_child_of(parent),
-                                )
-                                .await
-                                .unwrap()
-                    }
-                  },
+                            )
+                            .await
+                            .unwrap(),
+                    },
                 },
             },
             None => {
@@ -393,17 +768,25 @@ impl SoliteKernel {
 
         tokio::spawn(async move {
             let mut rt = runtime;
-            while let Some((cmd, parent, response)) = rx.recv().await {
-                match cmd {
-                    code => {
-                        rt.enqueue(
-                            "<anonymous>",
-                            code.as_str(),
-                            solite_core::BlockSource::JupyerCell,
-                        );
-                        handle_code(&mut rt, response, &parent).await.unwrap();
-                    }
+            while let Some((code, parent, response)) = rx.recv().await {
+                // debugging
+                if code.starts_with("@@") {
+                    let r = format!("{}\n{:?}", parent.metadata["cellId"], parent);
+                    response
+                        .send(
+                            DisplayData::new(vec![MediaType::Plain(r)].into()).as_child_of(&parent),
+                        )
+                        .await
+                        .unwrap();
+                    continue;
                 }
+
+                rt.enqueue(
+                    "<anonymous>",
+                    code.as_str(),
+                    solite_core::BlockSource::JupyerCell,
+                );
+                handle_code(&mut rt, response, &parent).await.unwrap();
             }
         });
 
@@ -475,7 +858,7 @@ impl SoliteKernel {
             .send(DisplayData::from(MediaType::Plain(message.to_string())).as_child_of(parent))
             .await
     }
-    
+
     async fn send_error(
         &mut self,
         ename: &str,

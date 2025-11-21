@@ -2,11 +2,13 @@ mod completer;
 mod highlighter;
 use crate::cli::ReplArgs;
 use crate::commands::repl::completer::ReplCompleter;
-use crate::commands::repl::highlighter::ReplHighlighter;
+use crate::commands::repl::highlighter::{ReplHighlighter, highlight_sql};
 use crate::commands::run::format_duration;
+use crate::commands::tui::launch_tui;
+use crate::ui::CTP_MOCHA_THEME;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
-
+use solite_core::dot::sh::ShellResult;
 use rustyline::hint::HistoryHinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{
@@ -133,11 +135,32 @@ impl Highlighter for ReplHelper {
 
 fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) {
     match cmd {
+        DotCommand::Tui(_) => {
+            launch_tui(runtime).unwrap();
+        }
+        DotCommand::Dotenv(cmd) => {
+            cmd.execute();
+        }
+        
+        DotCommand::Clear(cmd) => {
+            cmd.execute();
+        }
+
         DotCommand::Tables(cmd) => {
             let tables = cmd.execute(runtime);
             for table in tables {
                 println!("{table}");
             }
+        }
+        DotCommand::Schema(cmd) => {
+            let creates = cmd.execute(runtime);
+            for create in creates {
+                println!("{}", highlight_sql(&mut create.clone()));
+            }
+        }
+        DotCommand::Graphviz(cmd) => {
+            let dot = cmd.execute(runtime);
+            println!("{}", dot);
         }
         DotCommand::Print(print_cmd) => print_cmd.execute(),
         DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
@@ -165,19 +188,28 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             solite_core::dot::ParameterCommand::Clear => todo!(),
         },
         DotCommand::Shell(shell_cmd) => {
-            let rx = shell_cmd.execute();
-            while let Ok(msg) = rx.recv() {
-                println!("{}", msg);
+            match shell_cmd.execute() {
+              ShellResult::Background(child) => {
+                println!("✓ started background process with PID {}", child.id());
+              }
+              ShellResult::Stream(rx) => {
+                while let Ok(msg) = rx.recv() {
+                    println!("{}", msg);
+                }
+              }
             }
         }
         DotCommand::Ask(ask_command) => {
             let rx = ask_command.execute(runtime).unwrap();
             let stdout = std::io::stdout();
             let mut handle = stdout.lock();
+
             while let Ok(msg) = rx.recv() {
-                write!(handle, "{}", msg.unwrap()).unwrap();
-                handle.flush().unwrap();
+              let msg = msg.unwrap();
+              write!(handle, "{}", msg).unwrap();
             }
+
+            handle.flush().unwrap();
             println!();
         }
         DotCommand::Export(mut export_command) => match export_command.execute() {
@@ -243,7 +275,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                     let start = std::time::Instant::now();
 
                     // TODO error handle
-                    if let Ok(Some(table)) = crate::ui::table_from_statement(&stmt, true) {
+                    if let Ok(Some(table)) = crate::ui::table_from_statement(&stmt, Some(&CTP_MOCHA_THEME)) {
                         print_stdout(table).unwrap();
                     }
                     if *timer {

@@ -1,4 +1,6 @@
-use super::highlighter::sql_highlighter;
+
+
+use super::highlighter::CTP_MOCHA_THEME;
 use rustyline::completion::{Completer, Pair};
 use rustyline::Result;
 use solite_core::Runtime;
@@ -32,7 +34,8 @@ impl ReplCompleter {
             .filter_map(|v| {
                 if v.starts_with(prefix) {
                     Some(Pair {
-                        display: sql_highlighter::dot(v).to_string(),
+                        display: CTP_MOCHA_THEME.style_dot(v),
+                        //sql_highlighter::dot(v).to_string(),
                         replacement: format!("{v} "),
                     })
                 } else {
@@ -97,7 +100,9 @@ impl ReplCompleter {
             let display = if phase == 9 {
                 format!("ᶜ {}", (candidate.clone()))
             } else if phase == 1 {
-                format!("{}", sql_highlighter::keyword(candidate.clone()))
+                format!("{}", 
+                  CTP_MOCHA_THEME.style_keyword(&candidate)
+              )
             } else {
                 format!("ᵗ {}", candidate.clone())
             };

@@ -9,6 +9,7 @@ use indicatif::HumanCount;
 use jiff::fmt::friendly::{FractionalUnit, SpanPrinter};
 use jiff::{SpanRound, Timestamp, ToSpan};
 use nbformat::{parse_notebook, Notebook};
+use solite_core::dot::sh::ShellResult;
 use solite_core::sqlite::Statement;
 use solite_core::{
     dot::DotCommand,
@@ -106,11 +107,26 @@ fn stmt_status(stmt: *mut sqlite3_stmt) -> InProgressStatementStatus {
 fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &mut bool) {
     match cmd {
         DotCommand::Ask(cmd) => todo!(),
+        DotCommand::Tui(cmd) => todo!(),
+        DotCommand::Clear(cmd) => todo!(),
+        DotCommand::Dotenv(cmd) => {
+            cmd.execute();
+        }
         DotCommand::Tables(cmd) => {
             let tables = cmd.execute(&runtime);
             for table in tables {
                 println!("{table}");
             }
+        }
+        DotCommand::Schema(cmd) => {
+            let creates = cmd.execute(&runtime);
+            for create in creates {
+                println!("{create}");
+            }
+        }
+        DotCommand::Graphviz(cmd) => {
+            let creates = cmd.execute(&runtime);
+            println!("{}", creates);
         }
         DotCommand::Print(print_cmd) => print_cmd.execute(),
         DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
@@ -157,12 +173,16 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &mut b
                 );
             }
         },
-        DotCommand::Shell(shell_command) => {
-            let rx = shell_command.execute();
-            while let Ok(msg) = rx.recv() {
-                println!("{}", msg);
+        DotCommand::Shell(shell_command) => match shell_command.execute() {
+            ShellResult::Background(child) => {
+                println!("✓ started background process with PID {}", child.id());
             }
-        }
+            ShellResult::Stream(rx) => {
+                while let Ok(msg) = rx.recv() {
+                    println!("{}", msg);
+                }
+            }
+        },
         DotCommand::Vegalite(vega_lite_command) => todo!(),
         DotCommand::Bench(cmd) => {
             todo!();
@@ -253,7 +273,7 @@ fn handle_sql(
 
     let start = std::time::Instant::now();
     pb.finish_and_clear();
-    let table = crate::ui::table_from_statement(&stmt, true);
+    let table = crate::ui::table_from_statement(&stmt, Some(&crate::ui::CTP_MOCHA_THEME));
 
     match table {
         Ok(Some(table)) => print_stdout(table).unwrap(),
@@ -317,7 +337,6 @@ fn handle_sql(
         x.nextx().unwrap();
     }
 }
-
 
 pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
     let (database, script) = match (flags.database, flags.script) {

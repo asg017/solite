@@ -203,6 +203,11 @@ pub struct ColumnMeta {
     pub origin_column: Option<String>,
     pub decltype: Option<String>,
 }
+
+pub enum IsExplain{
+  Explain,
+  ExplainQueryPlan,
+}
 /// https://www.sqlite.org/c3ref/stmt.html
 #[derive(Serialize, Debug)]
 pub struct Statement {
@@ -230,6 +235,23 @@ impl Statement {
                 sqlite3_free(result.cast());
                 Ok(expanded.to_owned())
             }
+        }
+    }
+
+    pub fn is_explain(&self) -> Option<IsExplain> {
+        let result = unsafe {
+          sqlite3_stmt_isexplain(self.statement)
+        };
+        match result {
+          0 => None,
+          1 => Some(IsExplain::Explain),
+          2 => Some(IsExplain::ExplainQueryPlan),
+          _ => None,
+        }
+    }
+    pub fn explain(&self, emode: i32) {
+        unsafe {
+            //sqlite3_stmt_explain(self.statement, emode);
         }
     }
     pub fn column_names(&self) -> Result<Vec<String>, Utf8Error> {
@@ -535,6 +557,8 @@ impl Connection {
             unsafe {
                 let v = 1;
                 let x = sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, &v);
+                sqlite3_db_config(connection, 1018, 1, &v);
+                //sqlite3_db_config(connection, 1018, 0, &v);
                 //let x = sqlite3_enable_load_extension(connection, 1);
                 //sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION);
             }
@@ -552,6 +576,21 @@ impl Connection {
     }
     pub unsafe fn db(&self) -> *mut sqlite3 {
         self.connection
+    }
+
+    pub fn db_name(&self)-> Option<String> {
+        unsafe {
+            let filename: *const sqlite3_filename = sqlite3_db_filename(self.connection, c"main".as_ptr()).cast();
+            if !filename.is_null() {
+                // TODO: lol
+                let s = sqlite3_filename_database(filename.cast());
+                let s = CStr::from_ptr(s).to_string_lossy();
+                Some(s.to_string())
+            } else {
+                None
+            }
+        }
+
     }
 
     pub fn in_transaction(&self) -> bool {
@@ -581,6 +620,17 @@ impl Connection {
     pub fn execute(&self, sql: &str) -> Result<usize, /* TODO */ ()> {
         let stmt = self.prepare(sql).unwrap().1.unwrap();
         Ok(stmt.execute().unwrap())
+    }
+
+    pub fn execute_script(&self, sql: &str) -> Result<(), SQLiteError> {
+        let z_sql = CString::new(sql).unwrap();
+        // TODO unfurl manually
+        let rc = unsafe { sqlite3_exec(self.connection, z_sql.as_ptr(), None, ptr::null_mut(), ptr::null_mut()) };
+        if rc == SQLITE_OK {
+            Ok(())
+        } else {
+            Err(SQLiteError::from_latest(self.connection, rc))
+        }
     }
 
     pub fn set_progress_handler<F, T>(&self, ops: i32, handle: Option<F>, aux: T)

@@ -1,4 +1,5 @@
 mod server;
+pub(crate) mod html;
 use crate::cli::{JupyterCommand, JupyterInstallArgs, JupyterNamespace, JupyterUpArgs};
 use serde_json::json;
 use server::start_kernel;

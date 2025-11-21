@@ -2,12 +2,15 @@ use std::str::Chars;
 
 use serde::{Deserialize, Serialize};
 
+pub mod json;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Token {
+pub struct Token<'a> {
     pub kind: Kind,
     pub start: usize,
     pub end: usize,
     pub value: TokenValue,
+    pub contents: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -378,7 +381,7 @@ impl<'a> Lexer<'a> {
         Kind::Eof
     }
 
-    fn read_next_token(&mut self) -> Token {
+    fn read_next_token(&mut self) -> Token<'a> {
         let start = self.offset();
         let kind = self.read_next_kind();
         let end = self.offset();
@@ -391,6 +394,7 @@ impl<'a> Lexer<'a> {
             start,
             end,
             value,
+            contents: &self.source[start..end],
         }
     }
 
@@ -407,7 +411,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-pub fn tokenize(src: &str) -> Vec<Token> {
+pub fn tokenize<'a>(src: &'a str) -> Vec<Token<'a>> {
     let mut l = Lexer::new(src);
     let mut tokens = vec![];
     loop {
@@ -426,7 +430,7 @@ fn main() {
     let mut l = Lexer::new(src);
     loop {
         let token = l.read_next_token();
-        println!("{:?} '{}'", token, &src[token.start..token.end]);
+        println!("{:?} '{}'", token, token.contents);
         if token.kind == Kind::Eof {
             break;
         }

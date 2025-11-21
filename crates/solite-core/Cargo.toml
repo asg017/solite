@@ -21,6 +21,7 @@ jiff = "0.2.15"
 statistical = "1.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator"] }
 ureq = "3.0.12"
+dotenvy = "0.15.7"
 
 [dev-dependencies]
 rusqlite.workspace = true

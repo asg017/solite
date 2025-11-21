@@ -5,10 +5,15 @@ mod export;
 mod open;
 mod param;
 mod print;
-mod sh;
+pub mod sh;
 mod tables;
 mod timer;
 mod vegalite;
+mod tui;
+mod dotenv;
+mod clear;
+mod schema;
+mod graphviz;
 
 pub use crate::dot::{
   ask::AskCommand,
@@ -21,13 +26,17 @@ pub use crate::dot::{
   export::ExportCommand,
   vegalite::VegaLiteCommand,
   param::ParameterCommand,
+  tui::TuiCommand,
+  clear::ClearCommand,
+  schema::SchemaCommand,
+  graphviz::GraphvizCommand,
 };
 pub use load::LoadCommandSource;
 
 use param::parse_parameter;
 use thiserror::Error;
 
-use crate:: Runtime;
+use crate::{Runtime, dot::dotenv::DotenvCommand};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Error, Debug, PartialEq)]
@@ -50,6 +59,8 @@ pub enum DotCommand {
     /*  introspection  */
     //Databases,
     Tables(TablesCommand),
+    Schema(SchemaCommand),
+    Graphviz(GraphvizCommand),
     //Indexes,
     //Schema,
 
@@ -70,6 +81,8 @@ pub enum DotCommand {
     /// usage: .open file.db
     Open(OpenCommand),
     Load(LoadCommand),
+    Tui(TuiCommand),
+    Clear(ClearCommand),
 
     /// TODO sqlpkg/spm support
     //Load,
@@ -89,6 +102,7 @@ pub enum DotCommand {
     Export(ExportCommand),
     Vegalite(VegaLiteCommand),
     Bench(BenchCommand),
+    Dotenv(DotenvCommand),
 }
 
 fn parse_bool(s: String) -> Result<bool, String> {
@@ -111,7 +125,12 @@ pub fn parse_dot<S: Into<String>>(
         "print" => Ok(DotCommand::Print(PrintCommand { message: args })),
         "sh" => Ok(DotCommand::Shell(ShellCommand { command: args })),
         "tables" => Ok(DotCommand::Tables(TablesCommand {})),
+        "schema" => Ok(DotCommand::Schema(SchemaCommand {})),
         "open" => Ok(DotCommand::Open(OpenCommand { path: args })),
+        "tui" => Ok(DotCommand::Tui(TuiCommand{})),
+        "c" | "clear" => Ok(DotCommand::Clear(ClearCommand{})),
+        "graphviz" | "gv" => Ok(DotCommand::Graphviz(GraphvizCommand{})),
+        "dotenv"| "loadenv" => Ok(DotCommand::Dotenv(DotenvCommand{})),
         "export" => Ok(DotCommand::Export(ExportCommand::new(args, runtime, rest)?)),
         "bench" => Ok(DotCommand::Bench(BenchCommand::new(args, runtime, rest)?)),
         "vl" | "vegalite" => Ok(DotCommand::Vegalite(VegaLiteCommand::new(

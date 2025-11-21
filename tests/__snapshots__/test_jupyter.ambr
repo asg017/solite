@@ -7,7 +7,31 @@
   <html>
    <div>
     <style>
-  td {text-align: right;}
+  
+  
+    td {
+      text-align: right;
+    }
+    .xxx {
+      color: red;
+    }
+    .solite-json-overflow {
+      font-size: 0;
+      color: transparent;
+    }
+    .solite-json-overflow::before {
+      content: "…";
+      font-size: 1rem;
+      color: #666;
+    }
+  
+    .solite-json-overflow::before::selection {
+      color: transparent;
+      background: transparent;
+    }
+  
+  
+  
     </style>
     <table>
      <thead>

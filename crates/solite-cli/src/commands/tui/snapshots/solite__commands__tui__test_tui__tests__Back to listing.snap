@@ -1,0 +1,25 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+snapshot_kind: text
+---
+"Listing                            Solite TUI                          q to quit"
+"                           ┌Tables in ──────────────┐                           "
+"                           │❱  1 t                  │                           "
+"                           │   2 t2                 │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           │                        │                           "
+"                           └────────────────────────┘                           "

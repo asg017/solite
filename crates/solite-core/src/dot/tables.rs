@@ -1,13 +1,6 @@
 use serde::Serialize;
 use crate::Runtime;
 
-enum SchemaCommands {
-    Tables,
-    Views,
-    Indexes,
-    Schema,
-}
-
 #[derive(Serialize, Debug, PartialEq)]
 pub struct TablesCommand {}
 impl TablesCommand {

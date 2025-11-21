@@ -1,5 +1,5 @@
 ---
-source: solite-lexer/src/lib.rs
+source: crates/solite-lexer/src/lib.rs
 expression: result
 snapshot_kind: text
 ---
@@ -11,6 +11,7 @@ snapshot_kind: text
             start: 0,
             end: 6,
             value: None,
+            contents: "select",
         },
     ),
     (
@@ -20,6 +21,7 @@ snapshot_kind: text
             start: 6,
             end: 8,
             value: None,
+            contents: " 1",
         },
     ),
     (
@@ -29,6 +31,7 @@ snapshot_kind: text
             start: 8,
             end: 10,
             value: None,
+            contents: " +",
         },
     ),
     (
@@ -38,6 +41,7 @@ snapshot_kind: text
             start: 10,
             end: 12,
             value: None,
+            contents: " 2",
         },
     ),
     (
@@ -47,6 +51,7 @@ snapshot_kind: text
             start: 12,
             end: 12,
             value: None,
+            contents: "",
         },
     ),
 ]

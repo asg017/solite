@@ -16,9 +16,19 @@ pub fn replacement_scan(
      * - [ ] .txt files?
      * - [ ] XML??
      */
-    if table_name.ends_with(".csv") {
+    if table_name.to_lowercase().ends_with(".csv") {
         match connection
             .prepare(format!("create virtual table temp.\"{}\" using csv ", table_name).as_str())
+        {
+            Ok((_, Some(stmt))) => return Some(Ok(stmt)),
+            _ => {
+                panic!("replacement didnt work")
+            }
+        }
+    }
+    if table_name.to_lowercase().ends_with(".tsv") {
+        match connection
+            .prepare(format!("create virtual table temp.\"{}\" using tsv(flexible=true)", table_name).as_str())
         {
             Ok((_, Some(stmt))) => return Some(Ok(stmt)),
             _ => {

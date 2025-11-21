@@ -15,7 +15,9 @@
     docs     Tooling for documenting SQLite extensions
     bench    Run benchmarks on SQL statements
     mcp      MCP
+    rpc      RPC
     codegen  Codegen SQL queries into an intermediate representation
+    tui      Tui for exploring a database
     help     Print this message or the help of the given subcommand(s)
   
   Options:
@@ -56,6 +58,8 @@
     -f, --format <FORMAT>
             [possible values: csv, tsv, json, ndjson, value, clipboard]
     -p, --parameters <PARAMETERS> <PARAMETERS>
+            
+        --load-extension <LOAD_EXTENSION>
             
     -h, --help
             Print help

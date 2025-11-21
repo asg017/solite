@@ -1,0 +1,195 @@
+---
+source: crates/solite-lexer/src/json.rs
+expression: result
+snapshot_kind: text
+---
+[
+    (
+        "[",
+        Token {
+            kind: LBracket,
+            start: 0,
+            end: 1,
+            string_context: None,
+            text: "[",
+        },
+    ),
+    (
+        "1",
+        Token {
+            kind: Number,
+            start: 1,
+            end: 2,
+            string_context: Some(
+                Value,
+            ),
+            text: "1",
+        },
+    ),
+    (
+        ",",
+        Token {
+            kind: Comma,
+            start: 2,
+            end: 3,
+            string_context: Some(
+                Value,
+            ),
+            text: ",",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 3,
+            end: 4,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "2",
+        Token {
+            kind: Number,
+            start: 4,
+            end: 5,
+            string_context: Some(
+                Value,
+            ),
+            text: "2",
+        },
+    ),
+    (
+        ",",
+        Token {
+            kind: Comma,
+            start: 5,
+            end: 6,
+            string_context: Some(
+                Value,
+            ),
+            text: ",",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 6,
+            end: 7,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "3",
+        Token {
+            kind: Number,
+            start: 7,
+            end: 8,
+            string_context: Some(
+                Value,
+            ),
+            text: "3",
+        },
+    ),
+    (
+        ",",
+        Token {
+            kind: Comma,
+            start: 8,
+            end: 9,
+            string_context: Some(
+                Value,
+            ),
+            text: ",",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 9,
+            end: 10,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "4",
+        Token {
+            kind: Number,
+            start: 10,
+            end: 11,
+            string_context: Some(
+                Value,
+            ),
+            text: "4",
+        },
+    ),
+    (
+        ",",
+        Token {
+            kind: Comma,
+            start: 11,
+            end: 12,
+            string_context: Some(
+                Value,
+            ),
+            text: ",",
+        },
+    ),
+    (
+        " ",
+        Token {
+            kind: Whitespace,
+            start: 12,
+            end: 13,
+            string_context: Some(
+                Value,
+            ),
+            text: " ",
+        },
+    ),
+    (
+        "5",
+        Token {
+            kind: Number,
+            start: 13,
+            end: 14,
+            string_context: Some(
+                Value,
+            ),
+            text: "5",
+        },
+    ),
+    (
+        "]",
+        Token {
+            kind: RBracket,
+            start: 14,
+            end: 15,
+            string_context: Some(
+                Value,
+            ),
+            text: "]",
+        },
+    ),
+    (
+        "",
+        Token {
+            kind: Eof,
+            start: 15,
+            end: 15,
+            string_context: None,
+            text: "",
+        },
+    ),
+]

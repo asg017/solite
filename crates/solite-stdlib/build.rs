@@ -74,9 +74,7 @@ fn build_sqlite_org_extension(
     build.compile(name);
 }
 
-fn main() {
-    generate_builtins();
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+fn amalgammation_from_sqlite_org(out_dir: PathBuf) -> PathBuf {
     let amalgammation_dir = out_dir.join("amalgamation");
     let amalgammation_src_dir =
         amalgammation_dir.join(format!("sqlite-amalgamation-{}", AMALGAMATION.1));
@@ -111,7 +109,18 @@ fn main() {
         }
         std::fs::remove_file(zip_path).unwrap();
     }
+    amalgammation_src_dir
+}
 
+fn main() {
+    generate_builtins();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    println!("cargo:rerun-if-env-changed=SOLITE_AMALGAMMATION_DIR");
+    let amalgammation_src_dir = env::var("SOLITE_AMALGAMMATION_DIR")
+    .map(PathBuf::from)
+    .unwrap_or_else(|_| amalgammation_from_sqlite_org(out_dir.clone()));
+  
+  println!("cargo:rerun-if-changed={}", amalgammation_src_dir.join("sqlite3.c").display());
     cc::Build::new()
         .file(amalgammation_src_dir.join("sqlite3.c"))
         .include(&amalgammation_src_dir)
@@ -131,7 +140,7 @@ fn main() {
         .flag("-DSQLITE_ENABLE_COLUMN_METADATA ")
         .warnings(false)
         .compile("sqlite");
-    
+
     // hopefully libsqlite3-sys finds this to fix windows builds?
     env::set_var("SQLITE3_LIB_DIR", env::var("OUT_DIR").unwrap());
     env::set_var("SQLITE3_INCLUDE_DIR", amalgammation_src_dir.clone());

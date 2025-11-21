@@ -3,6 +3,7 @@ mod colors;
 mod commands;
 mod errors;
 mod ui;
+mod themes;
 use std::{env, path::PathBuf, process::exit};
 
 use clap::Parser;
@@ -50,6 +51,8 @@ fn main() {
         cli::Commands::Bench(args) => commands::bench::bench(args),
         cli::Commands::Mcp(args) => commands::mcp::mcp(args),
         cli::Commands::Codegen(cmd) => commands::codegen::codegen(cmd),
+        cli::Commands::Tui(cmd) => commands::tui::tui(cmd),
+        cli::Commands::Rpc(cmd) => commands::rpc::rpc(cmd),
     };
     match result {
         Ok(_) => exit(0),

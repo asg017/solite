@@ -76,6 +76,9 @@ pub struct QueryArgs {
 
     #[arg(long, short = 'p', num_args = 2)]
     pub parameters: Vec<String>,
+
+    #[arg(long)]
+    pub load_extension: Option<Vec<PathBuf>>,
 }
 
 #[derive(Args, Debug)]
@@ -117,6 +120,26 @@ pub struct CodegenArgs {
     pub schema: Option<PathBuf>,
 }
 
+
+#[derive(Args, Debug)]
+pub struct RpcNamespace {
+    #[command(subcommand)]
+    pub command: RpcCommand,
+}
+#[derive(Subcommand, Debug)]
+pub enum RpcCommand {
+    ClientDebug(RpcClientDebugArgs),
+    Server(RpcServerArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RpcClientDebugArgs {
+    #[arg(long)]
+    pub executable: PathBuf,
+}
+#[derive(Args, Debug)]
+pub struct RpcServerArgs {
+}
 #[derive(Args, Debug)]
 pub struct McpNamespace {
     #[command(subcommand)]
@@ -209,6 +232,12 @@ pub struct DocsInlineArgs {
     pub output: Option<PathBuf>,
 }
 
+#[derive(Args, Debug)]
+pub struct TuiArgs {
+    pub database: PathBuf,
+    pub table: Option<String>,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -239,9 +268,15 @@ pub enum Commands {
 
     /// MCP
     Mcp(McpNamespace),
+
+    /// RPC
+    Rpc(RpcNamespace),
     
     /// Codegen SQL queries into an intermediate representation
-    Codegen(CodegenArgs)
+    Codegen(CodegenArgs),
+    
+    /// Tui for exploring a database
+    Tui(TuiArgs),
 }
 
 #[derive(Parser)]

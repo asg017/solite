@@ -43,7 +43,7 @@ fn max(times: &[jiff::Span]) -> jiff::Span {
 fn format_runtime(span: jiff::Span) -> String {
     if span.compare(Span::new().milliseconds(50)).unwrap().is_lt() {
         let total = span.total(Unit::Millisecond).unwrap();
-        format!("{total}ms")
+        format!("{total:.1} ms")
     } else {
         let rounded = span
             .round(
@@ -107,7 +107,10 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
 
             pb.set_message(format!(
                 "Current estimate: {}",
-                format_runtime(average(&times)).green()
+                format_runtime(average(&times)).with(
+                  crate::themes::ctp_mocha_colors::GREEN.clone().into(
+                  )
+                )
             ));
 
             bytecode_steps(stmt.pointer());
@@ -125,14 +128,35 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
             + 1;
         println!("{sql}:");
         println!(
-            "  Time  (mean ± σ ):  {} ± {}",
-            avg.green().bold(),
-            stddev.green(),
+            "  Time  ({} ± {}):  {} ± {}",
+            "mean".with(
+              crate::themes::ctp_mocha_colors::GREEN.clone().into()
+            ).bold(),
+            "σ".with(
+              crate::themes::ctp_mocha_colors::GREEN.clone().into()
+            ),
+            avg.with(
+              crate::themes::ctp_mocha_colors::GREEN.clone().into()
+            ).bold(),
+            stddev.with(
+              crate::themes::ctp_mocha_colors::GREEN.clone().into()
+            ),
         );
         println!(
-            "  Range (min … max):  {} … {}",
-            mn.cyan(),
-            mx.magenta(),
+            "  Range ({} … {}):  {} … {}",
+            //mn.cyan(),
+            "min".with(
+              crate::themes::ctp_mocha_colors::SKY.clone().into()
+            ),
+            "max".with(
+              crate::themes::ctp_mocha_colors::MAUVE.clone().into()
+            ),
+            mn.with(
+              crate::themes::ctp_mocha_colors::SKY.clone().into()
+            ),
+            mx.with(
+              crate::themes::ctp_mocha_colors::MAUVE.clone().into()
+            ),
         );
     }
 
@@ -144,9 +168,9 @@ mod tests {
     use super::*;
     #[test]
     fn test_bench() {
-        insta::assert_snapshot!(format_runtime(Span::new().microseconds(1000)), @"1ms");
-        insta::assert_snapshot!(format_runtime("4ms 4us".parse().unwrap()), @"4.004ms");
-        insta::assert_snapshot!(format_runtime("49ms 999us".parse().unwrap()), @"49.999ms");
+        insta::assert_snapshot!(format_runtime(Span::new().microseconds(1000)), @"1.0 ms");
+        insta::assert_snapshot!(format_runtime("4ms 4us".parse().unwrap()), @"4.0 ms");
+        insta::assert_snapshot!(format_runtime("49ms 999us".parse().unwrap()), @"50.0 ms");
         insta::assert_snapshot!(format_runtime("50ms 999us".parse().unwrap()), @"51ms");
         insta::assert_snapshot!(format_runtime("989ms 999us".parse().unwrap()), @"990ms");
         insta::assert_snapshot!(format_runtime("1s 1ms 999us".parse().unwrap()), @"1s 2ms");

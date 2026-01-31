@@ -187,6 +187,17 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             solite_core::dot::ParameterCommand::List => todo!(),
             solite_core::dot::ParameterCommand::Clear => todo!(),
         },
+        DotCommand::Env(env_cmd) => {
+            let action = env_cmd.execute();
+            match action {
+                solite_core::dot::EnvAction::Set { name, value: _ } => {
+                    println!("✓ set environment variable '{name}'");
+                }
+                solite_core::dot::EnvAction::Unset { name } => {
+                    println!("✓ unset environment variable '{name}'");
+                }
+            }
+        }
         DotCommand::Shell(shell_cmd) => {
             match shell_cmd.execute() {
               ShellResult::Background(child) => {

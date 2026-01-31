@@ -1,5 +1,5 @@
 mod ask;
-mod bench;
+pub mod bench;
 mod load;
 mod export;
 mod open;
@@ -14,6 +14,7 @@ mod dotenv;
 mod clear;
 mod schema;
 mod graphviz;
+mod env;
 
 pub use crate::dot::{
   ask::AskCommand,
@@ -30,10 +31,12 @@ pub use crate::dot::{
   clear::ClearCommand,
   schema::SchemaCommand,
   graphviz::GraphvizCommand,
+  env::{EnvCommand, EnvAction},
 };
 pub use load::LoadCommandSource;
 
 use param::parse_parameter;
+use env::parse_env;
 use thiserror::Error;
 
 use crate::{Runtime, dot::dotenv::DotenvCommand};
@@ -92,6 +95,8 @@ pub enum DotCommand {
     Shell(ShellCommand),
     /// usage: .param set name 'alex garcia'
     Parameter(ParameterCommand),
+    /// usage: .env set NAME VALUE
+    Env(EnvCommand),
     /// usage: .bail on/off
     //Bail,
 
@@ -124,7 +129,9 @@ pub fn parse_dot<S: Into<String>>(
         "ask" => Ok(DotCommand::Ask(AskCommand { message: args })),
         "print" => Ok(DotCommand::Print(PrintCommand { message: args })),
         "sh" => Ok(DotCommand::Shell(ShellCommand { command: args })),
-        "tables" => Ok(DotCommand::Tables(TablesCommand {})),
+        "tables" => Ok(DotCommand::Tables(TablesCommand {
+            schema: if args.is_empty() { None } else { Some(args.trim().to_string()) }
+        })),
         "schema" => Ok(DotCommand::Schema(SchemaCommand {})),
         "open" => Ok(DotCommand::Open(OpenCommand { path: args })),
         "tui" => Ok(DotCommand::Tui(TuiCommand{})),
@@ -141,6 +148,7 @@ pub fn parse_dot<S: Into<String>>(
             parse_bool(args).map_err(ParseDotError::InvalidArgument)?,
         )),
         "param" | "parameter" => Ok(DotCommand::Parameter(parse_parameter(args))),
+        "env" => Ok(DotCommand::Env(parse_env(args))),
         _ => Err(ParseDotError::UnknownCommand(command)),
     }
 }

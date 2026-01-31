@@ -104,10 +104,54 @@ pub enum StepResult {
 
 pub struct Step {
     pub preamble: Option<String>,
+    pub epilogue: Option<String>,
     /// Dot command or SQL
     pub result: StepResult,
 
     pub reference: StepReference,
+}
+
+fn extract_epilogue(code: &str, rest_index: usize) -> Option<String> {
+    if rest_index >= code.len() {
+        return None;
+    }
+    let rest = &code[rest_index..];
+    let mut chars = rest.char_indices();
+    let mut first_non_ws_idx: Option<usize> = None;
+    while let Some((idx, c)) = chars.next() {
+        if c == '\n' {
+            // newline before any comment -> not an epilogue
+            return None;
+        }
+        if c.is_whitespace() {
+            continue;
+        }
+        first_non_ws_idx = Some(idx);
+        break;
+    }
+    let idx = match first_non_ws_idx {
+        Some(i) => i,
+        None => return None,
+    };
+    let rem = &rest[idx..];
+    if rem.starts_with("--") {
+        // include leading whitespace before comment
+        if let Some(pos) = rem.find('\n') {
+            return Some(rest[..idx + pos].to_string());
+        } else {
+            return Some(rest.to_string());
+        }
+    }
+    if rem.starts_with("/*") {
+        if let Some(endpos) = rem.find("*/") {
+            let end = endpos + 2;
+            return Some(rest[..idx + end].to_string());
+        } else {
+            // unterminated block comment: take rest
+            return Some(rest.to_string());
+        }
+    }
+    None
 }
 
 fn extract_preamble(code: &str) -> (&str, Option<&str>) {
@@ -217,6 +261,7 @@ impl Runtime {
 
                 return Some(Ok(Step {
                     preamble: None,
+                    epilogue: None,
                     reference: StepReference {
                         block_name: source,
                         // TODO: why hardcode here?
@@ -236,6 +281,7 @@ impl Runtime {
                     let column_idx = stmt_offset_idx - block.rope.line_to_byte(line_idx);
                     let raw_sql = stmt.sql(); //code.to_owned();
                     let preamble_owned = preamble.map(|p| p.to_string());
+                    let epilogue_owned = rest.and_then(|r| extract_epilogue(code, r));
 
                     if let Some(rest) = rest {
                         block.offset += rest; // + preamble.map_or(0, |p| p.len()) + 1;
@@ -244,6 +290,7 @@ impl Runtime {
 
                     return Some(Ok(Step {
                         preamble: preamble_owned,
+                        epilogue: epilogue_owned,
                         reference: StepReference {
                             block_name,
                             line_number: line_idx + 1,
@@ -577,5 +624,37 @@ select not_exist();",
                 _ => (),
             }
         }
+    }
+
+    #[test]
+    fn test_extract_epilogue_line_comment_same_line() {
+        let code = "select 1; -- epilogue\nselect 2;";
+        let rest_index = "select 1;".len();
+        let ep = super::extract_epilogue(code, rest_index);
+        assert_eq!(ep, Some(" -- epilogue".to_string()));
+    }
+
+    #[test]
+    fn test_extract_epilogue_block_comment_same_line() {
+        let code = "select 1; /* block */\nselect 2;";
+        let rest_index = "select 1;".len();
+        let ep = super::extract_epilogue(code, rest_index);
+        assert_eq!(ep, Some(" /* block */".to_string()));
+    }
+
+    #[test]
+    fn test_no_epilogue_newline_before_comment() {
+        let code = "select 1;\n-- not an epilogue\n";
+        let rest_index = "select 1;".len();
+        let ep = super::extract_epilogue(code, rest_index);
+        assert_eq!(ep, None);
+    }
+
+    #[test]
+    fn test_extract_epilogue_no_space_before_comment() {
+        let code = "select 1;--tight\n";
+        let rest_index = "select 1;".len();
+        let ep = super::extract_epilogue(code, rest_index);
+        assert_eq!(ep, Some("--tight".to_string()));
     }
 }

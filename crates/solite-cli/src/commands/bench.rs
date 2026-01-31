@@ -3,7 +3,11 @@ use std::path::Path;
 use crossterm::style::Stylize;
 use indicatif::ProgressBar;
 use jiff::{Span, SpanRound, Unit};
-use solite_core::{sqlite::{bytecode_steps, Connection}, Runtime};
+use solite_core::{
+    sqlite::{bytecode_steps, Connection},
+    Runtime,
+    dot::bench::render_steps,
+};
 
 use crate::cli::BenchArgs;
 
@@ -59,7 +63,7 @@ fn format_runtime(span: jiff::Span) -> String {
 pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
     let mut runtime = Runtime::new(None);
 
-    if let Some(extensions) = args.load_extension {
+    if let Some(ref extensions) = args.load_extension {
         for extension in extensions {
             runtime
                 .connection
@@ -78,8 +82,18 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
         .unwrap(),
     );
     for (idx, sql) in args.sql.iter().enumerate() {
-      if let Some(databases) = &args.database {
-            let conn = Connection::open(databases.get(idx).unwrap().as_os_str().to_str().unwrap()).unwrap();
+        if let Some(databases) = &args.database {
+            let conn = Connection::open(databases.get(idx).unwrap().as_os_str().to_str().unwrap())
+                .unwrap();
+            if let Some(ref extensions) = args.load_extension {
+                for extension in extensions {
+                    conn.load_extension(&extension.as_os_str().to_string_lossy(), &None)
+                        .map_err(|err| {
+                            eprintln!("Error loading extension {}: {err}", extension.display());
+                            ()
+                        })?;
+                }
+            }
             runtime.connection = conn;
         } else {
             pb.set_message("Using in-memory database".to_string());
@@ -98,6 +112,7 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
         pb.set_length(10);
         let t0 = jiff::Timestamp::now();
         let mut niter = 0;
+        let mut steps = vec![];
         for _ in 0..10 {
             pb.inc(1);
             let tn = jiff::Timestamp::now();
@@ -107,15 +122,14 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
 
             pb.set_message(format!(
                 "Current estimate: {}",
-                format_runtime(average(&times)).with(
-                  crate::themes::ctp_mocha_colors::GREEN.clone().into(
-                  )
-                )
+                format_runtime(average(&times))
+                    .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
             ));
 
-            bytecode_steps(stmt.pointer());
+            steps = bytecode_steps(stmt.pointer());
         }
         pb.finish_and_clear();
+        
 
         let avg = format_runtime(average(&times));
         let stddev = format_runtime(stddev(&times));
@@ -129,35 +143,23 @@ pub fn bench(args: BenchArgs) -> std::result::Result<(), ()> {
         println!("{sql}:");
         println!(
             "  Time  ({} ± {}):  {} ± {}",
-            "mean".with(
-              crate::themes::ctp_mocha_colors::GREEN.clone().into()
-            ).bold(),
-            "σ".with(
-              crate::themes::ctp_mocha_colors::GREEN.clone().into()
-            ),
-            avg.with(
-              crate::themes::ctp_mocha_colors::GREEN.clone().into()
-            ).bold(),
-            stddev.with(
-              crate::themes::ctp_mocha_colors::GREEN.clone().into()
-            ),
+            "mean"
+                .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
+                .bold(),
+            "σ".with(crate::themes::ctp_mocha_colors::GREEN.clone().into()),
+            avg.with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
+                .bold(),
+            stddev.with(crate::themes::ctp_mocha_colors::GREEN.clone().into()),
         );
         println!(
             "  Range ({} … {}):  {} … {}",
             //mn.cyan(),
-            "min".with(
-              crate::themes::ctp_mocha_colors::SKY.clone().into()
-            ),
-            "max".with(
-              crate::themes::ctp_mocha_colors::MAUVE.clone().into()
-            ),
-            mn.with(
-              crate::themes::ctp_mocha_colors::SKY.clone().into()
-            ),
-            mx.with(
-              crate::themes::ctp_mocha_colors::MAUVE.clone().into()
-            ),
+            "min".with(crate::themes::ctp_mocha_colors::SKY.clone().into()),
+            "max".with(crate::themes::ctp_mocha_colors::MAUVE.clone().into()),
+            mn.with(crate::themes::ctp_mocha_colors::SKY.clone().into()),
+            mx.with(crate::themes::ctp_mocha_colors::MAUVE.clone().into()),
         );
+        println!("{}", render_steps(steps));
     }
 
     Ok(())

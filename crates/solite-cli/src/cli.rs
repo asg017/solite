@@ -175,6 +175,17 @@ pub struct SnapTestArgs {
     pub verbose: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct TestArgs {
+    pub file: PathBuf,
+
+    #[arg(long)]
+    pub database: Option<PathBuf>,
+
+    #[arg(long)]
+    pub verbose: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SnapCommand {
     Test(SnapTestArgs),
@@ -256,6 +267,9 @@ pub enum Commands {
 
     /// Snapshot testing for extensions and SQL statements
     Snap(SnapNamespace),
+
+    /// Run SQL-based inline tests in a single file
+    Test(TestArgs),
 
     /// Manage the Solite Jupyter kernel
     Jupyter(JupyterNamespace),

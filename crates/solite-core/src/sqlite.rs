@@ -132,7 +132,8 @@ impl<'a> ValueRefX<'a> {
             if n == 0 {
                 ""
             } else {
-                std::str::from_utf8(std::slice::from_raw_parts(s, n as usize)).unwrap()
+              // TODO: error handling
+                std::str::from_utf8(std::slice::from_raw_parts(s, n as usize)).unwrap_or("")
             }
         }
     }
@@ -526,7 +527,7 @@ pub struct PrepareError {
 impl Connection {
     pub fn open(path: &str) -> Result<Self, SQLiteError> {
         let mut connection: *mut sqlite3 = ptr::null_mut();
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE;
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI;
         let filename = CString::new(path).unwrap();
         let rc =
             unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };

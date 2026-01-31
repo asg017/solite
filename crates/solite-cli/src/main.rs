@@ -46,6 +46,7 @@ fn main() {
         cli::Commands::Execute(_args) => todo!(),
         cli::Commands::Repl(args) => commands::repl::repl(args),
         cli::Commands::Snap(cmd) => commands::snapshot::snapshot(cmd),
+        cli::Commands::Test(cmd) => commands::test::test(cmd),
         cli::Commands::Jupyter(cmd) => commands::jupyter::jupyter(cmd),
         cli::Commands::Docs(cmd) => commands::docs::docs(cmd),
         cli::Commands::Bench(args) => commands::bench::bench(args),

@@ -68,14 +68,25 @@ fn report_from_file(source: &str, filename: &PathBuf, base_db_type: BaseDatabase
     };
     
     let mut rt = Runtime::new(None);
-
     let conn = match base_db_type {
         BaseDatabaseType::None => Connection::open_in_memory().unwrap(),
         BaseDatabaseType::Database(path) => {
           let base_db = Connection::open(path.to_str().unwrap()).unwrap();
             let db = Connection::open_in_memory().unwrap();
 
-            let stmt = base_db.prepare("select name, sql from sqlite_master where type = 'table'").unwrap()
+            let stmt = base_db.prepare(r#"
+              with t as (
+              select name
+              from pragma_table_list
+              where type in ('table','view', 'virtual')
+                and name not like 'sqlite_%'
+              )
+              select
+                t.name,
+                sqlite_master.sql
+              from t
+              left join sqlite_master on sqlite_master.name = t.name
+            "#).unwrap()
                 .1.unwrap();
               loop {
                 match stmt.nextx() {
@@ -92,6 +103,9 @@ fn report_from_file(source: &str, filename: &PathBuf, base_db_type: BaseDatabase
         }
         BaseDatabaseType::SqlFile(path) => {
             let db = Connection::open_in_memory().unwrap();
+            let sql = std::fs::read_to_string(path).unwrap();
+            db.execute_script(&sql).unwrap();
+            report.setup.push(sql);
             db
         } 
     };
@@ -127,7 +141,7 @@ fn report_from_file(source: &str, filename: &PathBuf, base_db_type: BaseDatabase
                                 let export_parameters = parameters
                                     .iter()
                                     .map(|p| {
-                                        if p.starts_with("$") && p.contains("::") {
+                                        if (p.starts_with("$") || p.starts_with(":")) && p.contains("::") {
                                             let idx = p
                                                 .find("::")
                                                 .expect("pattern to match contains above");

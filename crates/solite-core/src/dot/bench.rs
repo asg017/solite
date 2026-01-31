@@ -51,7 +51,7 @@ impl BenchResult {
       let mx = max(&self.times);
       let niter = self.niter;
       format!(
-          "{}\n  Time  (mean ± σ):   {} ± {} ({} iterations)\n  Range (min … max):  {} … {}\n{}",
+          "{}\n  Time  (mean ± σ):   {} ± {} ({} iterations)\n  Range (min … max):  {} … {}",
           match self.name.clone() {
               Some(name) => format!("Benchmark: {}", name),
               None => "Benchmark".to_string(),
@@ -59,9 +59,9 @@ impl BenchResult {
           format_runtime(avg),
           format_runtime(stddev),
           niter,
-          format_runtime(mn.clone()),
-          format_runtime(mx.clone()),
-          self.report
+          format_runtime(mn),
+          format_runtime(mx),
+          //self.report
       )
   }
 }
@@ -147,7 +147,7 @@ impl BenchCommand {
             self.statement.execute().unwrap();
             self.statement.reset();
             let elapsed = jiff::Timestamp::now() - tn;
-            times.push(elapsed.clone());
+            times.push(elapsed);
             if let Some(cb) = &callback {
                 cb(elapsed);
             }
@@ -240,27 +240,30 @@ fn render_flamegraph(steps: &[BytecodeStep], ai_indent: &[i32]) -> String {
     output
 }
 
-fn render_steps(steps: Vec<BytecodeStep>) -> String {
+pub fn render_steps(steps: Vec<BytecodeStep>) -> String {
     let mut output = String::new();
-    
+
     if steps.is_empty() {
         return output;
     }
-    
+
+    // Get terminal width, default to 120 if unavailable
+    let term_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(120);
+
     // Compute indentation array
     let n_indent = steps.len();
     let mut ai_indent = vec![0i32; n_indent];
-    
+
     // Apply indentation rules
     for (i_op, step) in steps.iter().enumerate() {
         let opcode = step.opcode.as_str();
         let i_addr = step.addr;
         let p2 = step.p2;
         let p1 = step.p1;
-        
+
         // Calculate p2op (target address in array indices)
         let p2op = (p2 + (i_op as i64 - i_addr)) as usize;
-        
+
         // Rule 2: Next/Prev family opcodes
         if matches!(
             opcode,
@@ -272,7 +275,7 @@ fn render_steps(steps: Vec<BytecodeStep>) -> String {
                 }
             }
         }
-        
+
         // Rule 3: Goto (backward jumps)
         if opcode == "Goto" && p2op < n_indent {
             let target_opcode = steps[p2op].opcode.as_str();
@@ -280,7 +283,7 @@ fn render_steps(steps: Vec<BytecodeStep>) -> String {
                 target_opcode,
                 "Yield" | "SeekLT" | "SeekGT" | "RowSetRead" | "Rewind"
             );
-            
+
             if is_loop_target || p1 != 0 {
                 for i in p2op..i_op {
                     ai_indent[i] += 2;
@@ -288,14 +291,10 @@ fn render_steps(steps: Vec<BytecodeStep>) -> String {
             }
         }
     }
-    
+
     // Calculate total cycles for percentage computation
     let total_cycles: i64 = steps.iter().map(|s| s.ncycle).sum();
-    
-    // Find the maximum width needed for comment (for alignment)
-    let max_comment_width = steps.iter().map(|s| s.comment.len()).max().unwrap_or(20);
-    let comment_width = max_comment_width.max(20) + 2; // Add 2 for spacing
-    
+
     // Render output with indentation
     output.push_str(&format!(
         "QUERY PLAN (cycles={} [100%])\n",
@@ -303,53 +302,52 @@ fn render_steps(steps: Vec<BytecodeStep>) -> String {
     ));
     output.push_str("addr  opcode         p1    p2    p3    p4             p5  comment\n");
     output.push_str("----  -------------  ----  ----  ----  -------------  --  -------\n");
-    
+
     for (i, step) in steps.iter().enumerate() {
         let indent = ai_indent[i];
-        
+
         // Calculate cycle percentage
         let cycle_pct = if total_cycles > 0 {
             ((step.ncycle as f64 / total_cycles as f64) * 100.0).round() as i64
         } else {
             0
         };
-        
-        // Format the line with fixed-width columns and right-aligned cycle info
+
+        // Build the base line content (without cycle info)
+        let base_line = format!(
+            "{:<4}  {:indent$}{:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
+            step.addr,
+            "",
+            step.opcode,
+            step.p1,
+            step.p2,
+            step.p3,
+            step.p4,
+            step.p5,
+            step.comment,
+            indent = indent as usize
+        );
+
         if step.ncycle > 0 {
             let cycle_info = format!("(cycles={} [{}%])", step.ncycle, cycle_pct);
-            output.push_str(&format!(
-                "{:<4}  {:indent$}{:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {:<width$}{}\n",
-                step.addr,
-                "",
-                step.opcode,
-                step.p1,
-                step.p2,
-                step.p3,
-                step.p4,
-                step.p5,
-                step.comment,
-                cycle_info,
-                indent = indent as usize,
-                width = comment_width
-            ));
+            // Calculate padding to right-align cycle_info to terminal width
+            let content_len = base_line.len();
+            let cycle_len = cycle_info.len();
+            let total_needed = content_len + 1 + cycle_len; // +1 for minimum spacing
+
+            let padding = if term_width > total_needed {
+                term_width - total_needed
+            } else {
+                1 // minimum single space
+            };
+
+            output.push_str(&format!("{}{:>pad$}{}\n", base_line, "", cycle_info, pad = padding + 1));
         } else {
-            output.push_str(&format!(
-                "{:<4}  {:indent$}{:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}\n",
-                step.addr,
-                "",
-                step.opcode,
-                step.p1,
-                step.p2,
-                step.p3,
-                step.p4,
-                step.p5,
-                step.comment,
-                indent = indent as usize
-            ));
+            output.push_str(&format!("{}\n", base_line));
         }
     }
-    
+
     //output.push_str(&render_flamegraph(&steps, &ai_indent));
-    
+
     output
 }

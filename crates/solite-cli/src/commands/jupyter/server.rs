@@ -589,6 +589,25 @@ async fn handle_code(
 
                         response.send(msg.as_child_of(parent)).await.unwrap()
                     }
+                    DotCommand::Env(env_cmd) => {
+                        let action = env_cmd.execute();
+                        let msg = match action {
+                            solite_core::dot::EnvAction::Set { name, value: _ } => {
+                                DisplayData::from(MediaType::Plain(format!(
+                                    "set environment variable: {}",
+                                    name,
+                                )))
+                            }
+                            solite_core::dot::EnvAction::Unset { name } => {
+                                DisplayData::from(MediaType::Plain(format!(
+                                    "unset environment variable: {}",
+                                    name,
+                                )))
+                            }
+                        };
+
+                        response.send(msg.as_child_of(parent)).await.unwrap()
+                    }
                     DotCommand::Open(open_cmd) => {
                         open_cmd.execute(runtime);
                         response
@@ -610,7 +629,9 @@ async fn handle_code(
                             Ok(LoadCommandSource::Uv { directory, package }) => MediaType::Plain(
                                 format!("Loaded '{package}' with uv from {directory}"),
                             ),
-                            Err(_) => todo!(),
+                            Err(error) => {
+                                MediaType::Plain(format!("Load failed: {}", error))
+                            },
                         };
                         response
                             .send(DisplayData::from(msg).as_child_of(parent))
@@ -682,8 +703,36 @@ async fn handle_code(
                         }
                         Err(_) => todo!(),
                     },
-                    DotCommand::Bench(mut cmd) => match cmd.execute(None) {
+                    DotCommand::Bench(mut cmd) =>{
+                        let response_clone = response.clone();
+                        let parent_clone = parent.clone();
+                        let callback = move |interval: jiff::Span| {
+                            let msg = format!(
+                                "Benchmark running... elapsed: {:?}",
+                                interval
+                            );
+                            let response = response_clone.clone();
+                            let parent = parent_clone.clone();
+                            tokio::spawn(async move {
+                              response
+                                .send(ClearOutput { wait: false }.as_child_of(&parent))
+                                .await
+                                .unwrap();
+                                response
+                                    .send(
+                                        DisplayData::from(MediaType::Plain(msg))
+                                            .as_child_of(&parent),
+                                    )
+                                    .await
+                                    .unwrap();
+                            });
+                        };
+                       match cmd.execute(Some(Box::new(callback))) {
                         Ok(result) => {
+                            response
+                                .send(ClearOutput { wait: false }.as_child_of(parent))
+                                .await
+                                .unwrap();
                             response
                                 .send(
                                     DisplayData::from(MediaType::Plain(format!(
@@ -702,6 +751,7 @@ async fn handle_code(
                             )
                             .await
                             .unwrap(),
+                    }
                     },
                 },
             },

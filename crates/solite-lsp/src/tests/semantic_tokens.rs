@@ -1,6 +1,6 @@
 //! Semantic token snapshot tests
 
-use super::*;
+use crate::server::compute_semantic_tokens;
 use insta::assert_snapshot;
 
 /// Format semantic tokens as a human-readable string for snapshot testing.

@@ -442,7 +442,7 @@ fn test_normal_identifier_no_insert_text() {
 // Phase 6: Keyword Completions Tests
 // ========================================
 
-use solite_lsp::completions::{get_completions_extended, CompletionOptions};
+use crate::completions::{get_completions_extended, CompletionOptions};
 
 #[test]
 fn test_statement_start_keywords() {

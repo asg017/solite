@@ -287,7 +287,7 @@ fn build_combined_schema(sources: &[&str]) -> Schema {
     }
 }
 
-struct Backend {
+pub(crate) struct Backend {
     client: Client,
     documents: RwLock<HashMap<Url, String>>,
     schemas: RwLock<HashMap<Url, Schema>>,
@@ -304,7 +304,7 @@ struct Backend {
 }
 
 impl Backend {
-    fn new(client: Client) -> Self {
+    pub(crate) fn new(client: Client) -> Self {
         Self {
             client,
             documents: RwLock::new(HashMap::new()),
@@ -652,7 +652,7 @@ impl Backend {
 }
 
 /// Compute semantic tokens for SQL text (standalone function for testing)
-fn compute_semantic_tokens(text: &str) -> Vec<SemanticToken> {
+pub(crate) fn compute_semantic_tokens(text: &str) -> Vec<SemanticToken> {
     let tokens = lex(text);
     let mut semantic_tokens = Vec::new();
         let mut prev_line = 0u32;

@@ -10,6 +10,7 @@ solite-analyzer = { path = "../solite-analyzer" }
 solite-ast = { path = "../solite-ast" }
 solite-fmt = { path = "../solite-fmt" }
 solite-schema = { path = "../solite-schema" }
+solite-completion = { path = "../solite-completion", features = ["analyzer"] }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 

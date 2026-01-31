@@ -7,7 +7,7 @@ use tokio::io::{duplex, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LspService, Server};
 
-use crate::Backend;
+use crate::server::Backend;
 
 /// A simple LSP client for testing that communicates over an async stream
 struct TestClient {

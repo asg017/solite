@@ -719,7 +719,7 @@ fn test_context_where_after_expr_suggests_operators() {
     // Direct context test for after expression in WHERE clause
     // This verifies the AfterWhereExpr context is detected and returns correct completions
     use super::{build_test_schema, get_completions_for_context};
-    use solite_lsp::context::detect_context;
+    use crate::context::detect_context;
 
     let schema = build_test_schema("CREATE TABLE t (id INTEGER, name TEXT);");
 

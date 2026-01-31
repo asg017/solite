@@ -1,7 +1,7 @@
 //! CTE (Common Table Expression) tests for diagnostics, autocomplete, and hover.
 
 use super::*;
-use solite_lsp::context::{detect_context, CompletionContext, CteRef};
+use crate::context::{detect_context, CompletionContext, CteRef};
 use solite_analyzer::{analyze_with_schema, format_hover_content, find_symbol_at_offset, find_statement_at_offset};
 use solite_parser::parse_program;
 

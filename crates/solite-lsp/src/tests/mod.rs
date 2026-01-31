@@ -14,10 +14,11 @@ mod lsp_integration;
 mod semantic_tokens;
 
 use super::*;
-use solite_lsp::completions::{get_completions_for_context, quote_identifier_if_needed};
-use solite_lsp::context::{detect_context, extract_used_insert_columns, CompletionContext, TableRef};
-use solite_analyzer::build_schema;
+use crate::completions::{get_completions_for_context, quote_identifier_if_needed};
+use crate::context::{detect_context, extract_used_insert_columns, CompletionContext, TableRef};
+use solite_analyzer::{build_schema, Schema};
 use solite_parser::parse_program;
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
 
 // ============================================================================
 // Shared Test Helpers

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solite SQL Formatter</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --surface-alt: #0f3460;
+      --primary: #e94560;
+      --text: #eee;
+      --text-muted: #888;
+      --border: #333;
+      --success: #4ade80;
+      --error: #f87171;
+      --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 2rem;
+      font-weight: 600;
+    }
+
+    h1 span {
+      color: var(--primary);
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      margin: 0;
+    }
+
+    .editor-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 900px) {
+      .editor-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: var(--surface);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 12px 16px;
+      background: var(--surface-alt);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .status {
+      font-size: 0.8rem;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+
+    .status.success {
+      background: rgba(74, 222, 128, 0.2);
+      color: var(--success);
+    }
+
+    .status.error {
+      background: rgba(248, 113, 113, 0.2);
+      color: var(--error);
+    }
+
+    .status.pending {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 400px;
+      padding: 16px;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1.6;
+      resize: none;
+      outline: none;
+    }
+
+    textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .output-area {
+      flex: 1;
+      min-height: 400px;
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+
+    .output-area.error {
+      color: var(--error);
+    }
+
+    .controls {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      align-items: flex-end;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    select, input[type="number"] {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      min-width: 140px;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    input[type="number"] {
+      width: 80px;
+      min-width: 80px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 10px;
+      margin-left: auto;
+    }
+
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.secondary {
+      background: var(--surface-alt);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 30px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Solite <span>SQL Formatter</span></h1>
+      <p class="subtitle">Format SQLite SQL with configurable style options</p>
+    </header>
+
+    <div id="app">
+      <div class="loading">
+        <div class="loading-spinner"></div>
+        <div>Loading WASM module...</div>
+      </div>
+    </div>
+
+    <footer>
+      Powered by <a href="https://github.com/anthropics/solite">solite_fmt</a> compiled to WebAssembly
+    </footer>
+  </div>
+
+  <script type="module">
+    import init, { format, check } from './pkg/solite_fmt_wasm.js';
+
+    const SAMPLE_SQL = `-- Sample SQL query
+SELECT u.id, u.name, COUNT(o.id) AS order_count, SUM(o.total) AS total_spent
+FROM users AS u
+LEFT JOIN orders AS o ON u.id = o.user_id
+WHERE u.created_at > '2024-01-01' AND u.status = 'active'
+GROUP BY u.id, u.name
+HAVING COUNT(o.id) > 0
+ORDER BY total_spent DESC
+LIMIT 10;
+
+-- Insert statement
+INSERT INTO audit_log (user_id, event_type, created_at)
+VALUES (1, 'login', datetime('now'));`;
+
+    let isInitialized = false;
+
+    async function initialize() {
+      try {
+        await init();
+        isInitialized = true;
+        renderApp();
+      } catch (err) {
+        document.getElementById('app').innerHTML = `
+          <div class="loading" style="color: var(--error)">
+            Failed to load WASM module: ${err.message}
+          </div>
+        `;
+      }
+    }
+
+    function renderApp() {
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="editor-container">
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">Input</span>
+              <span class="status pending" id="check-status">Not checked</span>
+            </div>
+            <textarea id="input" placeholder="Enter SQL here...">${SAMPLE_SQL}</textarea>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">Output</span>
+              <button class="secondary" style="padding: 4px 12px; font-size: 12px;" id="copy-btn">Copy</button>
+            </div>
+            <div class="output-area" id="output"></div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="control-group">
+            <label>Keyword Case</label>
+            <select id="keyword-case">
+              <option value="lower" selected>lowercase</option>
+              <option value="upper">UPPERCASE</option>
+              <option value="preserve">Preserve</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Indent Style</label>
+            <select id="indent-style">
+              <option value="spaces" selected>Spaces</option>
+              <option value="tabs">Tabs</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Indent Size</label>
+            <input type="number" id="indent-size" value="2" min="1" max="8">
+          </div>
+
+          <div class="control-group">
+            <label>Line Width</label>
+            <input type="number" id="line-width" value="80" min="40" max="200">
+          </div>
+
+          <div class="control-group">
+            <label>Comma Position</label>
+            <select id="comma-position">
+              <option value="trailing" selected>Trailing</option>
+              <option value="leading">Leading</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>AND/OR Position</label>
+            <select id="logical-position">
+              <option value="before" selected>Before</option>
+              <option value="after">After</option>
+            </select>
+          </div>
+
+          <div class="buttons">
+            <button class="secondary" id="check-btn">Check</button>
+            <button id="format-btn">Format</button>
+          </div>
+        </div>
+      `;
+
+      // Set up event listeners
+      const inputEl = document.getElementById('input');
+      const outputEl = document.getElementById('output');
+      const statusEl = document.getElementById('check-status');
+      const formatBtn = document.getElementById('format-btn');
+      const checkBtn = document.getElementById('check-btn');
+      const copyBtn = document.getElementById('copy-btn');
+
+      function getConfig() {
+        return {
+          keyword_case: document.getElementById('keyword-case').value,
+          indent_style: document.getElementById('indent-style').value,
+          indent_size: parseInt(document.getElementById('indent-size').value, 10),
+          line_width: parseInt(document.getElementById('line-width').value, 10),
+          comma_position: document.getElementById('comma-position').value,
+          logical_operator_position: document.getElementById('logical-position').value,
+        };
+      }
+
+      function doFormat() {
+        const sql = inputEl.value;
+        const config = getConfig();
+
+        try {
+          const result = format(sql, config);
+          outputEl.textContent = result;
+          outputEl.classList.remove('error');
+          statusEl.textContent = 'Formatted';
+          statusEl.className = 'status success';
+        } catch (err) {
+          outputEl.textContent = 'Error: ' + err.message;
+          outputEl.classList.add('error');
+          statusEl.textContent = 'Error';
+          statusEl.className = 'status error';
+        }
+      }
+
+      function doCheck() {
+        const sql = inputEl.value;
+        const config = getConfig();
+
+        try {
+          const isFormatted = check(sql, config);
+          if (isFormatted) {
+            statusEl.textContent = 'Already formatted';
+            statusEl.className = 'status success';
+          } else {
+            statusEl.textContent = 'Needs formatting';
+            statusEl.className = 'status error';
+          }
+        } catch (err) {
+          statusEl.textContent = 'Parse error';
+          statusEl.className = 'status error';
+        }
+      }
+
+      formatBtn.addEventListener('click', doFormat);
+      checkBtn.addEventListener('click', doCheck);
+
+      copyBtn.addEventListener('click', () => {
+        const text = outputEl.textContent;
+        if (text) {
+          navigator.clipboard.writeText(text).then(() => {
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+          });
+        }
+      });
+
+      // Auto-format on input change (debounced)
+      let timeout;
+      inputEl.addEventListener('input', () => {
+        statusEl.textContent = 'Typing...';
+        statusEl.className = 'status pending';
+        clearTimeout(timeout);
+        timeout = setTimeout(doFormat, 300);
+      });
+
+      // Format on config change
+      document.querySelectorAll('select, input[type="number"]').forEach(el => {
+        el.addEventListener('change', doFormat);
+      });
+
+      // Initial format
+      doFormat();
+    }
+
+    initialize();
+  </script>
+</body>
+</html>

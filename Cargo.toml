@@ -14,6 +14,7 @@ members = [
     "crates/solite-lsp",
     "crates/solite-fmt-wasm",
     "crates/solite-mdtest",
+    "crates/solite-completion",
 ]
 
 [workspace.dependencies]

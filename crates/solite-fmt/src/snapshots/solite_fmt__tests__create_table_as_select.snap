@@ -1,0 +1,15 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table t as select a, b from u where x = 1
+
+-- Output:
+create table t as
+select
+  a,
+  b
+from u
+where x = 1;

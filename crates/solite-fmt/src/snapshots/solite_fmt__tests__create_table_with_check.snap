@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table t (a integer check(a > 0), b integer, check(a + b < 100))
+
+-- Output:
+create table t(
+  a integer check(a > 0),
+  b integer,
+  check(a + b < 100)
+);

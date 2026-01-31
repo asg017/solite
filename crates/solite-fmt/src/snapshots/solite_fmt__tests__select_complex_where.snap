@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select a from t where x = 1 and y = 2 or z = 3
+
+-- Output:
+select a
+from t
+where x = 1
+  and y = 2
+  or z = 3;

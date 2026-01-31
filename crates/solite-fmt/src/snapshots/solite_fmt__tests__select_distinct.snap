@@ -1,0 +1,13 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select distinct a, b from t
+
+-- Output:
+select distinct
+  a,
+  b
+from t;

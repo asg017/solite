@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create view v(col1, col2) as select a, b from t
+
+-- Output:
+create view v(col1, col2) as
+select
+  a,
+  b
+from t;

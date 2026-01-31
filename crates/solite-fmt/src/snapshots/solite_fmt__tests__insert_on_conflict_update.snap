@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- insert into t (a, b) values (1, 2) on conflict(a) do update set b = excluded.b
+
+-- Output:
+insert into t(a, b)
+values
+  (1, 2)
+on conflict(a) do update set
+  b = excluded.b;

@@ -1,0 +1,12 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select a from t limit 10 offset 5
+
+-- Output:
+select a
+from t
+limit 10 offset 5;

@@ -1,0 +1,10 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- drop index idx_t_a
+
+-- Output:
+drop index idx_t_a;

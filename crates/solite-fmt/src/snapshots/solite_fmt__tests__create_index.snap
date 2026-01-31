@@ -1,0 +1,10 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create index idx_t_a on t(a)
+
+-- Output:
+create index idx_t_a on t(a);

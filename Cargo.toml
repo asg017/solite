@@ -11,6 +11,7 @@ members = [
     "crates/solite-parser",
     "crates/solite-analyzer",
     "crates/solite-schema",
+    "crates/solite-fmt",
 ]
 
 [workspace.dependencies]

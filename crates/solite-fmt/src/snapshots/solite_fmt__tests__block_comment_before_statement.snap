@@ -1,0 +1,16 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- /* This is a
+--    multi-line
+--    block comment */
+-- select * from t
+
+-- Output:
+/* This is a
+   multi-line
+   block comment */
+select * from t;

@@ -1,0 +1,15 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- -- Create the users table
+-- create table users (id integer primary key, name text)
+
+-- Output:
+-- Create the users table
+create table users(
+  id integer primary key,
+  name text
+);

@@ -1,0 +1,18 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select * from t where x in (select y from u where y in (select z from v))
+
+-- Output:
+select *
+from t
+where x in (
+  select y
+  from u
+  where y in (
+    select z from v
+  )
+);

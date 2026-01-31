@@ -1,0 +1,12 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select "select" from "from" where "where" = 1
+
+-- Output:
+select "select"
+from "from"
+where "where" = 1;

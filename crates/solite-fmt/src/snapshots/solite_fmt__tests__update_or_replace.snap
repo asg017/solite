@@ -1,0 +1,13 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- update or replace t set a = 1 where id = 5
+
+-- Output:
+update or replace t
+set
+  a = 1
+where id = 5;

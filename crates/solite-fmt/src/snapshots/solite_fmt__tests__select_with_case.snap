@@ -1,0 +1,16 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select case when x = 1 then 'one' when x = 2 then 'two' else 'other' end from t
+
+-- Output:
+select
+  case
+    when x = 1 then 'one'
+    when x = 2 then 'two'
+    else 'other'
+  end
+from t;

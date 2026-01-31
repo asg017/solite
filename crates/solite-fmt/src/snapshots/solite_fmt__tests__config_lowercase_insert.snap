@@ -1,0 +1,12 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- INSERT INTO t (a, b) VALUES (1, 2)
+
+-- Output:
+insert into t(a, b)
+values
+  (1, 2);

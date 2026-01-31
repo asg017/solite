@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select a as col_a, b col_b, c as col_c from t as tbl
+
+-- Output:
+select
+  a as col_a,
+  b col_b,
+  c as col_c
+from t as tbl;

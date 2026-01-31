@@ -1,0 +1,13 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select cast(x as integer), cast(y as text) from t
+
+-- Output:
+select
+  cast(x as integer),
+  cast(y as text)
+from t;

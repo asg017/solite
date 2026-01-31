@@ -1,0 +1,12 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select name collate nocase from t order by name collate nocase
+
+-- Output:
+select name collate nocase
+from t
+order by name collate nocase;

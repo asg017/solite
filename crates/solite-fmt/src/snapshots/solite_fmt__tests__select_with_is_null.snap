@@ -1,0 +1,13 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select a from t where x is null and y is not null
+
+-- Output:
+select a
+from t
+where x is null
+  and y is not null;

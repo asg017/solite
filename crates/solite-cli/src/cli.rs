@@ -122,24 +122,6 @@ pub struct CodegenArgs {
 
 
 #[derive(Args, Debug)]
-pub struct McpNamespace {
-    #[command(subcommand)]
-    pub command: McpCommand,
-}
-#[derive(Subcommand, Debug)]
-pub enum McpCommand {
-    Up(McpUpArgs),
-    Install(McpInstallArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct McpUpArgs {
-}
-#[derive(Args, Debug)]
-pub struct McpInstallArgs {
-}
-
-#[derive(Args, Debug)]
 pub struct SnapNamespace {
     #[command(subcommand)]
     pub command: SnapCommand,
@@ -299,9 +281,6 @@ pub enum Commands {
 
     /// Run benchmarks on SQL statements
     Bench(BenchArgs),
-
-    /// MCP
-    Mcp(McpNamespace),
 
     /// Codegen SQL queries into an intermediate representation
     Codegen(CodegenArgs),

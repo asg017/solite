@@ -50,7 +50,6 @@ fn main() {
         cli::Commands::Jupyter(cmd) => commands::jupyter::jupyter(cmd),
         cli::Commands::Docs(cmd) => commands::docs::docs(cmd),
         cli::Commands::Bench(args) => commands::bench::bench(args),
-        cli::Commands::Mcp(args) => commands::mcp::mcp(args),
         cli::Commands::Codegen(cmd) => commands::codegen::codegen(cmd),
         cli::Commands::Tui(cmd) => commands::tui::tui(cmd),
         cli::Commands::Fmt(args) => commands::fmt::fmt(args),

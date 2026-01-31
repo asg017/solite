@@ -1,57 +1,59 @@
-use crate::cli::TestArgs;
+//! SQL test runner for assertion-based testing.
+//!
+//! This module provides functionality to run SQL test files that contain
+//! assertions in the form of comments following SQL statements.
+//!
+//! # Test File Format
+//!
+//! Each SQL statement can be followed by an expected result comment:
+//!
+//! ```sql
+//! SELECT 1 + 1; -- 2
+//! SELECT 'hello'; -- 'hello'
+//! SELECT * FROM empty_table; -- [no results]
+//! ```
+//!
+//! # Special Annotations
+//!
+//! - `-- [no results]`: Expect no rows returned
+//! - `-- error: <message>`: Expect a specific error message
+//! - `-- TODO ...`: Skip this test (marked as pending)
+//!
+//! # Example Test File
+//!
+//! ```sql
+//! -- Setup
+//! CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT);
+//! INSERT INTO users VALUES (1, 'Alice');
+//!
+//! -- Tests
+//! SELECT COUNT(*) FROM users; -- 1
+//! SELECT name FROM users WHERE id = 1; -- 'Alice'
+//! SELECT * FROM users WHERE id = 999; -- [no results]
+//! SELECT * FROM nonexistent; -- error: no such table: nonexistent
+//! ```
+
+mod parser;
+mod report;
+mod value;
+
 use console::Style;
-use solite_core::dot::{DotCommand, LoadCommand};
+use solite_core::dot::DotCommand;
 use solite_core::{BlockSource, Runtime, StepResult};
-use solite_core::sqlite::{ValueRefX, ValueRefXValue};
 use std::fs::read_to_string;
-use std::path::PathBuf;
-use codespan_reporting::files::SimpleFiles;
-use codespan_reporting::diagnostic::{Diagnostic, Label};
-use codespan_reporting::term::{self, termcolor::{ColorChoice, StandardStream}};
+use std::io::Write as _;
 
-fn parse_epilogue_comment(ep: &str) -> String {
-    let s = ep.trim();
-    let s = if s.starts_with("--") {
-        s[2..].trim()
-    } else if s.starts_with("/*") && s.ends_with("*/") {
-        s[2..s.len() - 2].trim()
-    } else if s.starts_with("/*") {
-        // unterminated block style: strip leading /*
-        s[2..].trim()
-    } else {
-        s
-    };
-    s.to_string()
-}
+use crate::cli::TestArgs;
 
-fn value_to_string(v: &ValueRefX) -> String {
-    match &v.value {
-        ValueRefXValue::Null => "NULL".to_string(),
-        ValueRefXValue::Int(i) => format!("{}", i),
-        ValueRefXValue::Double(d) => {
-            // Use a reasonably short representation
-            let s = format!("{}", d);
-            s
-        }
-        ValueRefXValue::Text(b) => {
-            // return SQL single-quoted literal, escaping single quotes
-            let mut s = String::from("'");
-            let mut inner = String::from_utf8_lossy(b).to_string();
-            inner = inner.replace("'", "''");
-            s.push_str(&inner);
-            s.push('\'');
-            s
-        }
-        ValueRefXValue::Blob(_) => {
-            // TODO: handle blobs
-            todo!("blob comparison not implemented")
-        }
-    }
-}
+use parser::{compute_offset_from_reference, parse_epilogue_comment, parse_ref_file_line_col};
+use report::{report_mismatch, TestStats};
+use value::value_to_string;
 
-fn test_impl(args: TestArgs) -> Result<(), anyhow::Error> {
-    let source_path: PathBuf = args.file;
-    let content = read_to_string(&source_path)?;
+/// Run SQL tests from a file.
+fn test_impl(args: TestArgs) -> Result<(), TestError> {
+    let source_path = args.file;
+    let content = read_to_string(&source_path)
+        .map_err(|e| TestError::FileRead(format!("{}: {}", source_path.display(), e)))?;
 
     let mut rt = Runtime::new(None);
     rt.enqueue(
@@ -60,11 +62,7 @@ fn test_impl(args: TestArgs) -> Result<(), anyhow::Error> {
         BlockSource::File(source_path.clone()),
     );
 
-    let mut successes = 0usize;
-    let mut failures = 0usize;
-    let mut todos: Vec<(String, usize, usize, String)> = vec![];
-
-    // print progress symbols inline
+    let mut stats = TestStats::new();
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
 
@@ -72,208 +70,193 @@ fn test_impl(args: TestArgs) -> Result<(), anyhow::Error> {
         match rt.next_stepx() {
             None => break,
             Some(Err(e)) => {
-                failures += 1;
+                stats.record_failure();
                 eprintln!("Error preparing step: {}", e);
                 print!("{}", Style::new().red().apply_to("x"));
             }
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => {
-                    match cmd {
-                        DotCommand::Load(cmdx) => {
-                            cmdx.execute(&mut rt.connection).ok();
-                        }
-                        _ => todo!(),
-                    }
+                    handle_dot_command(&cmd, &mut rt);
                 }
                 StepResult::SqlStatement { stmt, .. } => {
-                    let ep = step.epilogue.clone();
-                    let ep = match ep {
-                        Some(s) => parse_epilogue_comment(&s),
+                    let epilogue = match &step.epilogue {
+                        Some(s) => parse_epilogue_comment(s),
                         None => {
-                            failures += 1;
+                            stats.record_failure();
                             print!("{}", Style::new().red().apply_to("x"));
                             continue;
                         }
                     };
 
-                    if ep.to_uppercase().starts_with("TODO") {
-                        // capture location from step.reference via its Display
+                    // Handle TODO annotations
+                    if epilogue.to_uppercase().starts_with("TODO") {
                         let ref_display = format!("{}", step.reference);
                         if let Some((file, line, col)) = parse_ref_file_line_col(&ref_display) {
-                            todos.push((file, line, col, ep.clone()));
+                            stats.record_todo(file, line, col, epilogue.clone());
                         } else {
-                            todos.push((source_path.to_string_lossy().to_string(), 0, 0, ep.clone()));
+                            stats.record_todo(
+                                source_path.to_string_lossy().to_string(),
+                                0,
+                                0,
+                                epilogue.clone(),
+                            );
                         }
                         print!("{}", Style::new().yellow().apply_to("-"));
                         continue;
                     }
 
-                    // execute and compare
+                    // Execute and compare
                     match stmt.next() {
                         Err(err) => {
-                            // compute offset from step reference to show diagnostic
                             let ref_display = format!("{}", step.reference);
-                            let maybe_offset = compute_offset_from_reference(&content, &ref_display);
-                            if ep.starts_with("error:") {
-                                let expected = ep["error:".len()..].trim();
+                            let maybe_offset =
+                                compute_offset_from_reference(&content, &ref_display);
+
+                            if epilogue.starts_with("error:") {
+                                let expected = epilogue["error:".len()..].trim();
                                 if expected == err.message {
-                                    successes += 1;
+                                    stats.record_success();
                                     print!("{}", Style::new().green().apply_to("."));
                                 } else {
-                                    failures += 1;
+                                    stats.record_failure();
                                     print!("{}", Style::new().red().apply_to("x"));
-                                    // print diagnostic for sqlite error
-                                    if let Some(off) = maybe_offset {
-                                        crate::errors::report_error(&source_path.to_string_lossy(), &content, &err, Some(off));
-                                    } else {
-                                        crate::errors::report_error(&source_path.to_string_lossy(), &content, &err, None);
-                                    }
+                                    crate::errors::report_error(
+                                        &source_path.to_string_lossy(),
+                                        &content,
+                                        &err,
+                                        maybe_offset,
+                                    );
                                     if args.verbose {
-                                        eprintln!("\nExpected error: '{}' got: '{}'", expected, err.message);
+                                        eprintln!(
+                                            "\nExpected error: '{}' got: '{}'",
+                                            expected, err.message
+                                        );
                                     }
                                 }
                             } else {
-                                failures += 1;
+                                stats.record_failure();
                                 print!("{}", Style::new().red().apply_to("x"));
-                                if let Some(off) = maybe_offset {
-                                    crate::errors::report_error(&source_path.to_string_lossy(), &content, &err, Some(off));
-                                } else {
-                                    crate::errors::report_error(&source_path.to_string_lossy(), &content, &err, None);
-                                }
+                                crate::errors::report_error(
+                                    &source_path.to_string_lossy(),
+                                    &content,
+                                    &err,
+                                    maybe_offset,
+                                );
                                 if args.verbose {
                                     eprintln!("\nExecution error: {}", err.message);
                                 }
                             }
                         }
-                        Ok(maybe_row) => match maybe_row {
-                            None => {
-                                // no rows
-                                if ep == "[no results]" {
-                                    successes += 1;
-                                    print!("{}", Style::new().green().apply_to("."));
-                                } else {
-                                    failures += 1;
+                        Ok(None) => {
+                            if epilogue == "[no results]" {
+                                stats.record_success();
+                                print!("{}", Style::new().green().apply_to("."));
+                            } else {
+                                stats.record_failure();
+                                print!("{}", Style::new().red().apply_to("x"));
+                            }
+                        }
+                        Ok(Some(row)) => {
+                            let v = match row.first() {
+                                Some(v) => v,
+                                None => {
+                                    stats.record_failure();
                                     print!("{}", Style::new().red().apply_to("x"));
+                                    continue;
+                                }
+                            };
+
+                            let actual = value_to_string(v);
+                            if actual == epilogue {
+                                stats.record_success();
+                                print!("{}", Style::new().green().apply_to("."));
+                            } else {
+                                stats.record_failure();
+                                print!("{}", Style::new().red().apply_to("x"));
+
+                                let ref_display = format!("{}", step.reference);
+                                if let Some((_, line, col)) =
+                                    parse_ref_file_line_col(&ref_display)
+                                {
+                                    report_mismatch(
+                                        &source_path.to_string_lossy(),
+                                        &content,
+                                        line,
+                                        col,
+                                        &epilogue,
+                                        &actual,
+                                    );
+                                } else if args.verbose {
+                                    eprintln!("\nExpected: '{}' Got: '{}'", epilogue, actual);
                                 }
                             }
-                            Some(row) => {
-                                // single value expected
-                                let v = row.get(0).unwrap();
-                                let actual = value_to_string(&v);
-                                if actual == ep {
-                                    successes += 1;
-                                    print!("{}", Style::new().green().apply_to("."));
-                                } else {
-                                    failures += 1;
-                                    print!("{}", Style::new().red().apply_to("x"));
-                                    // print a codespan diagnostic showing expected vs actual
-                                    let ref_display = format!("{}", step.reference);
-                                    if let Some((line, col)) = parse_line_col_from_ref(&ref_display) {
-                                        report_mismatch(&source_path.to_string_lossy(), &content, line, col, &ep, &actual);
-                                    } else if args.verbose {
-                                        eprintln!("\nExpected: '{}' Got: '{}'", ep, actual);
-                                    }
-                                }
-                            }
-                        },
+                        }
                     }
                 }
             },
         }
-        use std::io::Write as _;
-        handle.flush()?;
+
+        let _ = handle.flush();
     }
 
-    println!();
-    println!("{} successes", successes);
-    println!("{} failures", failures);
-    if !todos.is_empty() {
-        println!("{} TODO(s):", todos.len());
-        for (file, line, col, msg) in todos.iter() {
-            println!(" - {}:{}:{} {}", file, line, col, msg);
-        }
-    }
+    stats.print_summary();
 
-    // exit non-zero if any failures or any TODOs
-    if failures > 0 || !todos.is_empty() {
-        if !todos.is_empty() {
-            eprintln!("\nThere are {} TODO(s). Treating as failure per policy.", todos.len());
+    if stats.has_failures() {
+        if !stats.todos.is_empty() {
+            eprintln!(
+                "\nThere are {} TODO(s). Treating as failure per policy.",
+                stats.todos.len()
+            );
         }
-        Err(anyhow::anyhow!("{} failures; {} todos", failures, todos.len()))
+        Err(TestError::TestsFailed {
+            failures: stats.failures,
+            todos: stats.todos.len(),
+        })
     } else {
         Ok(())
     }
 }
 
-fn parse_line_col_from_ref(ref_display: &str) -> Option<(usize, usize)> {
-    // ref_display is "block:line:column". Use rsplitn to get last two parts.
-    let mut parts: Vec<&str> = ref_display.rsplitn(3, ':').collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    let col = parts[0].parse::<usize>().ok()?;
-    let line = parts[1].parse::<usize>().ok()?;
-    Some((line, col))
-}
-
-fn parse_ref_file_line_col(ref_display: &str) -> Option<(String, usize, usize)> {
-    let mut parts: Vec<&str> = ref_display.splitn(3, ':').collect();
-    if parts.len() < 3 {
-        return None;
-    }
-    let file = parts[0].to_string();
-    let line = parts[1].parse::<usize>().ok()?;
-    let col = parts[2].parse::<usize>().ok()?;
-    Some((file, line, col))
-}
-
-fn compute_offset_from_reference(content: &str, ref_display: &str) -> Option<usize> {
-    if let Some((line, col)) = parse_line_col_from_ref(ref_display) {
-        let lines: Vec<&str> = content.lines().collect();
-        if line == 0 || line > lines.len() {
-            return None;
+/// Handle a dot command during test execution.
+fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
+    match cmd {
+        DotCommand::Load(load_cmd) => {
+            if let Err(e) = load_cmd.execute(&mut rt.connection) {
+                eprintln!("Warning: Failed to load extension: {:?}", e);
+            }
         }
-        let mut offset = 0usize;
-        for i in 0..(line - 1) {
-            offset += lines[i].as_bytes().len();
-            offset += 1; // newline
+        other => {
+            eprintln!("Warning: Unhandled dot command in test: {:?}", other);
         }
-        let col0 = if col == 0 { 0 } else { col - 1 };
-        offset += col0;
-        Some(offset)
-    } else {
-        None
     }
 }
 
-fn report_mismatch(file_name: &str, content: &str, line: usize, _column: usize, expected: &str, actual: &str) {
-    let mut files = SimpleFiles::new();
-    let id = files.add(file_name.to_string(), content.to_string());
-    let lines: Vec<&str> = content.lines().collect();
-    let start = if line == 0 || line > lines.len() { 0 } else {
-        let mut off = 0usize;
-        for i in 0..(line - 1) {
-            off += lines[i].as_bytes().len();
-            off += 1;
-        }
-        off
-    };
-    let end = start + if line == 0 || line > lines.len() { 1 } else { lines[line - 1].as_bytes().len() };
-
-    let diagnostic = Diagnostic::error()
-        .with_message("Test assertion failed: expected vs actual mismatch")
-        .with_labels(vec![Label::primary(id, start..end).with_message(format!("expected: {}\nactual: {}", expected, actual))]);
-
-    let writer = StandardStream::stderr(ColorChoice::Auto);
-    let config = term::Config::default();
-    term::emit(&mut writer.lock(), &config, &files, &diagnostic).ok();
+/// Errors that can occur during test execution.
+#[derive(Debug)]
+pub enum TestError {
+    /// Failed to read the test file.
+    FileRead(String),
+    /// Tests failed.
+    TestsFailed { failures: usize, todos: usize },
 }
 
+impl std::fmt::Display for TestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TestError::FileRead(msg) => write!(f, "Failed to read file: {}", msg),
+            TestError::TestsFailed { failures, todos } => {
+                write!(f, "{} failures; {} todos", failures, todos)
+            }
+        }
+    }
+}
 
+impl std::error::Error for TestError {}
+
+/// Entry point for the test command.
 pub fn test(args: TestArgs) -> Result<(), ()> {
     match test_impl(args) {
-        Ok(_) => Ok(()),
+        Ok(()) => Ok(()),
         Err(_) => Err(()),
     }
-} 
- 
+}

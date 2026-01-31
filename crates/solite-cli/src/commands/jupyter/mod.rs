@@ -1,15 +1,30 @@
-mod server;
-pub(crate) mod html;
+//! Jupyter kernel support for Solite.
+//!
+//! This module provides:
+//! - `install`: Install the Solite kernel specification
+//! - `up`: Start the kernel from a connection file
+//!
+//! Submodules:
+//! - `kernel`: The main kernel implementation
+//! - `handlers`: Dot command handlers
+//! - `protocol`: Jupyter message sending utilities
+//! - `render`: HTML and table rendering
+
+mod handlers;
+mod kernel;
+mod protocol;
+pub(crate) mod render;
+
 use crate::cli::{JupyterCommand, JupyterInstallArgs, JupyterNamespace, JupyterUpArgs};
+use kernel::start_kernel;
 use serde_json::json;
-use server::start_kernel;
 use std::env::current_exe;
 
 fn install(args: JupyterInstallArgs) -> anyhow::Result<()> {
     let user_data_dir = runtimelib::dirs::user_data_dir()?;
     let kernelspec_path = user_data_dir
         .join("kernels")
-        .join(args.name.unwrap_or("solite".to_string()))
+        .join(args.name.unwrap_or_else(|| "solite".to_string()))
         .join("kernel.json");
     std::fs::create_dir_all(kernelspec_path.parent().unwrap())?;
 
@@ -29,14 +44,14 @@ fn install(args: JupyterInstallArgs) -> anyhow::Result<()> {
         "{connection_file}"
       ],
       "env": {},
-      "display_name": args.display.unwrap_or("Solite".to_string()),
+      "display_name": args.display.unwrap_or_else(|| "Solite".to_string()),
       "language": "sql",
       "interrupt_mode": "signal",
       "metadata": {}
     });
 
-    let f = std::fs::File::create(&kernelspec_path).unwrap();
-    serde_json::to_writer(f, &kernel_json).unwrap();
+    let f = std::fs::File::create(&kernelspec_path)?;
+    serde_json::to_writer(f, &kernel_json)?;
     println!(
         "Successfully installed Solite Jupyter kernel at {}",
         kernelspec_path.display()
@@ -44,13 +59,12 @@ fn install(args: JupyterInstallArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn up(args: JupyterUpArgs) -> Result<(), ()> {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        start_kernel(args.connection).await.unwrap();
-    });
+fn up(args: JupyterUpArgs) -> anyhow::Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async { start_kernel(args.connection).await })?;
     Ok(())
 }
+
 pub(crate) fn jupyter(cmd: JupyterNamespace) -> Result<(), ()> {
     match cmd.command {
         JupyterCommand::Install(args) => match install(args) {
@@ -60,6 +74,12 @@ pub(crate) fn jupyter(cmd: JupyterNamespace) -> Result<(), ()> {
                 Err(())
             }
         },
-        JupyterCommand::Up(args) => up(args),
+        JupyterCommand::Up(args) => match up(args) {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                eprintln!("{error}");
+                Err(())
+            }
+        },
     }
 }

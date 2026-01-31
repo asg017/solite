@@ -1,0 +1,103 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        Select(
+            SelectStmt {
+                with_clause: None,
+                distinct: All,
+                columns: [
+                    Expr {
+                        expr: Ident(
+                            "a",
+                            false,
+                            Span {
+                                start: 7,
+                                end: 8,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 7,
+                            end: 8,
+                        },
+                    },
+                    Expr {
+                        expr: Ident(
+                            "b",
+                            false,
+                            Span {
+                                start: 10,
+                                end: 11,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 10,
+                            end: 11,
+                        },
+                    },
+                ],
+                from: Some(
+                    FromClause {
+                        tables: [
+                            Table {
+                                schema: None,
+                                name: "users",
+                                alias: None,
+                                alias_has_as: false,
+                                indexed: None,
+                                span: Span {
+                                    start: 17,
+                                    end: 22,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 12,
+                            end: 22,
+                        },
+                    },
+                ),
+                where_clause: Some(
+                    Binary {
+                        left: Ident(
+                            "id",
+                            false,
+                            Span {
+                                start: 29,
+                                end: 31,
+                            },
+                        ),
+                        op: Eq,
+                        right: Integer(
+                            1,
+                            Span {
+                                start: 34,
+                                end: 35,
+                            },
+                        ),
+                        span: Span {
+                            start: 29,
+                            end: 35,
+                        },
+                    },
+                ),
+                group_by: None,
+                having: None,
+                compounds: [],
+                order_by: None,
+                limit: None,
+                span: Span {
+                    start: 0,
+                    end: 36,
+                },
+            },
+        ),
+    ],
+}

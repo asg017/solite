@@ -1,0 +1,157 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        CreateTable(
+            CreateTableStmt {
+                temporary: false,
+                if_not_exists: false,
+                schema: None,
+                table_name: "rect",
+                columns: [
+                    ColumnDef {
+                        name: "w",
+                        type_name: Some(
+                            "REAL",
+                        ),
+                        constraints: [],
+                        doc: None,
+                        span: Span {
+                            start: 36,
+                            end: 42,
+                        },
+                    },
+                    ColumnDef {
+                        name: "h",
+                        type_name: Some(
+                            "REAL",
+                        ),
+                        constraints: [],
+                        doc: None,
+                        span: Span {
+                            start: 60,
+                            end: 66,
+                        },
+                    },
+                    ColumnDef {
+                        name: "area",
+                        type_name: Some(
+                            "REAL",
+                        ),
+                        constraints: [
+                            Generated {
+                                expr: Binary {
+                                    left: Ident(
+                                        "w",
+                                        false,
+                                        Span {
+                                            start: 115,
+                                            end: 116,
+                                        },
+                                    ),
+                                    op: Mul,
+                                    right: Ident(
+                                        "h",
+                                        false,
+                                        Span {
+                                            start: 119,
+                                            end: 120,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 115,
+                                        end: 120,
+                                    },
+                                },
+                                stored: true,
+                                span: Span {
+                                    start: 94,
+                                    end: 128,
+                                },
+                            },
+                        ],
+                        doc: None,
+                        span: Span {
+                            start: 84,
+                            end: 128,
+                        },
+                    },
+                    ColumnDef {
+                        name: "perimeter",
+                        type_name: Some(
+                            "REAL",
+                        ),
+                        constraints: [
+                            Generated {
+                                expr: Binary {
+                                    left: Integer(
+                                        2,
+                                        Span {
+                                            start: 165,
+                                            end: 166,
+                                        },
+                                    ),
+                                    op: Mul,
+                                    right: Paren(
+                                        Binary {
+                                            left: Ident(
+                                                "w",
+                                                false,
+                                                Span {
+                                                    start: 170,
+                                                    end: 171,
+                                                },
+                                            ),
+                                            op: Add,
+                                            right: Ident(
+                                                "h",
+                                                false,
+                                                Span {
+                                                    start: 174,
+                                                    end: 175,
+                                                },
+                                            ),
+                                            span: Span {
+                                                start: 170,
+                                                end: 175,
+                                            },
+                                        },
+                                        Span {
+                                            start: 169,
+                                            end: 176,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 165,
+                                        end: 176,
+                                    },
+                                },
+                                stored: false,
+                                span: Span {
+                                    start: 161,
+                                    end: 185,
+                                },
+                            },
+                        ],
+                        doc: None,
+                        span: Span {
+                            start: 146,
+                            end: 185,
+                        },
+                    },
+                ],
+                table_constraints: [],
+                table_options: [],
+                as_select: None,
+                doc: None,
+                span: Span {
+                    start: 0,
+                    end: 200,
+                },
+            },
+        ),
+    ],
+}

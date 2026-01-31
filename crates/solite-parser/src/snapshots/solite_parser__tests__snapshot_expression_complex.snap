@@ -1,0 +1,85 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        Select(
+            SelectStmt {
+                with_clause: None,
+                distinct: All,
+                columns: [
+                    Expr {
+                        expr: Case {
+                            operand: None,
+                            when_clauses: [
+                                (
+                                    Binary {
+                                        left: Ident(
+                                            "x",
+                                            false,
+                                            Span {
+                                                start: 17,
+                                                end: 18,
+                                            },
+                                        ),
+                                        op: Gt,
+                                        right: Integer(
+                                            0,
+                                            Span {
+                                                start: 21,
+                                                end: 22,
+                                            },
+                                        ),
+                                        span: Span {
+                                            start: 17,
+                                            end: 22,
+                                        },
+                                    },
+                                    String(
+                                        "positive",
+                                        Span {
+                                            start: 28,
+                                            end: 38,
+                                        },
+                                    ),
+                                ),
+                            ],
+                            else_clause: Some(
+                                String(
+                                    "non-positive",
+                                    Span {
+                                        start: 44,
+                                        end: 58,
+                                    },
+                                ),
+                            ),
+                            span: Span {
+                                start: 7,
+                                end: 62,
+                            },
+                        },
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 7,
+                            end: 62,
+                        },
+                    },
+                ],
+                from: None,
+                where_clause: None,
+                group_by: None,
+                having: None,
+                compounds: [],
+                order_by: None,
+                limit: None,
+                span: Span {
+                    start: 0,
+                    end: 63,
+                },
+            },
+        ),
+    ],
+}

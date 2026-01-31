@@ -230,69 +230,69 @@ fn sql_html(sql: &str) -> String {
     let mut code = root.child("pre");
     code.attr("style", "font-family: monospace;");
 
-    let tokens = solite_lexer::tokenize(sql);
+    let tokens = solite_lexer::lex(sql);
     let mut prev_end = 0usize; // Track where the last token ended
     for token in tokens {
         // Emit any whitespace/characters between tokens as plain text
-        if token.start > prev_end {
-            code.child("span").set_text(&sql[prev_end..token.start]);
+        if token.span.start > prev_end {
+            code.child("span").set_text(&sql[prev_end..token.span.start]);
         }
 
         let color = match token.kind {
             // Numeric literals
-            solite_lexer::Kind::Integer
-            | solite_lexer::Kind::Float
-            | solite_lexer::Kind::HexInteger
-            | solite_lexer::Kind::Blob => ctp_mocha_colors::PEACH.clone(),
+            solite_lexer::TokenKind::Integer
+            | solite_lexer::TokenKind::Float
+            | solite_lexer::TokenKind::HexInteger
+            | solite_lexer::TokenKind::Blob => ctp_mocha_colors::PEACH.clone(),
 
             // String literals
-            solite_lexer::Kind::String => ctp_mocha_colors::GREEN.clone(),
+            solite_lexer::TokenKind::String => ctp_mocha_colors::GREEN.clone(),
 
             // Parameters (all variants)
-            solite_lexer::Kind::BindParam
-            | solite_lexer::Kind::BindParamColon
-            | solite_lexer::Kind::BindParamAt
-            | solite_lexer::Kind::BindParamDollar => ctp_mocha_colors::YELLOW.clone(),
+            solite_lexer::TokenKind::BindParam
+            | solite_lexer::TokenKind::BindParamColon
+            | solite_lexer::TokenKind::BindParamAt
+            | solite_lexer::TokenKind::BindParamDollar => ctp_mocha_colors::YELLOW.clone(),
 
             // Punctuation & operators
-            solite_lexer::Kind::Plus
-            | solite_lexer::Kind::Minus
-            | solite_lexer::Kind::Star
-            | solite_lexer::Kind::Slash
-            | solite_lexer::Kind::Pipe
-            | solite_lexer::Kind::Lt
-            | solite_lexer::Kind::Gt
-            | solite_lexer::Kind::Le
-            | solite_lexer::Kind::Ge
-            | solite_lexer::Kind::Eq
-            | solite_lexer::Kind::EqEq
-            | solite_lexer::Kind::Ne
-            | solite_lexer::Kind::BangEq
-            | solite_lexer::Kind::Arrow
-            | solite_lexer::Kind::ArrowArrow
-            | solite_lexer::Kind::Concat
-            | solite_lexer::Kind::Ampersand
-            | solite_lexer::Kind::Tilde
-            | solite_lexer::Kind::LShift
-            | solite_lexer::Kind::RShift
-            | solite_lexer::Kind::Percent
-            | solite_lexer::Kind::LParen
-            | solite_lexer::Kind::RParen
-            | solite_lexer::Kind::LBracket
-            | solite_lexer::Kind::RBracket
-            | solite_lexer::Kind::Comma
-            | solite_lexer::Kind::Semicolon
-            | solite_lexer::Kind::Dot => ctp_mocha_colors::SKY.clone(),
+            solite_lexer::TokenKind::Plus
+            | solite_lexer::TokenKind::Minus
+            | solite_lexer::TokenKind::Star
+            | solite_lexer::TokenKind::Slash
+            | solite_lexer::TokenKind::Pipe
+            | solite_lexer::TokenKind::Lt
+            | solite_lexer::TokenKind::Gt
+            | solite_lexer::TokenKind::Le
+            | solite_lexer::TokenKind::Ge
+            | solite_lexer::TokenKind::Eq
+            | solite_lexer::TokenKind::EqEq
+            | solite_lexer::TokenKind::Ne
+            | solite_lexer::TokenKind::BangEq
+            | solite_lexer::TokenKind::Arrow
+            | solite_lexer::TokenKind::ArrowArrow
+            | solite_lexer::TokenKind::Concat
+            | solite_lexer::TokenKind::Ampersand
+            | solite_lexer::TokenKind::Tilde
+            | solite_lexer::TokenKind::LShift
+            | solite_lexer::TokenKind::RShift
+            | solite_lexer::TokenKind::Percent
+            | solite_lexer::TokenKind::LParen
+            | solite_lexer::TokenKind::RParen
+            | solite_lexer::TokenKind::LBracket
+            | solite_lexer::TokenKind::RBracket
+            | solite_lexer::TokenKind::Comma
+            | solite_lexer::TokenKind::Semicolon
+            | solite_lexer::TokenKind::Dot => ctp_mocha_colors::SKY.clone(),
 
             // Comments (line and block)
-            solite_lexer::Kind::Comment
-            | solite_lexer::Kind::BlockComment => ctp_mocha_colors::OVERLAY0.clone(),
+            solite_lexer::TokenKind::Comment
+            | solite_lexer::TokenKind::BlockComment => ctp_mocha_colors::OVERLAY0.clone(),
 
             // Identifiers (regular and quoted)
-            solite_lexer::Kind::Ident
-            | solite_lexer::Kind::QuotedIdent
-            | solite_lexer::Kind::BracketIdent
-            | solite_lexer::Kind::BacktickIdent => ctp_mocha_colors::BLUE.clone(),
+            solite_lexer::TokenKind::Ident
+            | solite_lexer::TokenKind::QuotedIdent
+            | solite_lexer::TokenKind::BracketIdent
+            | solite_lexer::TokenKind::BacktickIdent => ctp_mocha_colors::BLUE.clone(),
 
             // Everything else is a keyword
             _ => ctp_mocha_colors::MAUVE.clone(),
@@ -300,8 +300,8 @@ fn sql_html(sql: &str) -> String {
 
         let mut span = code.child("span");
         span.style("color", color.to_hex_string());
-        span.set_text(token.contents);
-        prev_end = token.end;
+        span.set_text(&sql[token.span.clone()]);
+        prev_end = token.span.end;
     }
     // Emit any trailing content after the last token
     if prev_end < sql.len() {

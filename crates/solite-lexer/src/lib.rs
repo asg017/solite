@@ -519,58 +519,6 @@ pub fn lex(source: &str) -> Vec<Token> {
     tokens
 }
 
-// ========================================
-// COMPATIBILITY LAYER
-// ========================================
-// These types and functions provide backward compatibility with the old API.
-// They will be removed in Phase 10.
-
-/// Re-export TokenKind as Kind for backward compatibility
-pub use TokenKind as Kind;
-
-/// Legacy token value type
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum TokenValue {
-    None,
-    Int(i64),
-    Text(String),
-}
-
-/// Legacy token type for backward compatibility
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct LegacyToken<'a> {
-    pub kind: TokenKind,
-    pub start: usize,
-    pub end: usize,
-    pub value: TokenValue,
-    #[serde(borrow)]
-    pub contents: &'a str,
-}
-
-/// Legacy tokenize function that returns old-style tokens.
-/// This provides backward compatibility with existing code.
-pub fn tokenize(src: &str) -> Vec<LegacyToken<'_>> {
-    lex(src)
-        .into_iter()
-        .map(|t| {
-            let contents = &src[t.span.clone()];
-            let value = match t.kind {
-                TokenKind::Comment | TokenKind::BlockComment | TokenKind::String => {
-                    TokenValue::Text(contents.to_string())
-                }
-                _ => TokenValue::None,
-            };
-            LegacyToken {
-                kind: t.kind,
-                start: t.span.start,
-                end: t.span.end,
-                value,
-                contents,
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,25 +592,5 @@ mod tests {
         // ORDER(0) BY(1) x(2) ASC(3) ,(4) y(5) DESC(6)
         assert_eq!(tokens[3].kind, TokenKind::Asc);
         assert_eq!(tokens[6].kind, TokenKind::Desc);
-    }
-
-    // Legacy API compatibility tests
-    #[test]
-    fn test_legacy_tokenize() {
-        let tests = vec![
-            "select 1 + 2",
-            "select 'rooga'",
-            r#"-- comment!
-    select 1 + 2"#,
-        ];
-        for (i, test) in tests.iter().enumerate() {
-            let tokens = tokenize(test);
-            let v: Vec<String> = tokens
-                .iter()
-                .map(|t| (&test[t.start..t.end]).to_string())
-                .collect();
-            let result: Vec<(&String, LegacyToken)> = v.iter().zip(tokens).collect();
-            insta::assert_debug_snapshot!(format!("test_{i}"), result);
-        }
     }
 }

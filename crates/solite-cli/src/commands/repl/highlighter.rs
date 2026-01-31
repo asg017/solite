@@ -132,88 +132,88 @@ pub mod sql_highlighter {
     }
 }
 
-use solite_lexer::{tokenize, Kind, LegacyToken};
+use solite_lexer::{lex, Token, TokenKind};
 
 use crate::themes::{SoliteColor, ctp_mocha_colors};
 pub fn highlight_sql(copy: &mut String) -> String {
-    let tokens = tokenize(copy.as_str());
+    let tokens = lex(copy.as_str());
     let mut hl = String::new();
     let mut iter = tokens.iter().peekable();
-    let mut prevs: Vec<&LegacyToken> = vec![];
+    let mut prevs: Vec<&Token> = vec![];
     let mut prev_end = 0usize; // Track where the last token ended
     let theme = CTP_MOCHA_THEME.clone();
     while let Some(token) = iter.next() {
         // Emit any whitespace/characters between tokens as plain text
-        if token.start > prev_end {
-            hl.push_str(&copy[prev_end..token.start]);
+        if token.span.start > prev_end {
+            hl.push_str(&copy[prev_end..token.span.start]);
         }
         let s = match token.kind {
             // Comments (line and block)
-            Kind::Comment | Kind::BlockComment => theme.style_comment(
-                &copy[token.start..token.end]
+            TokenKind::Comment | TokenKind::BlockComment => theme.style_comment(
+                &copy[token.span.clone()]
             ),
             // Bind parameters (all 4 variants)
-            Kind::BindParam | Kind::BindParamColon | Kind::BindParamAt | Kind::BindParamDollar => {
-                theme.style_parameter(&copy[token.start..token.end])
+            TokenKind::BindParam | TokenKind::BindParamColon | TokenKind::BindParamAt | TokenKind::BindParamDollar => {
+                theme.style_parameter(&copy[token.span.clone()])
             }
             // Numbers (integer, float, hex)
-            Kind::Integer | Kind::Float | Kind::HexInteger => {
-                theme.style_number(&copy[token.start..token.end])
+            TokenKind::Integer | TokenKind::Float | TokenKind::HexInteger => {
+                theme.style_number(&copy[token.span.clone()])
             }
             // Operators
-            Kind::Plus | Kind::Minus | Kind::Pipe | Kind::Slash | Kind::Lt | Kind::Gt
-            | Kind::Le | Kind::Ge | Kind::Eq | Kind::EqEq | Kind::Ne | Kind::BangEq
-            | Kind::Ampersand | Kind::Tilde | Kind::LShift | Kind::RShift | Kind::Concat
-            | Kind::Percent => {
-                theme.style_operator(&copy[token.start..token.end])
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Pipe | TokenKind::Slash | TokenKind::Lt | TokenKind::Gt
+            | TokenKind::Le | TokenKind::Ge | TokenKind::Eq | TokenKind::EqEq | TokenKind::Ne | TokenKind::BangEq
+            | TokenKind::Ampersand | TokenKind::Tilde | TokenKind::LShift | TokenKind::RShift | TokenKind::Concat
+            | TokenKind::Percent => {
+                theme.style_operator(&copy[token.span.clone()])
             }
             // String literals
-            Kind::String => theme.style_string(&copy[token.start..token.end]),
+            TokenKind::String => theme.style_string(&copy[token.span.clone()]),
             // Blob literals
-            Kind::Blob => theme.style_string(&copy[token.start..token.end]),
+            TokenKind::Blob => theme.style_string(&copy[token.span.clone()]),
             // Punctuation (no styling)
-            Kind::Star
-            | Kind::LBracket
-            | Kind::RBracket
-            | Kind::Comma
-            | Kind::Semicolon
-            | Kind::Dot => (&copy[token.start..token.end]).to_string(),
+            TokenKind::Star
+            | TokenKind::LBracket
+            | TokenKind::RBracket
+            | TokenKind::Comma
+            | TokenKind::Semicolon
+            | TokenKind::Dot => copy[token.span.clone()].to_string(),
             // Parentheses
-            Kind::LParen | Kind::RParen => {
-                theme.style_paren(&copy[token.start..token.end])
+            TokenKind::LParen | TokenKind::RParen => {
+                theme.style_paren(&copy[token.span.clone()])
             }
             // JSON operators
-            Kind::Arrow | Kind::ArrowArrow => {
-                theme.style_operator(&copy[token.start..token.end])
+            TokenKind::Arrow | TokenKind::ArrowArrow => {
+                theme.style_operator(&copy[token.span.clone()])
             }
             // Identifiers (regular and quoted)
-            Kind::Ident | Kind::QuotedIdent | Kind::BracketIdent | Kind::BacktickIdent => {
+            TokenKind::Ident | TokenKind::QuotedIdent | TokenKind::BracketIdent | TokenKind::BacktickIdent => {
                 // if the next token is a '('
-                if matches!(iter.peek().map(|v| v.kind), Some(Kind::LParen))
+                if matches!(iter.peek().map(|v| v.kind), Some(TokenKind::LParen))
                 // and the previous token is NOT 'using' or 'table'
-                    && !(matches!(prevs.last().map(|t| t.kind), Some(Kind::Using) | Some(Kind::Table)))
+                    && !(matches!(prevs.last().map(|t| t.kind), Some(TokenKind::Using) | Some(TokenKind::Table)))
                 {
                     if BUILTIN_FUNCTIONS
                         .iter()
-                        .any(|r| *r == (&copy[token.start..token.end]).trim())
+                        .any(|r| *r == copy[token.span.clone()].trim())
                     {
-                        theme.style_operator(&copy[token.start..token.end])
+                        theme.style_operator(&copy[token.span.clone()])
                     } else {
                         theme.style_function(
-                            &copy[token.start..token.end]
+                            &copy[token.span.clone()]
                         )
                     }
                 } else {
-                    (&copy[token.start..token.end]).to_string()
+                    copy[token.span.clone()].to_string()
                 }
             }
             // Everything else is a keyword
             _ => theme.style_keyword(
-                    &copy[token.start..token.end]
+                    &copy[token.span.clone()]
                 )
         };
         hl.push_str(s.as_str());
-        prev_end = token.end;
+        prev_end = token.span.end;
         prevs.push(token);
     }
     // Emit any trailing content after the last token

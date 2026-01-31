@@ -1,0 +1,15 @@
+[package]
+name = "solite-analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solite-ast = { path = "../solite-ast" }
+solite-lexer = { path = "../solite-lexer" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+once_cell = "1"
+
+[dev-dependencies]
+solite-parser = { path = "../solite-parser" }
+insta = { workspace = true }

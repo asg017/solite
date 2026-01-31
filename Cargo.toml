@@ -9,6 +9,7 @@ members = [
     "crates/solite-mcp",
     "crates/solite-ast",
     "crates/solite-parser",
+    "crates/solite-analyzer",
 ]
 
 [workspace.dependencies]

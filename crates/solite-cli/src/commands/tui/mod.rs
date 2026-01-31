@@ -1,13 +1,20 @@
-//! # adapted from Ratatui Table example
+//! TUI (Terminal User Interface) module for the Solite database browser.
+//!
+//! Provides an interactive terminal interface for exploring SQLite databases,
+//! viewing tables, and copying data.
+
+mod copy_popup;
+mod help_bar;
 mod listing_page;
 mod table_page;
 mod tui_theme;
+mod utils;
 
 #[cfg(test)]
 mod test_tui;
+
 use crate::commands::tui::tui_theme::{CTP_MOCHA_THEME, TuiTheme};
 use crate::commands::tui::{listing_page::ListingPage, table_page::TablePage};
-use crate::themes;
 use color_eyre::Result;
 use crossterm::event::{self, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -19,28 +26,44 @@ use solite_core::Runtime;
 
 use crate::cli::TuiArgs;
 
+pub use copy_popup::{CopyOption, CopyPopup};
+pub use help_bar::HelpBar;
+pub use utils::{popup_area, popup_area_fixed, truncate_string};
+
 enum NavigateToPage {
     Listing,
     Table(String),
 }
+
 enum HandleKeyResult {
     None,
     Quit,
     Navigate(NavigateToPage),
+    ShowMessage(String),
 }
 
-fn copy(value: &OwnedValue) {
-    let content = match value {
-        OwnedValue::Null => "".to_owned(),
+/// Convert an OwnedValue to a string for clipboard operations
+fn value_to_string(value: &OwnedValue) -> String {
+    match value {
+        OwnedValue::Null => String::new(),
         OwnedValue::Integer(i) => i.to_string(),
         OwnedValue::Double(f) => f.to_string(),
-        OwnedValue::Text(s) => unsafe { std::str::from_utf8_unchecked(&s).to_owned() },
+        OwnedValue::Text(s) => String::from_utf8_lossy(s).into_owned(),
         OwnedValue::Blob(_) => "[BLOB]".to_owned(),
-    };
+    }
+}
+
+/// Copy text to the system clipboard. Returns an error message if it fails.
+fn copy_to_clipboard(content: &str) -> std::result::Result<(), String> {
     arboard::Clipboard::new()
-        .unwrap()
-        .set_text(content)
-        .unwrap();
+        .map_err(|e| format!("Failed to access clipboard: {}", e))?
+        .set_text(content.to_owned())
+        .map_err(|e| format!("Failed to copy: {}", e))
+}
+
+/// Copy an OwnedValue to the clipboard
+fn copy(value: &OwnedValue) -> std::result::Result<(), String> {
+    copy_to_clipboard(&value_to_string(value))
 }
 
 trait TuiPage {
@@ -58,7 +81,7 @@ pub(crate) struct App<'a> {
     theme: TuiTheme,
 }
 impl<'a> App<'a> {
-    /// returns true if the application should quit.
+    /// Returns true if the application should quit.
     fn handle_key(&mut self, key: KeyEvent) -> bool {
         let result = match &mut self.page {
             Page::Listing(page) => page.handle_key(key),
@@ -68,14 +91,19 @@ impl<'a> App<'a> {
         match result {
             HandleKeyResult::Quit => return true,
             HandleKeyResult::None => (),
+            HandleKeyResult::ShowMessage(msg) => {
+                // Messages are handled by individual pages via their footer_message
+                // This variant exists for consistency but the page already set the message
+                let _ = msg;
+            }
             HandleKeyResult::Navigate(to) => match to {
                 NavigateToPage::Listing => {
-                    let mut page = ListingPage::new(self.runtime, &self.theme);
-                    page.state.select_first();
+                    let page = ListingPage::new(self.runtime, &self.theme);
                     self.page = Page::Listing(page);
                 }
                 NavigateToPage::Table(table_name) => {
-                    self.page = Page::Table(TablePage::new(&table_name, self.runtime, self.theme.clone()));
+                    self.page =
+                        Page::Table(TablePage::new(&table_name, self.runtime, self.theme.clone()));
                 }
             },
         }
@@ -85,48 +113,53 @@ impl<'a> App<'a> {
 
     fn render(&mut self, frame: &mut Frame) {
         frame.render_widget(
-            ratatui::widgets::Block::new()
-                .bg::<Color>(self.theme.base.clone().into()),
-            frame.area()
+            ratatui::widgets::Block::new().bg::<Color>(self.theme.base.clone().into()),
+            frame.area(),
         );
-        
+
         let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]);
         let [top, main] = frame.area().layout(&layout);
 
-        let x = Layout::horizontal(vec![
+        let top_layout = Layout::horizontal(vec![
             Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Fill(1),
         ]);
-        let [l, m, r] = x.areas(top);
+        let [left, center, right] = top_layout.areas(top);
+
+        // Left: context info
+        let context_text = match &self.page {
+            Page::Listing(listing) => format!("{}", listing.database_name),
+            Page::Table(table_page) => {
+                let row_count = table_page.data.rows.len();
+                let row_text = if row_count == 1 { "row" } else { "rows" };
+                format!("{} ({} {})", table_page.table_name, row_count, row_text)
+            }
+        };
+        frame.render_widget(Text::from(context_text).left_aligned(), left);
+
+        // Center: title
         frame.render_widget(
-            Text::from(match &self.page {
-                Page::Listing(_) => "Listing".to_owned(),
-                Page::Table(table_page) => format!(
-                    "{} {} rows",
-                    table_page.table_name,
-                    table_page.data.rows.len()
-                ),
-            })
-            .left_aligned(),
-            l,
+            Text::from("Solite")
+                .bold()
+                .fg::<Color>(self.theme.keycap.clone().into())
+                .centered(),
+            center,
         );
-        frame.render_widget(Text::from("Solite TUI").bold().centered(), m);
-        let l = Line::from(vec![
-            "q".bold()
-                .fg::<Color>(self.theme.keycap.clone().into()),
-            " to quit".italic(),
+
+        // Right: quick help
+        let help = Line::from(vec![
+            "?".bold().fg::<Color>(self.theme.keycap.clone().into()),
+            " help  ".into(),
+            "q".bold().fg::<Color>(self.theme.keycap.clone().into()),
+            " quit".into(),
         ])
         .right_aligned();
-        frame.render_widget(l, r);
+        frame.render_widget(help, right);
 
         match &mut self.page {
-            Page::Listing(listing_page) => {
-                listing_page.render(frame, main);
-            }
-            Page::Table(table_page) => {
-                table_page.render(frame, main);
-            }
+            Page::Listing(listing_page) => listing_page.render(frame, main),
+            Page::Table(table_page) => table_page.render(frame, main),
         }
     }
 }

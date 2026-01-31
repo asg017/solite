@@ -2,9 +2,11 @@ use std::fmt::Write;
 
 use crate::commands::tui::copy_popup::{CopyOption, CopyPopup};
 use crate::commands::tui::help_bar::HelpBar;
+use crate::commands::tui::row_page::{get_primary_keys, PrimaryKeyInfo};
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{
-    copy_to_clipboard, value_to_string, Frame, HandleKeyResult, NavigateToPage, TuiPage,
+    copy_to_clipboard, value_to_string, Frame, HandleKeyResult, NavigateToPage, RowPageData,
+    TuiPage,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Rect};
@@ -119,11 +121,13 @@ pub struct TablePage<'a> {
     n_columns_show: usize,
     error: Option<String>,
     copy_popup: CopyPopup,
+    primary_keys: Vec<PrimaryKeyInfo>,
 }
 
 impl<'a> TablePage<'a> {
     pub(crate) fn new(table_name: &str, runtime: &'a Runtime, theme: TuiTheme) -> Self {
         let result = load_table_data(runtime, table_name, None);
+        let primary_keys = get_primary_keys(runtime, table_name);
         let mut state = TableState::default();
         if !result.data.rows.is_empty() {
             state.select_first();
@@ -140,6 +144,7 @@ impl<'a> TablePage<'a> {
             footer_message: None,
             error: result.error,
             copy_popup: CopyPopup::new(),
+            primary_keys,
         }
     }
 
@@ -356,6 +361,22 @@ impl TuiPage for TablePage<'_> {
                 self.copy_popup.show();
                 HandleKeyResult::None
             }
+            // Navigate to row detail view
+            KeyCode::Enter => {
+                if let Some((row_idx, _)) = self.state.selected_cell() {
+                    if row_idx < self.data.rows.len() {
+                        let data = RowPageData {
+                            table_name: self.table_name.clone(),
+                            row_index: row_idx,
+                            columns: self.data.columns.clone(),
+                            values: self.data.rows[row_idx].clone(),
+                            primary_keys: self.primary_keys.clone(),
+                        };
+                        return HandleKeyResult::Navigate(NavigateToPage::Row(data));
+                    }
+                }
+                HandleKeyResult::None
+            }
             _ => HandleKeyResult::None,
         }
     }
@@ -472,8 +493,9 @@ impl TuiPage for TablePage<'_> {
         // Help bar
         HelpBar::new()
             .keys(vec!["h", "j", "k", "l"], " navigate")
+            .item("Enter", " view row")
             .item("[", " sort asc")
-            .item("]", " sort desc")
+            .item("]", " desc")
             .separator()
             .keys(vec!["y", "c"], " copy")
             .item("q", " back")

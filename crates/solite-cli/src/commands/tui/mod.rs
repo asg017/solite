@@ -6,6 +6,7 @@
 mod copy_popup;
 mod help_bar;
 mod listing_page;
+mod row_page;
 mod table_page;
 mod tui_theme;
 mod utils;
@@ -14,7 +15,7 @@ mod utils;
 mod test_tui;
 
 use crate::commands::tui::tui_theme::{CTP_MOCHA_THEME, TuiTheme};
-use crate::commands::tui::{listing_page::ListingPage, table_page::TablePage};
+use crate::commands::tui::{listing_page::ListingPage, row_page::RowPage, table_page::TablePage};
 use color_eyre::Result;
 use crossterm::event::{self, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -33,6 +34,17 @@ pub use utils::{popup_area, popup_area_fixed, truncate_string};
 enum NavigateToPage {
     Listing,
     Table(String),
+    Row(RowPageData),
+    BackToTable,
+}
+
+/// Data needed to create a RowPage
+struct RowPageData {
+    table_name: String,
+    row_index: usize,
+    columns: Vec<String>,
+    values: Vec<OwnedValue>,
+    primary_keys: Vec<row_page::PrimaryKeyInfo>,
 }
 
 enum HandleKeyResult {
@@ -74,7 +86,9 @@ trait TuiPage {
 enum Page<'a> {
     Listing(ListingPage),
     Table(TablePage<'a>),
+    Row(RowPage, String), // RowPage + table_name for back navigation
 }
+
 pub(crate) struct App<'a> {
     runtime: &'a Runtime,
     page: Page<'a>,
@@ -86,6 +100,7 @@ impl<'a> App<'a> {
         let result = match &mut self.page {
             Page::Listing(page) => page.handle_key(key),
             Page::Table(page) => page.handle_key(key),
+            Page::Row(page, _) => page.handle_key(key),
         };
 
         match result {
@@ -104,6 +119,28 @@ impl<'a> App<'a> {
                 NavigateToPage::Table(table_name) => {
                     self.page =
                         Page::Table(TablePage::new(&table_name, self.runtime, self.theme.clone()));
+                }
+                NavigateToPage::Row(data) => {
+                    let row_page = RowPage::new(
+                        data.table_name.clone(),
+                        data.row_index,
+                        data.columns,
+                        data.values,
+                        data.primary_keys,
+                        self.theme.clone(),
+                    );
+                    self.page = Page::Row(row_page, data.table_name);
+                }
+                NavigateToPage::BackToTable => {
+                    // Get table name from current Row page, then navigate back
+                    if let Page::Row(_, table_name) = &self.page {
+                        let table_name = table_name.clone();
+                        self.page = Page::Table(TablePage::new(
+                            &table_name,
+                            self.runtime,
+                            self.theme.clone(),
+                        ));
+                    }
                 }
             },
         }
@@ -129,11 +166,18 @@ impl<'a> App<'a> {
 
         // Left: context info
         let context_text = match &self.page {
-            Page::Listing(listing) => format!("{}", listing.database_name),
+            Page::Listing(listing) => listing.database_name.clone(),
             Page::Table(table_page) => {
                 let row_count = table_page.data.rows.len();
                 let row_text = if row_count == 1 { "row" } else { "rows" };
                 format!("{} ({} {})", table_page.table_name, row_count, row_text)
+            }
+            Page::Row(row_page, _) => {
+                format!(
+                    "{} > row {}",
+                    row_page.table_name,
+                    row_page.row_index + 1
+                )
             }
         };
         frame.render_widget(Text::from(context_text).left_aligned(), left);
@@ -160,6 +204,7 @@ impl<'a> App<'a> {
         match &mut self.page {
             Page::Listing(listing_page) => listing_page.render(frame, main),
             Page::Table(table_page) => table_page.render(frame, main),
+            Page::Row(row_page, _) => row_page.render(frame, main),
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -52,11 +54,22 @@ impl ListingPage {
             state.select_first();
         }
 
+        // Convert absolute path to relative if possible
+        let db_name = runtime.connection.db_name().unwrap_or_default();
+        let database_name = if let Ok(cwd) = std::env::current_dir() {
+            Path::new(&db_name)
+                .strip_prefix(&cwd)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or(db_name)
+        } else {
+            db_name
+        };
+
         Self {
             theme: theme.clone(),
             state,
             tables,
-            database_name: runtime.connection.db_name().unwrap_or_default(),
+            database_name,
             error,
         }
     }

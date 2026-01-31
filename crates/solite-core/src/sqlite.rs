@@ -153,6 +153,7 @@ impl ValueRefX<'_> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum OwnedValue {
     Null,
     Integer(i64),

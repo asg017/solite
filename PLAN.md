@@ -560,3 +560,89 @@ The new lexer API is now:
 - `lex(source: &str) -> Vec<Token>` where `Token { kind: TokenKind, span: Range<usize> }`
 - `TokenKind` enum with 140+ variants for all SQL tokens
 - JSON lexer preserved in `solite_lexer::json` module
+
+---
+
+# Unify REPL and LSP Completion Systems
+
+## TODO Checklist
+
+- [x] Phase 1: Create solite-completion crate with context detection
+- [x] Phase 2: Add abstract completion types (items.rs, schema.rs)
+- [x] Phase 3: Move completion generation logic (engine.rs)
+- [x] Phase 4: Update solite-lsp to use solite-completion
+- [x] Phase 5: Update REPL completer to use solite-completion
+
+---
+
+## Overview
+
+Created a new `solite-completion` crate that extracts the context-aware completion logic from `solite-lsp`, allowing both the LSP and REPL to share the same completion engine.
+
+## Architecture
+
+```
+solite-completion (NEW)
+├── src/
+│   ├── lib.rs        # Exports
+│   ├── context.rs    # CompletionContext detection (from LSP)
+│   ├── items.rs      # Abstract CompletionItem, CompletionKind
+│   ├── engine.rs     # get_completions(context, schema)
+│   └── schema.rs     # SchemaSource trait
+
+solite-lsp
+└── Uses solite-completion, converts to LSP types
+
+solite-cli (REPL)
+└── Uses solite-completion, converts to rustyline Pairs
+```
+
+## Key Types
+
+### CompletionItem (in solite-completion)
+```rust
+pub struct CompletionItem {
+    pub label: String,
+    pub insert_text: Option<String>,
+    pub kind: CompletionKind,
+    pub detail: Option<String>,
+    pub sort_order: Option<u32>,
+}
+
+pub enum CompletionKind {
+    Keyword, Table, Column, Index, View, Function, Operator, Cte,
+}
+```
+
+### SchemaSource trait
+```rust
+pub trait SchemaSource {
+    fn table_names(&self) -> Vec<String>;
+    fn columns_for_table(&self, table: &str) -> Option<Vec<String>>;
+    fn columns_for_table_with_rowid(&self, table: &str) -> Option<Vec<String>>;
+    fn has_table(&self, name: &str) -> bool;
+    fn index_names(&self) -> Vec<String>;
+    fn view_names(&self) -> Vec<String>;
+}
+```
+
+## What Stays Where
+
+**In solite-completion (shared):**
+- Context detection (CompletionContext, state machine)
+- Abstract CompletionItem type
+- Core completion generation logic
+- SchemaSource trait
+- Implementation for solite_analyzer::Schema (behind feature flag)
+
+**In solite-lsp (LSP-specific):**
+- Conversion to `tower_lsp::lsp_types::CompletionItem`
+- Documentation strings for keywords
+- Snippet generation (InsertTextFormat)
+- CompletionOptions
+
+**In solite-cli REPL (REPL-specific):**
+- Dot command completion (`.tables`, `.load`, etc.)
+- Conversion to `rustyline::completion::Pair`
+- Display formatting (icons, colors)
+- LiveSchemaSource implementation (queries live SQLite database)

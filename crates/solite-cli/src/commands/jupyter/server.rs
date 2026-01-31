@@ -233,34 +233,43 @@ fn sql_html(sql: &str) -> String {
     let tokens = solite_lexer::tokenize(sql);
     for token in tokens {
         let color = match token.kind {
-            // End of file / nothing: use plain text color
-            solite_lexer::Kind::Eof => ctp_mocha_colors::TEXT.clone(),
-
             // Numeric literals
-            solite_lexer::Kind::Number
-            | solite_lexer::Kind::Int
+            solite_lexer::Kind::Integer
             | solite_lexer::Kind::Float
-            | solite_lexer::Kind::Bit
-          | solite_lexer::Kind::Text
-            | solite_lexer::Kind::Blob
-             => ctp_mocha_colors::PEACH.clone(),
+            | solite_lexer::Kind::HexInteger
+            | solite_lexer::Kind::Blob => ctp_mocha_colors::PEACH.clone(),
 
             // String literals
             solite_lexer::Kind::String => ctp_mocha_colors::GREEN.clone(),
 
-            // Parameters ( :foo )
-            solite_lexer::Kind::Parameter => ctp_mocha_colors::YELLOW.clone(),
+            // Parameters (all variants)
+            solite_lexer::Kind::BindParam
+            | solite_lexer::Kind::BindParamColon
+            | solite_lexer::Kind::BindParamAt
+            | solite_lexer::Kind::BindParamDollar => ctp_mocha_colors::YELLOW.clone(),
 
             // Punctuation & operators
             solite_lexer::Kind::Plus
             | solite_lexer::Kind::Minus
-            | solite_lexer::Kind::Asterisk
-            | solite_lexer::Kind::Div
+            | solite_lexer::Kind::Star
+            | solite_lexer::Kind::Slash
             | solite_lexer::Kind::Pipe
             | solite_lexer::Kind::Lt
             | solite_lexer::Kind::Gt
-            | solite_lexer::Kind::SingleArrowOperator
-            | solite_lexer::Kind::DoubleArrowOperator
+            | solite_lexer::Kind::Le
+            | solite_lexer::Kind::Ge
+            | solite_lexer::Kind::Eq
+            | solite_lexer::Kind::EqEq
+            | solite_lexer::Kind::Ne
+            | solite_lexer::Kind::BangEq
+            | solite_lexer::Kind::Arrow
+            | solite_lexer::Kind::ArrowArrow
+            | solite_lexer::Kind::Concat
+            | solite_lexer::Kind::Ampersand
+            | solite_lexer::Kind::Tilde
+            | solite_lexer::Kind::LShift
+            | solite_lexer::Kind::RShift
+            | solite_lexer::Kind::Percent
             | solite_lexer::Kind::LParen
             | solite_lexer::Kind::RParen
             | solite_lexer::Kind::LBracket
@@ -269,91 +278,18 @@ fn sql_html(sql: &str) -> String {
             | solite_lexer::Kind::Semicolon
             | solite_lexer::Kind::Dot => ctp_mocha_colors::SKY.clone(),
 
-            // Comments
-            solite_lexer::Kind::Comment => ctp_mocha_colors::OVERLAY0.clone(),
+            // Comments (line and block)
+            solite_lexer::Kind::Comment
+            | solite_lexer::Kind::BlockComment => ctp_mocha_colors::OVERLAY0.clone(),
 
-            // SQL keywords (grouped)
-            solite_lexer::Kind::Select
-            | solite_lexer::Kind::From
-            | solite_lexer::Kind::Where
-            | solite_lexer::Kind::Order
-            | solite_lexer::Kind::Group
-            | solite_lexer::Kind::By
-            | solite_lexer::Kind::Limit
-            | solite_lexer::Kind::With
-            | solite_lexer::Kind::Recursive
-            | solite_lexer::Kind::Values
-            | solite_lexer::Kind::Union
-            | solite_lexer::Kind::All
-            | solite_lexer::Kind::And
-            | solite_lexer::Kind::As
-            | solite_lexer::Kind::Between
-            | solite_lexer::Kind::Descending
-            | solite_lexer::Kind::Ascending
-            | solite_lexer::Kind::Drop
-            | solite_lexer::Kind::Index
-            | solite_lexer::Kind::Indexed
-            | solite_lexer::Kind::Inner
-            | solite_lexer::Kind::Left
-            | solite_lexer::Kind::Right
-            | solite_lexer::Kind::Full
-            | solite_lexer::Kind::Outer
-            | solite_lexer::Kind::Join
-            | solite_lexer::Kind::Match
-            | solite_lexer::Kind::Partition
-            | solite_lexer::Kind::Alter
-            | solite_lexer::Kind::Rename
-            | solite_lexer::Kind::Column
-            | solite_lexer::Kind::Add
-            | solite_lexer::Kind::Immediate
-            | solite_lexer::Kind::Exclusive
-            | solite_lexer::Kind::View
-            | solite_lexer::Kind::Window
-            | solite_lexer::Kind::Vacuum
-            | solite_lexer::Kind::Transaction
-            | solite_lexer::Kind::Distinct
-            | solite_lexer::Kind::Returning
-            | solite_lexer::Kind::Create
-            | solite_lexer::Kind::Temp
-            | solite_lexer::Kind::Table
-            | solite_lexer::Kind::Virtual
-            | solite_lexer::Kind::Using
-            | solite_lexer::Kind::Attach
-            | solite_lexer::Kind::Database
-            | solite_lexer::Kind::Begin
-            | solite_lexer::Kind::Commit
-            | solite_lexer::Kind::Like
-            | solite_lexer::Kind::Regexp
-            | solite_lexer::Kind::Or
-            | solite_lexer::Kind::Not
-            | solite_lexer::Kind::Is
-            | solite_lexer::Kind::Null
-            | solite_lexer::Kind::Insert
-            | solite_lexer::Kind::Into
-            | solite_lexer::Kind::Update
-            | solite_lexer::Kind::Delete
-            | solite_lexer::Kind::Primary
-            | solite_lexer::Kind::Key
-            | solite_lexer::Kind::Foreign
-            | solite_lexer::Kind::References
-            | solite_lexer::Kind::Rollback
-            | solite_lexer::Kind::Trigger
-            | solite_lexer::Kind::Explain
-            | solite_lexer::Kind::Query
-            | solite_lexer::Kind::Plan
-            | solite_lexer::Kind::Detach
-            | solite_lexer::Kind::Pragma
-            | solite_lexer::Kind::Reindex
-            | solite_lexer::Kind::Release
-            | solite_lexer::Kind::Savepoint
-            | solite_lexer::Kind::Analyze => ctp_mocha_colors::MAUVE.clone(),
+            // Identifiers (regular and quoted)
+            solite_lexer::Kind::Ident
+            | solite_lexer::Kind::QuotedIdent
+            | solite_lexer::Kind::BracketIdent
+            | solite_lexer::Kind::BacktickIdent => ctp_mocha_colors::BLUE.clone(),
 
-            // Type words / identifiers (remaining kinds)
-            
-            | solite_lexer::Kind::Identifier => ctp_mocha_colors::BLUE.clone(),
-
-            // Anything unknown -> highlight red for visibility
-            solite_lexer::Kind::Unknown => ctp_mocha_colors::RED.clone(),
+            // Everything else is a keyword
+            _ => ctp_mocha_colors::MAUVE.clone(),
         };
 
         let mut span = code.child("span");

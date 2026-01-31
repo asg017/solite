@@ -1,0 +1,59 @@
+---
+source: crates/solite-lexer/src/lib.rs
+expression: result
+snapshot_kind: text
+---
+[
+    (
+        "-- comment!",
+        LegacyToken {
+            kind: Comment,
+            start: 0,
+            end: 11,
+            value: Text(
+                "-- comment!",
+            ),
+            contents: "-- comment!",
+        },
+    ),
+    (
+        "select",
+        LegacyToken {
+            kind: Select,
+            start: 16,
+            end: 22,
+            value: None,
+            contents: "select",
+        },
+    ),
+    (
+        "1",
+        LegacyToken {
+            kind: Integer,
+            start: 23,
+            end: 24,
+            value: None,
+            contents: "1",
+        },
+    ),
+    (
+        "+",
+        LegacyToken {
+            kind: Plus,
+            start: 25,
+            end: 26,
+            value: None,
+            contents: "+",
+        },
+    ),
+    (
+        "2",
+        LegacyToken {
+            kind: Integer,
+            start: 27,
+            end: 28,
+            value: None,
+            contents: "2",
+        },
+    ),
+]

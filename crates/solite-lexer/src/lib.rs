@@ -1,18 +1,534 @@
-use std::str::Chars;
-
+use logos::Logos;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 pub mod json;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Token<'a> {
-    pub kind: Kind,
-    pub start: usize,
-    pub end: usize,
-    pub value: TokenValue,
-    pub contents: &'a str,
+#[derive(Logos, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[logos(skip r"[ \t\n\r]+")]
+pub enum TokenKind {
+    // Comments
+    #[regex(r"--[^\n]*")]
+    Comment,
+
+    // ========================================
+    // Keywords (case-insensitive)
+    // ========================================
+
+    // --- DML (Data Manipulation Language) ---
+    #[token("SELECT", ignore(ascii_case))]
+    Select,
+    #[token("INSERT", ignore(ascii_case))]
+    Insert,
+    #[token("UPDATE", ignore(ascii_case))]
+    Update,
+    #[token("DELETE", ignore(ascii_case))]
+    Delete,
+    #[token("REPLACE", ignore(ascii_case))]
+    Replace,
+    #[token("INTO", ignore(ascii_case))]
+    Into,
+    #[token("VALUES", ignore(ascii_case))]
+    Values,
+    #[token("SET", ignore(ascii_case))]
+    Set,
+    #[token("FROM", ignore(ascii_case))]
+    From,
+
+    // --- DDL (Data Definition Language) ---
+    #[token("CREATE", ignore(ascii_case))]
+    Create,
+    #[token("DROP", ignore(ascii_case))]
+    Drop,
+    #[token("ALTER", ignore(ascii_case))]
+    Alter,
+    #[token("TABLE", ignore(ascii_case))]
+    Table,
+    #[token("INDEX", ignore(ascii_case))]
+    Index,
+    #[token("VIEW", ignore(ascii_case))]
+    View,
+    #[token("TRIGGER", ignore(ascii_case))]
+    Trigger,
+    #[token("VIRTUAL", ignore(ascii_case))]
+    Virtual,
+    #[token("TEMP", ignore(ascii_case))]
+    Temp,
+    #[token("TEMPORARY", ignore(ascii_case))]
+    Temporary,
+    #[token("IF", ignore(ascii_case))]
+    If,
+    #[token("ADD", ignore(ascii_case))]
+    Add,
+    #[token("COLUMN", ignore(ascii_case))]
+    Column,
+    #[token("RENAME", ignore(ascii_case))]
+    Rename,
+
+    // --- TCL (Transaction Control Language) ---
+    #[token("BEGIN", ignore(ascii_case))]
+    Begin,
+    #[token("COMMIT", ignore(ascii_case))]
+    Commit,
+    #[token("ROLLBACK", ignore(ascii_case))]
+    Rollback,
+    #[token("SAVEPOINT", ignore(ascii_case))]
+    Savepoint,
+    #[token("RELEASE", ignore(ascii_case))]
+    Release,
+    #[token("TRANSACTION", ignore(ascii_case))]
+    Transaction,
+    #[token("DEFERRED", ignore(ascii_case))]
+    Deferred,
+    #[token("IMMEDIATE", ignore(ascii_case))]
+    Immediate,
+    #[token("EXCLUSIVE", ignore(ascii_case))]
+    Exclusive,
+    #[token("END", ignore(ascii_case))]
+    End,
+
+    // --- Query Clauses ---
+    #[token("WHERE", ignore(ascii_case))]
+    Where,
+    #[token("ORDER", ignore(ascii_case))]
+    Order,
+    #[token("BY", ignore(ascii_case))]
+    By,
+    #[token("GROUP", ignore(ascii_case))]
+    Group,
+    #[token("HAVING", ignore(ascii_case))]
+    Having,
+    #[token("LIMIT", ignore(ascii_case))]
+    Limit,
+    #[token("OFFSET", ignore(ascii_case))]
+    Offset,
+    #[token("DISTINCT", ignore(ascii_case))]
+    Distinct,
+    #[token("ALL", ignore(ascii_case))]
+    All,
+    #[token("AS", ignore(ascii_case))]
+    As,
+    #[token("ASC", ignore(ascii_case))]
+    Asc,
+    #[token("DESC", ignore(ascii_case))]
+    Desc,
+    #[token("NULLS", ignore(ascii_case))]
+    Nulls,
+    #[token("FIRST", ignore(ascii_case))]
+    First,
+    #[token("LAST", ignore(ascii_case))]
+    Last,
+    #[token("UNION", ignore(ascii_case))]
+    Union,
+    #[token("INTERSECT", ignore(ascii_case))]
+    Intersect,
+    #[token("EXCEPT", ignore(ascii_case))]
+    Except,
+    #[token("INDEXED", ignore(ascii_case))]
+    Indexed,
+
+    // --- Join Operations ---
+    #[token("JOIN", ignore(ascii_case))]
+    Join,
+    #[token("INNER", ignore(ascii_case))]
+    Inner,
+    #[token("LEFT", ignore(ascii_case))]
+    Left,
+    #[token("RIGHT", ignore(ascii_case))]
+    Right,
+    #[token("FULL", ignore(ascii_case))]
+    Full,
+    #[token("OUTER", ignore(ascii_case))]
+    Outer,
+    #[token("CROSS", ignore(ascii_case))]
+    Cross,
+    #[token("NATURAL", ignore(ascii_case))]
+    Natural,
+    #[token("ON", ignore(ascii_case))]
+    On,
+    #[token("USING", ignore(ascii_case))]
+    Using,
+
+    // --- Logical and Comparison Operators ---
+    #[token("AND", ignore(ascii_case))]
+    And,
+    #[token("OR", ignore(ascii_case))]
+    Or,
+    #[token("NOT", ignore(ascii_case))]
+    Not,
+    #[token("IN", ignore(ascii_case))]
+    In,
+    #[token("BETWEEN", ignore(ascii_case))]
+    Between,
+    #[token("LIKE", ignore(ascii_case))]
+    Like,
+    #[token("GLOB", ignore(ascii_case))]
+    Glob,
+    #[token("REGEXP", ignore(ascii_case))]
+    Regexp,
+    #[token("MATCH", ignore(ascii_case))]
+    Match,
+    #[token("ESCAPE", ignore(ascii_case))]
+    Escape,
+    #[token("IS", ignore(ascii_case))]
+    Is,
+    #[token("ISNULL", ignore(ascii_case))]
+    IsNull,
+    #[token("NOTNULL", ignore(ascii_case))]
+    NotNull,
+    #[token("EXISTS", ignore(ascii_case))]
+    Exists,
+
+    // --- Literal Keywords ---
+    #[token("NULL", ignore(ascii_case))]
+    Null,
+    #[token("TRUE", ignore(ascii_case))]
+    True,
+    #[token("FALSE", ignore(ascii_case))]
+    False,
+    #[token("CURRENT_DATE", ignore(ascii_case))]
+    CurrentDate,
+    #[token("CURRENT_TIME", ignore(ascii_case))]
+    CurrentTime,
+    #[token("CURRENT_TIMESTAMP", ignore(ascii_case))]
+    CurrentTimestamp,
+
+    // --- Conditional Expressions ---
+    #[token("CASE", ignore(ascii_case))]
+    Case,
+    #[token("WHEN", ignore(ascii_case))]
+    When,
+    #[token("THEN", ignore(ascii_case))]
+    Then,
+    #[token("ELSE", ignore(ascii_case))]
+    Else,
+    #[token("CAST", ignore(ascii_case))]
+    Cast,
+
+    // --- Constraint Keywords ---
+    #[token("CONSTRAINT", ignore(ascii_case))]
+    Constraint,
+    #[token("PRIMARY", ignore(ascii_case))]
+    Primary,
+    #[token("KEY", ignore(ascii_case))]
+    Key,
+    #[token("UNIQUE", ignore(ascii_case))]
+    Unique,
+    #[token("CHECK", ignore(ascii_case))]
+    Check,
+    #[token("DEFAULT", ignore(ascii_case))]
+    Default,
+    #[token("COLLATE", ignore(ascii_case))]
+    Collate,
+    #[token("FOREIGN", ignore(ascii_case))]
+    Foreign,
+    #[token("REFERENCES", ignore(ascii_case))]
+    References,
+    #[token("AUTOINCREMENT", ignore(ascii_case))]
+    Autoincrement,
+
+    // --- Foreign Key Actions ---
+    #[token("CASCADE", ignore(ascii_case))]
+    Cascade,
+    #[token("RESTRICT", ignore(ascii_case))]
+    Restrict,
+    #[token("NO", ignore(ascii_case))]
+    No,
+    #[token("ACTION", ignore(ascii_case))]
+    Action,
+    #[token("DEFERRABLE", ignore(ascii_case))]
+    Deferrable,
+    #[token("INITIALLY", ignore(ascii_case))]
+    Initially,
+
+    // --- Trigger Keywords ---
+    #[token("BEFORE", ignore(ascii_case))]
+    Before,
+    #[token("AFTER", ignore(ascii_case))]
+    After,
+    #[token("INSTEAD", ignore(ascii_case))]
+    Instead,
+    #[token("OF", ignore(ascii_case))]
+    Of,
+    #[token("FOR", ignore(ascii_case))]
+    For,
+    #[token("EACH", ignore(ascii_case))]
+    Each,
+    #[token("ROW", ignore(ascii_case))]
+    Row,
+    #[token("RAISE", ignore(ascii_case))]
+    Raise,
+
+    // --- Window Functions ---
+    #[token("OVER", ignore(ascii_case))]
+    Over,
+    #[token("PARTITION", ignore(ascii_case))]
+    Partition,
+    #[token("WINDOW", ignore(ascii_case))]
+    Window,
+    #[token("ROWS", ignore(ascii_case))]
+    Rows,
+    #[token("RANGE", ignore(ascii_case))]
+    Range,
+    #[token("GROUPS", ignore(ascii_case))]
+    Groups,
+    #[token("UNBOUNDED", ignore(ascii_case))]
+    Unbounded,
+    #[token("PRECEDING", ignore(ascii_case))]
+    Preceding,
+    #[token("FOLLOWING", ignore(ascii_case))]
+    Following,
+    #[token("CURRENT", ignore(ascii_case))]
+    Current,
+    #[token("FILTER", ignore(ascii_case))]
+    Filter,
+    #[token("EXCLUDE", ignore(ascii_case))]
+    Exclude,
+    #[token("TIES", ignore(ascii_case))]
+    Ties,
+    #[token("OTHERS", ignore(ascii_case))]
+    Others,
+
+    // --- Common Table Expressions (CTE) ---
+    #[token("WITH", ignore(ascii_case))]
+    With,
+    #[token("RECURSIVE", ignore(ascii_case))]
+    Recursive,
+    #[token("MATERIALIZED", ignore(ascii_case))]
+    Materialized,
+
+    // --- Conflict Resolution ---
+    #[token("ABORT", ignore(ascii_case))]
+    Abort,
+    #[token("FAIL", ignore(ascii_case))]
+    Fail,
+    #[token("IGNORE", ignore(ascii_case))]
+    Ignore,
+    #[token("CONFLICT", ignore(ascii_case))]
+    Conflict,
+    #[token("DO", ignore(ascii_case))]
+    Do,
+    #[token("NOTHING", ignore(ascii_case))]
+    Nothing,
+
+    // --- Generated Columns ---
+    #[token("GENERATED", ignore(ascii_case))]
+    Generated,
+    #[token("ALWAYS", ignore(ascii_case))]
+    Always,
+    #[token("STORED", ignore(ascii_case))]
+    Stored,
+
+    // --- Database Management ---
+    #[token("EXPLAIN", ignore(ascii_case))]
+    Explain,
+    #[token("QUERY", ignore(ascii_case))]
+    Query,
+    #[token("PLAN", ignore(ascii_case))]
+    Plan,
+    #[token("PRAGMA", ignore(ascii_case))]
+    Pragma,
+    #[token("ANALYZE", ignore(ascii_case))]
+    Analyze,
+    #[token("ATTACH", ignore(ascii_case))]
+    Attach,
+    #[token("DETACH", ignore(ascii_case))]
+    Detach,
+    #[token("DATABASE", ignore(ascii_case))]
+    Database,
+    #[token("VACUUM", ignore(ascii_case))]
+    Vacuum,
+    #[token("REINDEX", ignore(ascii_case))]
+    Reindex,
+    #[token("RETURNING", ignore(ascii_case))]
+    Returning,
+
+    // --- Table Options ---
+    #[token("WITHOUT", ignore(ascii_case))]
+    Without,
+
+    // --- Miscellaneous ---
+    #[token("TO", ignore(ascii_case))]
+    To,
+    #[token("WITHIN", ignore(ascii_case))]
+    Within,
+
+    // Identifiers
+    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*")]
+    Ident,
+
+    // Quoted identifiers: "identifier" (standard SQL)
+    #[regex(r#""([^"]|"")*""#)]
+    QuotedIdent,
+
+    // Square bracket identifiers: [identifier] (MS Access/SQL Server compatibility)
+    #[regex(r"\[[^\]]*\]")]
+    BracketIdent,
+
+    // Backtick identifiers: `identifier` (MySQL compatibility)
+    #[regex(r"`[^`]*`")]
+    BacktickIdent,
+
+    // Literals
+    #[regex(r"[0-9]+")]
+    Integer,
+
+    #[regex(r"[0-9]+\.[0-9]*|[0-9]*\.[0-9]+")]
+    Float,
+
+    // String literal: 'text' (SQLite uses single quotes)
+    #[regex(r"'([^']|'')*'")]
+    String,
+
+    // Blob literal: X'AABBCCDD'
+    #[regex(r"[xX]'[0-9a-fA-F]*'")]
+    Blob,
+
+    // Punctuation
+    #[token(",")]
+    Comma,
+
+    #[token(";")]
+    Semicolon,
+
+    #[token("(")]
+    LParen,
+
+    #[token(")")]
+    RParen,
+
+    #[token("[")]
+    LBracket,
+
+    #[token("]")]
+    RBracket,
+
+    #[token(".")]
+    Dot,
+
+    #[token("*")]
+    Star,
+
+    // Arithmetic operators
+    #[token("+")]
+    Plus,
+
+    #[token("-")]
+    Minus,
+
+    #[token("/")]
+    Slash,
+
+    #[token("%")]
+    Percent,
+
+    // Comparison operators
+    #[token("<")]
+    Lt,
+
+    #[token(">")]
+    Gt,
+
+    #[token("<=")]
+    Le,
+
+    #[token(">=")]
+    Ge,
+
+    #[token("=")]
+    Eq,
+
+    #[token("==")]
+    EqEq,
+
+    #[token("<>")]
+    Ne,
+
+    #[token("!=")]
+    BangEq,
+
+    // Bitwise operators
+    #[token("&")]
+    Ampersand,
+
+    #[token("|")]
+    Pipe,
+
+    #[token("~")]
+    Tilde,
+
+    #[token("<<")]
+    LShift,
+
+    #[token(">>")]
+    RShift,
+
+    // String concatenation
+    #[token("||")]
+    Concat,
+
+    // JSON operators
+    #[token("->")]
+    Arrow,
+
+    #[token("->>")]
+    ArrowArrow,
+
+    // Bind parameters
+    #[regex(r"\?[0-9]*")]
+    BindParam,
+
+    #[regex(r":[a-zA-Z_][a-zA-Z0-9_]*")]
+    BindParamColon,
+
+    #[regex(r"@[a-zA-Z_][a-zA-Z0-9_]*")]
+    BindParamAt,
+
+    #[regex(r"\$[a-zA-Z_][a-zA-Z0-9_]*")]
+    BindParamDollar,
+
+    // Hexadecimal integer literal
+    #[regex(r"0[xX][0-9a-fA-F]+")]
+    HexInteger,
+
+    // Block comments
+    #[regex(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/")]
+    BlockComment,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Range<usize>,
+}
+
+pub fn lex(source: &str) -> Vec<Token> {
+    let mut lexer = TokenKind::lexer(source);
+    let mut tokens = Vec::new();
+
+    while let Some(result) = lexer.next() {
+        if let Ok(kind) = result {
+            tokens.push(Token {
+                kind,
+                span: lexer.span(),
+            });
+        }
+        // Skip errors (invalid tokens) for now
+    }
+
+    tokens
+}
+
+// ========================================
+// COMPATIBILITY LAYER
+// ========================================
+// These types and functions provide backward compatibility with the old API.
+// They will be removed in Phase 10.
+
+/// Re-export TokenKind as Kind for backward compatibility
+pub use TokenKind as Kind;
+
+/// Legacy token value type
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TokenValue {
     None,
@@ -20,438 +536,133 @@ pub enum TokenValue {
     Text(String),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-pub enum Kind {
-    Eof, // end of file
-    Number,
-
-    /// '+'
-    Plus,
-    /// '-'
-    Minus,
-    Asterisk,
-    Pipe,
-    LParen,
-    RParen,
-    LBracket,
-    RBracket,
-    Comma,
-    Semicolon,
-    Lt,
-    Gt,
-    Dot,
-    Div,
-    SingleArrowOperator,
-    DoubleArrowOperator,
-
-    Comment,
-    String,
-    Parameter,
-    Select,
-    From,
-    Where,
-    Order,
-    Group,
-    By,
-    Limit,
-    With,
-    Recursive,
-    Values,
-    Union,
-    All,
-    And,
-    As,
-    Between,
-    Descending,
-    Ascending,
-
-    Drop,
-    Index,
-    Indexed,
-    Inner,
-    Left,
-    Right,
-    Full,
-    Outer,
-    Join,
-    Match,
-    Partition,
-    Alter,
-    Rename,
-    Column,
-    Add,
-    Immediate,
-    Exclusive,
-    View,
-    Window,
-    Vacuum,
-    Transaction,
-    Distinct,
-    Returning,
-
-    Create,
-    Temp,
-    Table,
-    Virtual,
-    Using,
-    Attach,
-    Database,
-    Begin,
-    Commit,
-    Like,
-    Regexp,
-    Or,
-    Not,
-    Is,
-    Null,
-    Insert,
-    Into,
-    Update,
-    Delete,
-
-    Primary,
-    Key,
-    Foreign,
-    References,
-    Rollback,
-
-    Trigger,
-    Explain,
-    Query,
-    Plan,
-    Detach,
-    Pragma,
-    Reindex,
-    Release,
-    Savepoint,
-    Analyze,
-
-    Text,
-    Int,
-    Float,
-    Blob,
-    Bit,
-
-    Identifier,
-    Unknown,
-}
-struct Lexer<'a> {
-    source: &'a str,
-    chars: Chars<'a>,
+/// Legacy token type for backward compatibility
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct LegacyToken<'a> {
+    pub kind: TokenKind,
+    pub start: usize,
+    pub end: usize,
+    pub value: TokenValue,
+    #[serde(borrow)]
+    pub contents: &'a str,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Self {
-            source,
-            chars: source.chars(),
-        }
-    }
-}
-
-impl<'a> Lexer<'a> {
-    fn read_next_kind(&mut self) -> Kind {
-        while let Some(c) = self.chars.next() {
-            match c {
-                ';' => return Kind::Semicolon,
-                ',' => return Kind::Comma,
-                '+' => return Kind::Plus,
-                '*' => return Kind::Asterisk,
-                '|' => return Kind::Pipe,
-                '(' => return Kind::LParen,
-                ')' => return Kind::RParen,
-                '[' => return Kind::LBracket,
-                ']' => return Kind::RBracket,
-                '<' => return Kind::Lt,
-                '>' => return Kind::Gt,
-                '.' => return Kind::Dot,
-                '/' => match self.peek() {
-                    Some('*') => {
-                        self.next();
-                        loop {
-                            match self.next() {
-                                Some('*') => {
-                                    if let Some('/') = self.peek() {
-                                        self.next();
-                                        break;
-                                    }
-                                    continue;
-                                }
-                                Some(_) => continue,
-                                None => break,
-                            }
-                        }
-                        return Kind::Comment;
-                    }
-                    Some(_) | None => return Kind::Div,
-                },
-                '-' => match self.peek() {
-                    Some('-') => {
-                        self.next();
-                        loop {
-                            match self.peek() {
-                                Some('\n') | None => {
-                                    self.next();
-                                    break;
-                                }
-                                Some(_) => {
-                                    self.next();
-                                }
-                            }
-                        }
-                        return Kind::Comment;
-                    }
-                    Some('>') => {
-                        self.next();
-                        if let Some('>') = self.peek() {
-                            self.next();
-                            return Kind::DoubleArrowOperator;
-                        }
-                        return Kind::SingleArrowOperator;
-                    }
-                    _ => return Kind::Minus,
-                },
-                '\'' => {
-                    loop {
-                        match self.peek() {
-                            // TODO: can escape with double ''
-                            Some('\'') | None => {
-                                self.next();
-                                break;
-                            }
-                            Some(_) => {
-                                self.next();
-                            }
-                        }
-                    }
-                    return Kind::String;
+/// Legacy tokenize function that returns old-style tokens.
+/// This provides backward compatibility with existing code.
+pub fn tokenize(src: &str) -> Vec<LegacyToken<'_>> {
+    lex(src)
+        .into_iter()
+        .map(|t| {
+            let contents = &src[t.span.clone()];
+            let value = match t.kind {
+                TokenKind::Comment | TokenKind::BlockComment | TokenKind::String => {
+                    TokenValue::Text(contents.to_string())
                 }
-
-                '?' => {
-                    loop {
-                        match self.peek() {
-                            None => {
-                                self.next();
-                                break;
-                            }
-                            Some('0'..='9') => {
-                                self.next();
-                            }
-                            Some(_) => break,
-                        }
-                    }
-                    return Kind::Parameter;
-                }
-                // TODO: '$' params can have `::` and `(whatever)` suffix
-                ':' | '@' | '$' => {
-                    loop {
-                        match self.peek() {
-                            None => {
-                                self.next();
-                                break;
-                            }
-                            Some(c) => {
-                                match c {
-                                    'a'..='z' | 'A'..='Z' | '0'..='9' | '$' | '_' => {
-                                        self.next();
-                                    }
-                                    _ => break,
-                                };
-                            }
-                        }
-                    }
-                    return Kind::Parameter;
-                }
-                '0'..='9' => {
-                    let start = self.offset();
-                    while let Some(ch) = self.peek() {
-                        match ch {
-                            '0'..='9' => {
-                                self.next();
-                            }
-                            ' ' | '\n' | _ => break,
-                        }
-                    }
-                    let end = self.offset();
-                    return Kind::Number;
-                }
-                'a'..='z' | 'A'..='Z' => {
-                    let mut identifier = String::new();
-                    identifier.push(c);
-                    while let Some(ch) = self.peek() {
-                        match ch {
-                            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
-                                identifier.push(ch);
-                            }
-                            ' ' | _ => break,
-                        }
-                        self.next();
-                    }
-                    //dbg!(identifier);
-                    return match identifier.trim().to_lowercase().as_str() {
-                        "select" => Kind::Select,
-                        "from" => Kind::From,
-                        "order" => Kind::Order,
-                        "group" => Kind::Group,
-                        "by" => Kind::By,
-                        "limit" => Kind::Limit,
-                        "where" => Kind::Where,
-                        "recursive" => Kind::Recursive,
-                        "values" => Kind::Values,
-                        "union" => Kind::Union,
-                        "all" => Kind::All,
-                        "and" => Kind::And,
-                        "with" => Kind::With,
-                        "as" => Kind::As,
-                        "create" => Kind::Create,
-                        "temp" | "temporary" => Kind::Temp,
-                        "table" => Kind::Table,
-                        "virtual" => Kind::Virtual,
-                        "using" => Kind::Using,
-                        "attach" => Kind::Attach,
-                        "database" => Kind::Database,
-                        "begin" => Kind::Begin,
-                        "commit" => Kind::Commit,
-                        "like" => Kind::Like,
-                        "regexp" => Kind::Regexp,
-                        "or" => Kind::Or,
-                        "not" => Kind::Not,
-                        "is" => Kind::Is,
-                        "null" => Kind::Null,
-                        "insert" => Kind::Insert,
-                        "into" => Kind::Into,
-                        "update" => Kind::Update,
-                        "delete" => Kind::Delete,
-
-                        "primary" => Kind::Primary,
-                        "key" => Kind::Key,
-                        "foreign" => Kind::Foreign,
-                        "references" => Kind::References,
-                        "rollback" => Kind::Rollback,
-                        "text" => Kind::Text,
-                        "int" | "integer" => Kind::Int,
-                        "float" => Kind::Float,
-                        "blob" => Kind::Blob,
-                        "bit" => Kind::Bit,
-
-                        "between" => Kind::Between,
-                        "ascending" | "asc" => Kind::Ascending,
-                        "descending" | "desc" => Kind::Descending,
-                        "drop" => Kind::Drop,
-                        "index" => Kind::Index,
-                        "indexed" => Kind::Indexed,
-                        "inner" => Kind::Inner,
-                        "left" => Kind::Left,
-                        "right" => Kind::Right,
-                        "full" => Kind::Full,
-                        "outer" => Kind::Outer,
-                        "join" => Kind::Join,
-                        "match" => Kind::Match,
-                        "partition" => Kind::Partition,
-                        "alter" => Kind::Alter,
-                        "rename" => Kind::Rename,
-                        "column" => Kind::Column,
-                        "add" => Kind::Add,
-                        "immediate" => Kind::Immediate,
-                        "exclusive" => Kind::Exclusive,
-                        "view" => Kind::View,
-                        "window" => Kind::Window,
-                        "vacuum" => Kind::Vacuum,
-                        "transaction" => Kind::Transaction,
-                        "distinct" => Kind::Distinct,
-                        "returning" => Kind::Returning,
-                        "trigger" => Kind::Trigger,
-                        "explain" => Kind::Explain,
-                        "query" => Kind::Query,
-                        "plan" => Kind::Plan,
-                        "detach" => Kind::Detach,
-                        "pragma" => Kind::Pragma,
-                        "reindex" => Kind::Reindex,
-                        "release" => Kind::Release,
-                        "savepoint" => Kind::Savepoint,
-                        "analyze" => Kind::Analyze,
-
-                        _ => Kind::Identifier,
-                    };
-                }
-                ' ' | '\n' | '\t' => continue,
-                _ => return Kind::Unknown,
+                _ => TokenValue::None,
+            };
+            LegacyToken {
+                kind: t.kind,
+                start: t.span.start,
+                end: t.span.end,
+                value,
+                contents,
             }
-        }
-        Kind::Eof
-    }
-
-    fn read_next_token(&mut self) -> Token<'a> {
-        let start = self.offset();
-        let kind = self.read_next_kind();
-        let end = self.offset();
-        let value = match kind {
-            Kind::Comment | Kind::String => TokenValue::Text(self.source[start..end].to_string()),
-            _ => TokenValue::None,
-        };
-        Token {
-            kind,
-            start,
-            end,
-            value,
-            contents: &self.source[start..end],
-        }
-    }
-
-    /// Get the length offset from the source text, in UTF-8 bytes
-    fn offset(&self) -> usize {
-        self.source.len() - self.chars.as_str().len()
-    }
-
-    fn peek(&self) -> Option<char> {
-        self.chars.clone().next()
-    }
-    fn next(&mut self) -> Option<char> {
-        self.chars.next()
-    }
+        })
+        .collect()
 }
 
-pub fn tokenize<'a>(src: &'a str) -> Vec<Token<'a>> {
-    let mut l = Lexer::new(src);
-    let mut tokens = vec![];
-    loop {
-        let token = l.read_next_token();
-        let should_break = token.kind == Kind::Eof;
-        tokens.push(token);
-        if should_break {
-            break;
-        }
-    }
-    tokens
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn main() {
-    let src = "select 1 + 2";
-    let mut l = Lexer::new(src);
-    loop {
-        let token = l.read_next_token();
-        println!("{:?} '{}'", token, token.contents);
-        if token.kind == Kind::Eof {
-            break;
-        }
+    #[test]
+    fn test_lex_select_integer() {
+        let tokens = lex("SELECT 1;");
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::Integer);
+        assert_eq!(tokens[2].kind, TokenKind::Semicolon);
     }
-}
 
-#[test]
-fn test_lexer() {
-    let tests = vec![
-        "select 1 + 2",
-        "select 'rooga'",
-        r#"-- comment!
+    #[test]
+    fn test_lex_select_string() {
+        let tokens = lex("SELECT 'hello';");
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::String);
+        assert_eq!(tokens[2].kind, TokenKind::Semicolon);
+    }
+
+    #[test]
+    fn test_case_insensitive() {
+        let tokens = lex("select null");
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::Null);
+    }
+
+    #[test]
+    fn test_lex_operators() {
+        let tokens = lex("1 + 2 - 3 * 4 / 5");
+        assert_eq!(tokens[1].kind, TokenKind::Plus);
+        assert_eq!(tokens[3].kind, TokenKind::Minus);
+        assert_eq!(tokens[5].kind, TokenKind::Star);
+        assert_eq!(tokens[7].kind, TokenKind::Slash);
+    }
+
+    #[test]
+    fn test_lex_json_operators() {
+        let tokens = lex("data -> 'key' ->> 'value'");
+        assert_eq!(tokens[1].kind, TokenKind::Arrow);
+        assert_eq!(tokens[3].kind, TokenKind::ArrowArrow);
+    }
+
+    #[test]
+    fn test_lex_bind_params() {
+        let tokens = lex("SELECT ?, :name, @var, $param");
+        assert_eq!(tokens[1].kind, TokenKind::BindParam);
+        assert_eq!(tokens[3].kind, TokenKind::BindParamColon);
+        assert_eq!(tokens[5].kind, TokenKind::BindParamAt);
+        assert_eq!(tokens[7].kind, TokenKind::BindParamDollar);
+    }
+
+    #[test]
+    fn test_lex_comments() {
+        let tokens = lex("SELECT -- comment\n1");
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::Comment);
+        assert_eq!(tokens[2].kind, TokenKind::Integer);
+
+        let tokens = lex("SELECT /* block */ 1");
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::BlockComment);
+        assert_eq!(tokens[2].kind, TokenKind::Integer);
+    }
+
+    #[test]
+    fn test_lex_asc_desc() {
+        let tokens = lex("ORDER BY x ASC, y DESC");
+        // ORDER(0) BY(1) x(2) ASC(3) ,(4) y(5) DESC(6)
+        assert_eq!(tokens[3].kind, TokenKind::Asc);
+        assert_eq!(tokens[6].kind, TokenKind::Desc);
+    }
+
+    // Legacy API compatibility tests
+    #[test]
+    fn test_legacy_tokenize() {
+        let tests = vec![
+            "select 1 + 2",
+            "select 'rooga'",
+            r#"-- comment!
     select 1 + 2"#,
-    ];
-    for (i, test) in tests.iter().enumerate() {
-        let tokens = tokenize(test);
-        let v: Vec<String> = tokens
-            .iter()
-            .map(|t| (&test[t.start..t.end]).to_string())
-            .collect();
-        let result: Vec<(&String, Token)> = v.iter().zip(tokens).collect();
-        insta::assert_debug_snapshot!(format!("test_{i}"), result);
+        ];
+        for (i, test) in tests.iter().enumerate() {
+            let tokens = tokenize(test);
+            let v: Vec<String> = tokens
+                .iter()
+                .map(|t| (&test[t.start..t.end]).to_string())
+                .collect();
+            let result: Vec<(&String, LegacyToken)> = v.iter().zip(tokens).collect();
+            insta::assert_debug_snapshot!(format!("test_{i}"), result);
+        }
     }
 }

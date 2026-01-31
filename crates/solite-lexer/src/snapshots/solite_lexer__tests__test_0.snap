@@ -1,0 +1,47 @@
+---
+source: crates/solite-lexer/src/lib.rs
+expression: result
+snapshot_kind: text
+---
+[
+    (
+        "select",
+        LegacyToken {
+            kind: Select,
+            start: 0,
+            end: 6,
+            value: None,
+            contents: "select",
+        },
+    ),
+    (
+        "1",
+        LegacyToken {
+            kind: Integer,
+            start: 7,
+            end: 8,
+            value: None,
+            contents: "1",
+        },
+    ),
+    (
+        "+",
+        LegacyToken {
+            kind: Plus,
+            start: 9,
+            end: 10,
+            value: None,
+            contents: "+",
+        },
+    ),
+    (
+        "2",
+        LegacyToken {
+            kind: Integer,
+            start: 11,
+            end: 12,
+            value: None,
+            contents: "2",
+        },
+    ),
+]

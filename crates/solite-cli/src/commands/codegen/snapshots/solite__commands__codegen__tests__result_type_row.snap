@@ -1,0 +1,26 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table users(id int, name text);\n\n            -- name: getUserById :row\n            select * from users where id = $id;\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table users(id int, name text);"
+exports:
+  - name: getUserById
+    result_type: Row
+    sql: select * from users where id = $id;
+    parameters:
+      - full_name: $id
+        name: id
+        annotated_type: ~
+    columns:
+      - name: id
+        origin_database: main
+        origin_table: users
+        origin_column: id
+        decltype: INT
+      - name: name
+        origin_database: main
+        origin_table: users
+        origin_column: name
+        decltype: TEXT

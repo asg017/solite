@@ -1,6 +1,6 @@
 ---
-source: crates/solite-cli/src/commands/codegen.rs
-expression: result
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(\"-- name: xxx\\nselect 1, 2, 3;\")"
 snapshot_kind: text
 ---
 setup: []

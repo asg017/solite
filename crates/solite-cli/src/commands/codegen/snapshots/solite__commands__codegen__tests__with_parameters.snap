@@ -1,0 +1,24 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table t(a, b text, c int);\n\n            -- name: withParams :list\n            select c from t where a = $a::text and b = $b::text;\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table t(a, b text, c int);"
+exports:
+  - name: withParams
+    result_type: List
+    sql: "select c from t where a = $a::text and b = $b::text;"
+    parameters:
+      - full_name: "$a::text"
+        name: a
+        annotated_type: text
+      - full_name: "$b::text"
+        name: b
+        annotated_type: text
+    columns:
+      - name: c
+        origin_database: main
+        origin_table: t
+        origin_column: c
+        decltype: INT

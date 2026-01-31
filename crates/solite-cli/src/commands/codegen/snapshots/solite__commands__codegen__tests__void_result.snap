@@ -1,0 +1,16 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table users(id int, name text);\n\n            -- name: deleteUser\n            delete from users where id = $id;\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table users(id int, name text);"
+exports:
+  - name: deleteUser
+    result_type: Void
+    sql: delete from users where id = $id;
+    parameters:
+      - full_name: $id
+        name: id
+        annotated_type: ~
+    columns: []

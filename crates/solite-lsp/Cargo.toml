@@ -1,0 +1,20 @@
+[package]
+name = "solite-lsp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solite-lexer = { path = "../solite-lexer" }
+solite-parser = { path = "../solite-parser" }
+solite-analyzer = { path = "../solite-analyzer" }
+solite-ast = { path = "../solite-ast" }
+solite-fmt = { path = "../solite-fmt" }
+solite-schema = { path = "../solite-schema" }
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+insta = { workspace = true }
+regex = "1"
+serde = "1"
+serde_json = "1"

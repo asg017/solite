@@ -1,0 +1,21 @@
+---
+source: crates/solite_lsp/src/main.rs
+expression: "format_semantic_tokens(\"SELECT CAST(x AS INTEGER), name FROM users WHERE id = 1;\")"
+snapshot_kind: text
+---
+keyword      SELECT
+keyword      CAST
+operator     (
+variable     x
+keyword      AS
+type         INTEGER
+operator     )
+operator     ,
+variable     name
+keyword      FROM
+variable     users
+keyword      WHERE
+variable     id
+operator     =
+number       1
+operator     ;

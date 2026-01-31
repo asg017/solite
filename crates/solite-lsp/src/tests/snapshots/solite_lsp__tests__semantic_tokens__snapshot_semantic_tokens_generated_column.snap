@@ -1,0 +1,24 @@
+---
+source: crates/solite_lsp/src/main.rs
+expression: "format_semantic_tokens(\"CREATE TABLE rect (w REAL, h REAL, area AS (w * h));\")"
+snapshot_kind: text
+---
+keyword      CREATE
+keyword      TABLE
+variable     rect
+operator     (
+variable     w
+type         REAL
+operator     ,
+variable     h
+type         REAL
+operator     ,
+variable     area
+keyword      AS
+operator     (
+variable     w
+operator     *
+variable     h
+operator     )
+operator     )
+operator     ;

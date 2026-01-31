@@ -14,7 +14,6 @@ clap = {version = "4.4.2", features=["derive", "string"]}
 solite-core = {path="../solite-core"}
 solite-stdlib = {path="../solite-stdlib"}
 solite-lexer = {path="../solite-lexer"}
-solite-mcp = {path="../solite-mcp"}
 solite-fmt = {path="../solite-fmt"}
 solite-analyzer = {path="../solite-analyzer"}
 solite-parser = {path="../solite-parser"}

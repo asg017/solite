@@ -6,7 +6,6 @@ members = [
     "crates/solite-core",
     "crates/solite-stdlib",
     "crates/solite-lexer",
-    "crates/solite-mcp",
     "crates/solite-ast",
     "crates/solite-parser",
     "crates/solite-analyzer",

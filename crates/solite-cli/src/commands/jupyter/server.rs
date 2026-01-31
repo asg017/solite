@@ -231,7 +231,13 @@ fn sql_html(sql: &str) -> String {
     code.attr("style", "font-family: monospace;");
 
     let tokens = solite_lexer::tokenize(sql);
+    let mut prev_end = 0usize; // Track where the last token ended
     for token in tokens {
+        // Emit any whitespace/characters between tokens as plain text
+        if token.start > prev_end {
+            code.child("span").set_text(&sql[prev_end..token.start]);
+        }
+
         let color = match token.kind {
             // Numeric literals
             solite_lexer::Kind::Integer
@@ -295,6 +301,11 @@ fn sql_html(sql: &str) -> String {
         let mut span = code.child("span");
         span.style("color", color.to_hex_string());
         span.set_text(token.contents);
+        prev_end = token.end;
+    }
+    // Emit any trailing content after the last token
+    if prev_end < sql.len() {
+        code.child("span").set_text(&sql[prev_end..]);
     }
 
     root.to_html()

@@ -140,8 +140,13 @@ pub fn highlight_sql(copy: &mut String) -> String {
     let mut hl = String::new();
     let mut iter = tokens.iter().peekable();
     let mut prevs: Vec<&LegacyToken> = vec![];
+    let mut prev_end = 0usize; // Track where the last token ended
     let theme = CTP_MOCHA_THEME.clone();
     while let Some(token) = iter.next() {
+        // Emit any whitespace/characters between tokens as plain text
+        if token.start > prev_end {
+            hl.push_str(&copy[prev_end..token.start]);
+        }
         let s = match token.kind {
             // Comments (line and block)
             Kind::Comment | Kind::BlockComment => theme.style_comment(
@@ -208,7 +213,12 @@ pub fn highlight_sql(copy: &mut String) -> String {
                 )
         };
         hl.push_str(s.as_str());
+        prev_end = token.end;
         prevs.push(token);
+    }
+    // Emit any trailing content after the last token
+    if prev_end < copy.len() {
+        hl.push_str(&copy[prev_end..]);
     }
     hl
 }
@@ -277,5 +287,28 @@ mod tests {
         insert into t (id, name) values (1, 'Alice'), (2, 'Bob');
         select id, name from t where id = 1;
         "#);
+    }
+
+    /// Strip ANSI escape codes from a string to get the plain text
+    fn strip_ansi(s: &str) -> String {
+        let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        re.replace_all(s, "").to_string()
+    }
+
+    #[test]
+    fn test_whitespace_preservation() {
+        // The highlighted output, when stripped of ANSI codes, should match the input exactly
+        let inputs = [
+            "select 1 + 2;",
+            "select   1   +   2;",
+            "SELECT * FROM users WHERE id = 1;",
+            "select\n  a,\n  b\nfrom t;",
+            "select 1, 2, 3 from t where x > 10",
+        ];
+        for input in inputs {
+            let highlighted = highlight_sql(&mut input.to_string());
+            let plain = strip_ansi(&highlighted);
+            assert_eq!(plain, input, "Whitespace not preserved for: {:?}", input);
+        }
     }
 }

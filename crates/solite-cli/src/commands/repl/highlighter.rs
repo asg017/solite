@@ -135,90 +135,102 @@ pub mod sql_highlighter {
 use solite_lexer::{lex, Token, TokenKind};
 
 use crate::themes::{SoliteColor, ctp_mocha_colors};
-pub fn highlight_sql(copy: &mut String) -> String {
-    let tokens = lex(copy.as_str());
+
+pub fn highlight_sql(sql: &str) -> String {
+    let tokens = lex(sql);
     let mut hl = String::new();
     let mut iter = tokens.iter().peekable();
     let mut prevs: Vec<&Token> = vec![];
-    let mut prev_end = 0usize; // Track where the last token ended
+    let mut prev_end = 0usize;
     let theme = CTP_MOCHA_THEME.clone();
+
     while let Some(token) = iter.next() {
         // Emit any whitespace/characters between tokens as plain text
         if token.span.start > prev_end {
-            hl.push_str(&copy[prev_end..token.span.start]);
+            hl.push_str(&sql[prev_end..token.span.start]);
         }
         let s = match token.kind {
             // Comments (line and block)
-            TokenKind::Comment | TokenKind::BlockComment => theme.style_comment(
-                &copy[token.span.clone()]
-            ),
-            // Bind parameters (all 4 variants)
-            TokenKind::BindParam | TokenKind::BindParamColon | TokenKind::BindParamAt | TokenKind::BindParamDollar => {
-                theme.style_parameter(&copy[token.span.clone()])
+            TokenKind::Comment | TokenKind::BlockComment => {
+                theme.style_comment(&sql[token.span.clone()])
             }
+            // Bind parameters (all 4 variants)
+            TokenKind::BindParam
+            | TokenKind::BindParamColon
+            | TokenKind::BindParamAt
+            | TokenKind::BindParamDollar => theme.style_parameter(&sql[token.span.clone()]),
             // Numbers (integer, float, hex)
             TokenKind::Integer | TokenKind::Float | TokenKind::HexInteger => {
-                theme.style_number(&copy[token.span.clone()])
+                theme.style_number(&sql[token.span.clone()])
             }
             // Operators
-            TokenKind::Plus | TokenKind::Minus | TokenKind::Pipe | TokenKind::Slash | TokenKind::Lt | TokenKind::Gt
-            | TokenKind::Le | TokenKind::Ge | TokenKind::Eq | TokenKind::EqEq | TokenKind::Ne | TokenKind::BangEq
-            | TokenKind::Ampersand | TokenKind::Tilde | TokenKind::LShift | TokenKind::RShift | TokenKind::Concat
-            | TokenKind::Percent => {
-                theme.style_operator(&copy[token.span.clone()])
-            }
+            TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Pipe
+            | TokenKind::Slash
+            | TokenKind::Lt
+            | TokenKind::Gt
+            | TokenKind::Le
+            | TokenKind::Ge
+            | TokenKind::Eq
+            | TokenKind::EqEq
+            | TokenKind::Ne
+            | TokenKind::BangEq
+            | TokenKind::Ampersand
+            | TokenKind::Tilde
+            | TokenKind::LShift
+            | TokenKind::RShift
+            | TokenKind::Concat
+            | TokenKind::Percent => theme.style_operator(&sql[token.span.clone()]),
             // String literals
-            TokenKind::String => theme.style_string(&copy[token.span.clone()]),
-            // Blob literals
-            TokenKind::Blob => theme.style_string(&copy[token.span.clone()]),
+            TokenKind::String | TokenKind::Blob => theme.style_string(&sql[token.span.clone()]),
             // Punctuation (no styling)
             TokenKind::Star
             | TokenKind::LBracket
             | TokenKind::RBracket
             | TokenKind::Comma
             | TokenKind::Semicolon
-            | TokenKind::Dot => copy[token.span.clone()].to_string(),
+            | TokenKind::Dot => sql[token.span.clone()].to_string(),
             // Parentheses
-            TokenKind::LParen | TokenKind::RParen => {
-                theme.style_paren(&copy[token.span.clone()])
-            }
+            TokenKind::LParen | TokenKind::RParen => theme.style_paren(&sql[token.span.clone()]),
             // JSON operators
             TokenKind::Arrow | TokenKind::ArrowArrow => {
-                theme.style_operator(&copy[token.span.clone()])
+                theme.style_operator(&sql[token.span.clone()])
             }
             // Identifiers (regular and quoted)
-            TokenKind::Ident | TokenKind::QuotedIdent | TokenKind::BracketIdent | TokenKind::BacktickIdent => {
-                // if the next token is a '('
+            TokenKind::Ident
+            | TokenKind::QuotedIdent
+            | TokenKind::BracketIdent
+            | TokenKind::BacktickIdent => {
+                // If the next token is a '(' and previous token is NOT 'using' or 'table'
                 if matches!(iter.peek().map(|v| v.kind), Some(TokenKind::LParen))
-                // and the previous token is NOT 'using' or 'table'
-                    && !(matches!(prevs.last().map(|t| t.kind), Some(TokenKind::Using) | Some(TokenKind::Table)))
+                    && !matches!(
+                        prevs.last().map(|t| t.kind),
+                        Some(TokenKind::Using) | Some(TokenKind::Table)
+                    )
                 {
                     if BUILTIN_FUNCTIONS
                         .iter()
-                        .any(|r| *r == copy[token.span.clone()].trim())
+                        .any(|r| *r == sql[token.span.clone()].trim())
                     {
-                        theme.style_operator(&copy[token.span.clone()])
+                        theme.style_operator(&sql[token.span.clone()])
                     } else {
-                        theme.style_function(
-                            &copy[token.span.clone()]
-                        )
+                        theme.style_function(&sql[token.span.clone()])
                     }
                 } else {
-                    copy[token.span.clone()].to_string()
+                    sql[token.span.clone()].to_string()
                 }
             }
             // Everything else is a keyword
-            _ => theme.style_keyword(
-                    &copy[token.span.clone()]
-                )
+            _ => theme.style_keyword(&sql[token.span.clone()]),
         };
-        hl.push_str(s.as_str());
+        hl.push_str(&s);
         prev_end = token.span.end;
         prevs.push(token);
     }
     // Emit any trailing content after the last token
-    if prev_end < copy.len() {
-        hl.push_str(&copy[prev_end..]);
+    if prev_end < sql.len() {
+        hl.push_str(&sql[prev_end..]);
     }
     hl
 }
@@ -248,13 +260,13 @@ impl Highlighter for ReplHighlighter {
         if line.len() <= 1 {
             return Borrowed(line);
         }
-        let mut copy = line.to_owned();
         if line.starts_with('.') {
+            let mut copy = line.to_owned();
             highlight_dot(&mut copy);
+            Owned(copy)
         } else {
-            return Owned(highlight_sql(&mut copy));
+            Owned(highlight_sql(line))
         }
-        return Owned(copy);
     }
 
     fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
@@ -269,7 +281,7 @@ mod tests {
     use super::*;
 
     fn sql_html(s: &str) -> String {
-        let result = ansi_to_html::convert(&highlight_sql(&mut s.to_string())).unwrap();
+        let result = ansi_to_html::convert(&highlight_sql(s)).unwrap();
         format!("<html><body>{result}</body></html>")
     }
 
@@ -306,7 +318,7 @@ mod tests {
             "select 1, 2, 3 from t where x > 10",
         ];
         for input in inputs {
-            let highlighted = highlight_sql(&mut input.to_string());
+            let highlighted = highlight_sql(input);
             let plain = strip_ansi(&highlighted);
             assert_eq!(plain, input, "Whitespace not preserved for: {:?}", input);
         }

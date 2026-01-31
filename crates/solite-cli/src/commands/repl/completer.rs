@@ -20,22 +20,21 @@ impl ReplCompleter {
     fn complete_dot(
         &self,
         line: &str,
-        pos: usize,
-        ctx: &rustyline::Context<'_>,
+        _pos: usize,
+        _ctx: &rustyline::Context<'_>,
     ) -> Result<(usize, Vec<Pair>)> {
-        let dots = ["load", "tables", "open"];
+        let dots = ["load", "tables", "open", "schema", "timer", "help"];
         if line.contains(' ') || !line.starts_with('.') {
             return Ok((0, vec![]));
         }
         let prefix = &line[1..];
 
-        let x = dots
+        let candidates = dots
             .iter()
             .filter_map(|v| {
                 if v.starts_with(prefix) {
                     Some(Pair {
                         display: CTP_MOCHA_THEME.style_dot(v),
-                        //sql_highlighter::dot(v).to_string(),
                         replacement: format!("{v} "),
                     })
                 } else {
@@ -43,24 +42,23 @@ impl ReplCompleter {
                 }
             })
             .collect();
-        Ok((1, x))
+        Ok((1, candidates))
     }
     fn complete_sql(
         &self,
         line: &str,
-        pos: usize,
-        ctx: &rustyline::Context<'_>,
+        _pos: usize,
+        _ctx: &rustyline::Context<'_>,
     ) -> Result<(usize, Vec<Pair>)> {
         let rt = self.runtime.borrow();
         let (last_word, last_word_idx) = line
             .trim_end()
             .rfind(|c: char| c.is_whitespace())
-            .map(|x| (&line[(x + 1)..], x + 1))
+            .map(|idx| (&line[(idx + 1)..], idx + 1))
             .unwrap_or((line, 0));
-        let stmt = rt
-            .connection
-            .prepare(
-                r#"
+
+        let stmt = match rt.connection.prepare(
+            r#"
               select
                 case
                   when phase == 1 then lower(candidate)
@@ -85,30 +83,27 @@ impl ReplCompleter {
               order by rank, candidate
               limit 20
             "#,
-            )
-            .unwrap()
-            .1
-            .unwrap();
+        ) {
+            Ok((_, Some(stmt))) => stmt,
+            _ => return Ok((0, vec![])),
+        };
+
         stmt.bind_text(1, last_word);
         stmt.bind_text(2, line);
 
-        //stmt.bind_text(2, line);
         let mut candidates: Vec<Pair> = vec![];
         while let Ok(Some(row)) = stmt.next() {
-            let candidate = row.first().unwrap().as_str().to_string();
-            let phase = row.get(1).unwrap().as_int64();
-            let display = if phase == 9 {
-                format!("ᶜ {}", (candidate.clone()))
-            } else if phase == 1 {
-                format!("{}", 
-                  CTP_MOCHA_THEME.style_keyword(&candidate)
-              )
-            } else {
-                format!("ᵗ {}", candidate.clone())
+            let Some(first) = row.first() else { continue };
+            let candidate = first.as_str().to_string();
+            let phase = row.get(1).map(|v| v.as_int64()).unwrap_or(0);
+            let display = match phase {
+                9 => format!("ᶜ {}", candidate),      // columns
+                1 => CTP_MOCHA_THEME.style_keyword(&candidate), // keywords
+                _ => format!("ᵗ {}", candidate),      // tables/other
             };
             candidates.push(Pair {
                 display,
-                replacement: candidate.clone(),
+                replacement: candidate,
             });
         }
         Ok((last_word_idx, candidates))

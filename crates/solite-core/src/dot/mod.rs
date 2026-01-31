@@ -2,6 +2,30 @@
 //!
 //! This module provides the `.command` functionality for the REPL and scripts,
 //! including commands like `.tables`, `.schema`, `.load`, `.param`, etc.
+//!
+//! # Overview
+//!
+//! Dot commands are special commands that start with a `.` (period) and provide
+//! various utilities for database introspection, configuration, and execution.
+//!
+//! # Available Commands
+//!
+//! - `.tables [schema]` - List tables and views
+//! - `.schema` - Show CREATE statements
+//! - `.graphviz` / `.gv` - Generate ERD in DOT format
+//! - `.open <path>` - Open a different database
+//! - `.load <path>` - Load an extension
+//! - `.param set/unset/list/clear` - Manage query parameters
+//! - `.env set/unset` - Manage environment variables
+//! - `.dotenv` - Load .env file
+//! - `.export <path> <query>` - Export query results
+//! - `.bench <query>` - Benchmark query execution
+//! - `.vegalite <mark> <query>` - Generate Vega-Lite chart
+//! - `.sh <command>` - Execute shell command
+//! - `.ask <question>` - Ask AI assistant
+//! - `.timer on/off` - Toggle query timing
+//! - `.clear` / `.c` - Clear screen
+//! - `.print <message>` - Print a message
 
 mod ask;
 pub mod bench;
@@ -25,6 +49,7 @@ pub use crate::dot::{
     ask::AskCommand,
     bench::BenchCommand,
     clear::ClearCommand,
+    dotenv::{DotenvCommand, DotenvResult},
     env::{EnvAction, EnvCommand},
     export::ExportCommand,
     graphviz::GraphvizCommand,
@@ -40,10 +65,11 @@ pub use crate::dot::{
 };
 pub use load::LoadCommandSource;
 
-use crate::{dot::dotenv::DotenvCommand, Runtime};
+use crate::Runtime;
 use env::parse_env;
 use param::parse_parameter;
 use serde::{Deserialize, Serialize};
+use std::io;
 use thiserror::Error;
 
 /// Errors that can occur during dot command parsing.
@@ -58,6 +84,44 @@ pub enum ParseDotError {
     /// Generic error message.
     #[error("{0}")]
     Generic(String),
+}
+
+/// Errors that can occur during dot command execution.
+#[derive(Error, Debug)]
+pub enum DotError {
+    /// SQLite error during command execution.
+    #[error("SQLite error: {0}")]
+    Sqlite(crate::sqlite::SQLiteError),
+
+    /// I/O error (file operations, shell commands, etc.).
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+
+    /// Environment variable error.
+    #[error("Environment error: {0}")]
+    Env(#[from] std::env::VarError),
+
+    /// Missing or invalid data.
+    #[error("{0}")]
+    InvalidData(String),
+
+    /// File not found.
+    #[error("File not found: {0}")]
+    FileNotFound(String),
+
+    /// Extension loading error.
+    #[error("Extension error: {0}")]
+    Extension(String),
+
+    /// Command execution error.
+    #[error("Command failed: {0}")]
+    Command(String),
+}
+
+impl From<crate::sqlite::SQLiteError> for DotError {
+    fn from(err: crate::sqlite::SQLiteError) -> Self {
+        DotError::Sqlite(err)
+    }
 }
 
 /// All supported dot commands.

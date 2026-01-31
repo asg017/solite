@@ -411,7 +411,7 @@ impl Runtime {
             Ok((rest, stmt))
         }
     }
-    fn lookup_parameter<S: AsRef<str>>(&self, key: S) -> Option<OwnedValue> {
+    pub fn lookup_parameter<S: AsRef<str>>(&self, key: S) -> Option<OwnedValue> {
         let stmt = self
             .connection
             .prepare("SELECT value FROM temp.sqlite_parameters WHERE key = ?1")

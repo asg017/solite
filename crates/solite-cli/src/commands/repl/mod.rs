@@ -133,30 +133,54 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                 eprintln!("✗ failed to launch TUI: {}", e);
             }
         }
-        DotCommand::Dotenv(cmd) => {
-            cmd.execute();
-        }
+        DotCommand::Dotenv(cmd) => match cmd.execute() {
+            Ok(result) => {
+                println!("✓ loaded {} variables from {}", result.loaded.len(), result.path.display());
+            }
+            Err(e) => {
+                eprintln!("✗ failed to load .env: {}", e);
+            }
+        },
         DotCommand::Clear(cmd) => {
             cmd.execute();
         }
-        DotCommand::Tables(cmd) => {
-            let tables = cmd.execute(runtime);
-            for table in tables {
-                println!("{table}");
+        DotCommand::Tables(cmd) => match cmd.execute(runtime) {
+            Ok(tables) => {
+                for table in tables {
+                    println!("{table}");
+                }
             }
-        }
-        DotCommand::Schema(cmd) => {
-            let creates = cmd.execute(runtime);
-            for create in creates {
-                println!("{}", highlight_sql(&create));
+            Err(e) => {
+                eprintln!("✗ failed to list tables: {}", e);
             }
-        }
-        DotCommand::Graphviz(cmd) => {
-            let dot = cmd.execute(runtime);
-            println!("{}", dot);
-        }
+        },
+        DotCommand::Schema(cmd) => match cmd.execute(runtime) {
+            Ok(creates) => {
+                for create in creates {
+                    println!("{}", highlight_sql(&create));
+                }
+            }
+            Err(e) => {
+                eprintln!("✗ failed to get schema: {}", e);
+            }
+        },
+        DotCommand::Graphviz(cmd) => match cmd.execute(runtime) {
+            Ok(dot) => {
+                println!("{}", dot);
+            }
+            Err(e) => {
+                eprintln!("✗ failed to generate graphviz: {}", e);
+            }
+        },
         DotCommand::Print(print_cmd) => print_cmd.execute(),
-        DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
+        DotCommand::Open(open_cmd) => match open_cmd.execute(runtime) {
+            Ok(()) => {
+                println!("✓ opened database");
+            }
+            Err(e) => {
+                eprintln!("✗ failed to open database: {}", e);
+            }
+        },
         DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
             Ok(source) => match source {
                 LoadCommandSource::Path(path) => {
@@ -200,13 +224,16 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             }
         }
         DotCommand::Shell(shell_cmd) => match shell_cmd.execute() {
-            ShellResult::Background(child) => {
+            Ok(ShellResult::Background(child)) => {
                 println!("✓ started background process with PID {}", child.id());
             }
-            ShellResult::Stream(rx) => {
+            Ok(ShellResult::Stream(rx)) => {
                 while let Ok(msg) = rx.recv() {
                     println!("{}", msg);
                 }
+            }
+            Err(e) => {
+                eprintln!("✗ shell command failed: {}", e);
             }
         },
         DotCommand::Ask(ask_command) => {

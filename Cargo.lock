@@ -3816,6 +3816,7 @@ dependencies = [
  "serde_json",
  "solite-stdlib",
  "statistical",
+ "tempfile",
  "term_size",
  "thiserror 1.0.69",
  "ureq",

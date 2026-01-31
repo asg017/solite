@@ -28,44 +28,56 @@ pub async fn handle_dot_command(
                 .send_plain("Ask command not yet implemented in Jupyter", parent)
                 .await?;
         }
-        DotCommand::Graphviz(cmd) => {
-            let dot = cmd.execute(runtime);
-            sender.send_plain(dot, parent).await?;
-        }
-        DotCommand::Dotenv(dotenv_cmd) => {
-            let result = dotenv_cmd.execute();
-            let mut output = String::new();
-            let relative = result
-                .path
-                .strip_prefix(std::env::current_dir().unwrap_or_default())
-                .unwrap_or(&result.path);
-
-            if result.loaded.is_empty() {
-                writeln!(
-                    &mut output,
-                    "No environment variables loaded from `{}`",
-                    relative.display()
-                )?;
-            } else if result.loaded.len() == 1 {
-                writeln!(
-                    &mut output,
-                    "Loaded `{}` from `{}`",
-                    result.loaded[0],
-                    relative.display()
-                )?;
-            } else {
-                writeln!(
-                    &mut output,
-                    "Loaded {} environment variables from `{}`:",
-                    result.loaded.len(),
-                    relative.display()
-                )?;
-                for key in result.loaded {
-                    writeln!(&mut output, "- `{}`", key)?;
-                }
+        DotCommand::Graphviz(cmd) => match cmd.execute(runtime) {
+            Ok(dot) => {
+                sender.send_plain(dot, parent).await?;
             }
-            sender.send_markdown(output, parent).await?;
-        }
+            Err(e) => {
+                sender
+                    .send_plain(format!("Graphviz error: {}", e), parent)
+                    .await?;
+            }
+        },
+        DotCommand::Dotenv(dotenv_cmd) => match dotenv_cmd.execute() {
+            Ok(result) => {
+                let mut output = String::new();
+                let relative = result
+                    .path
+                    .strip_prefix(std::env::current_dir().unwrap_or_default())
+                    .unwrap_or(&result.path);
+
+                if result.loaded.is_empty() {
+                    writeln!(
+                        &mut output,
+                        "No environment variables loaded from `{}`",
+                        relative.display()
+                    )?;
+                } else if result.loaded.len() == 1 {
+                    writeln!(
+                        &mut output,
+                        "Loaded `{}` from `{}`",
+                        result.loaded[0],
+                        relative.display()
+                    )?;
+                } else {
+                    writeln!(
+                        &mut output,
+                        "Loaded {} environment variables from `{}`:",
+                        result.loaded.len(),
+                        relative.display()
+                    )?;
+                    for key in result.loaded {
+                        writeln!(&mut output, "- `{}`", key)?;
+                    }
+                }
+                sender.send_markdown(output, parent).await?;
+            }
+            Err(e) => {
+                sender
+                    .send_plain(format!("Dotenv error: {}", e), parent)
+                    .await?;
+            }
+        },
         DotCommand::Tui(_) => {
             sender
                 .send_plain("TUI command not available in Jupyter", parent)
@@ -79,23 +91,26 @@ pub async fn handle_dot_command(
         DotCommand::Print(print_cmd) => {
             sender.send_plain(print_cmd.message, parent).await?;
         }
-        DotCommand::Shell(shell_cmd) => {
-            match shell_cmd.execute() {
-                ShellResult::Background(child) => {
-                    sender
-                        .send_stdout(
-                            &format!("Started background process with PID {}", child.id()),
-                            parent,
-                        )
-                        .await?;
-                }
-                ShellResult::Stream(rx) => {
-                    while let Ok(msg) = rx.recv() {
-                        sender.send_stdout(&format!("{msg}\n"), parent).await?;
-                    }
+        DotCommand::Shell(shell_cmd) => match shell_cmd.execute() {
+            Ok(ShellResult::Background(child)) => {
+                sender
+                    .send_stdout(
+                        &format!("Started background process with PID {}", child.id()),
+                        parent,
+                    )
+                    .await?;
+            }
+            Ok(ShellResult::Stream(rx)) => {
+                while let Ok(msg) = rx.recv() {
+                    sender.send_stdout(&format!("{msg}\n"), parent).await?;
                 }
             }
-        }
+            Err(e) => {
+                sender
+                    .send_plain(format!("Shell error: {}", e), parent)
+                    .await?;
+            }
+        },
         DotCommand::Timer(_) => {
             sender
                 .send_plain("Timer command not yet implemented", parent)
@@ -135,10 +150,18 @@ pub async fn handle_dot_command(
         }
         DotCommand::Open(open_cmd) => {
             let path = open_cmd.path.clone();
-            open_cmd.execute(runtime);
-            sender
-                .send_plain(format!("Opened database at {}", path), parent)
-                .await?;
+            match open_cmd.execute(runtime) {
+                Ok(()) => {
+                    sender
+                        .send_plain(format!("Opened database at {}", path), parent)
+                        .await?;
+                }
+                Err(e) => {
+                    sender
+                        .send_plain(format!("Open error: {}", e), parent)
+                        .await?;
+                }
+            }
         }
         DotCommand::Load(load_cmd) => {
             let msg = match load_cmd.execute(&mut runtime.connection) {
@@ -150,19 +173,31 @@ pub async fn handle_dot_command(
             };
             sender.send_plain(msg, parent).await?;
         }
-        DotCommand::Tables(cmd) => {
-            let tables = cmd.execute(runtime);
-            sender.send_plain(tables.join("\n"), parent).await?;
-        }
-        DotCommand::Schema(cmd) => {
-            let creates = cmd.execute(runtime);
-            let html = creates
-                .iter()
-                .map(|s| render_sql_html(s))
-                .collect::<Vec<String>>()
-                .join("\n");
-            sender.send_html(html, parent).await?;
-        }
+        DotCommand::Tables(cmd) => match cmd.execute(runtime) {
+            Ok(tables) => {
+                sender.send_plain(tables.join("\n"), parent).await?;
+            }
+            Err(e) => {
+                sender
+                    .send_plain(format!("Tables error: {}", e), parent)
+                    .await?;
+            }
+        },
+        DotCommand::Schema(cmd) => match cmd.execute(runtime) {
+            Ok(creates) => {
+                let html = creates
+                    .iter()
+                    .map(|s| render_sql_html(s))
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                sender.send_html(html, parent).await?;
+            }
+            Err(e) => {
+                sender
+                    .send_plain(format!("Schema error: {}", e), parent)
+                    .await?;
+            }
+        },
         DotCommand::Vegalite(mut cmd) => {
             match cmd.execute() {
                 Ok(data) => {

@@ -18,25 +18,47 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
         DotCommand::Clear(_) => {
             eprintln!("Warning: .clear command not supported in run mode");
         }
-        DotCommand::Dotenv(cmd) => {
-            cmd.execute();
-        }
-        DotCommand::Tables(cmd) => {
-            let tables = cmd.execute(runtime);
-            for table in tables {
-                println!("{}", table);
+        DotCommand::Dotenv(cmd) => match cmd.execute() {
+            Ok(result) => {
+                println!(
+                    "{} loaded {} variables from {}",
+                    colors::green("✓"),
+                    result.loaded.len(),
+                    result.path.display()
+                );
             }
-        }
-        DotCommand::Schema(cmd) => {
-            let creates = cmd.execute(runtime);
-            for create in creates {
-                println!("{}", create);
+            Err(e) => {
+                eprintln!("Error loading .env file: {}", e);
             }
-        }
-        DotCommand::Graphviz(cmd) => {
-            let graphviz = cmd.execute(runtime);
-            println!("{}", graphviz);
-        }
+        },
+        DotCommand::Tables(cmd) => match cmd.execute(runtime) {
+            Ok(tables) => {
+                for table in tables {
+                    println!("{}", table);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error listing tables: {}", e);
+            }
+        },
+        DotCommand::Schema(cmd) => match cmd.execute(runtime) {
+            Ok(creates) => {
+                for create in creates {
+                    println!("{}", create);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error getting schema: {}", e);
+            }
+        },
+        DotCommand::Graphviz(cmd) => match cmd.execute(runtime) {
+            Ok(graphviz) => {
+                println!("{}", graphviz);
+            }
+            Err(e) => {
+                eprintln!("Error generating graphviz: {}", e);
+            }
+        },
         DotCommand::Print(print_cmd) => {
             print_cmd.execute();
         }
@@ -50,9 +72,14 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                 }
             }
         }
-        DotCommand::Open(open_cmd) => {
-            open_cmd.execute(runtime);
-        }
+        DotCommand::Open(open_cmd) => match open_cmd.execute(runtime) {
+            Ok(()) => {
+                println!("{} opened database", colors::green("✓"));
+            }
+            Err(e) => {
+                eprintln!("Error opening database: {}", e);
+            }
+        },
         DotCommand::Timer(enabled) => {
             *timer = *enabled;
             println!(
@@ -93,18 +120,19 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                 }
             }
         }
-        DotCommand::Shell(shell_command) => {
-            match shell_command.execute() {
-                ShellResult::Background(child) => {
-                    println!("✓ started background process with PID {}", child.id());
-                }
-                ShellResult::Stream(rx) => {
-                    while let Ok(msg) = rx.recv() {
-                        println!("{}", msg);
-                    }
+        DotCommand::Shell(shell_command) => match shell_command.execute() {
+            Ok(ShellResult::Background(child)) => {
+                println!("✓ started background process with PID {}", child.id());
+            }
+            Ok(ShellResult::Stream(rx)) => {
+                while let Ok(msg) = rx.recv() {
+                    println!("{}", msg);
                 }
             }
-        }
+            Err(e) => {
+                eprintln!("Error executing shell command: {}", e);
+            }
+        },
         DotCommand::Vegalite(_) => {
             eprintln!("Warning: .vegalite command not supported in run mode");
         }

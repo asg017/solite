@@ -122,25 +122,6 @@ pub struct CodegenArgs {
 
 
 #[derive(Args, Debug)]
-pub struct RpcNamespace {
-    #[command(subcommand)]
-    pub command: RpcCommand,
-}
-#[derive(Subcommand, Debug)]
-pub enum RpcCommand {
-    ClientDebug(RpcClientDebugArgs),
-    Server(RpcServerArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct RpcClientDebugArgs {
-    #[arg(long)]
-    pub executable: PathBuf,
-}
-#[derive(Args, Debug)]
-pub struct RpcServerArgs {
-}
-#[derive(Args, Debug)]
 pub struct McpNamespace {
     #[command(subcommand)]
     pub command: McpCommand,
@@ -322,9 +303,6 @@ pub enum Commands {
     /// MCP
     Mcp(McpNamespace),
 
-    /// RPC
-    Rpc(RpcNamespace),
-    
     /// Codegen SQL queries into an intermediate representation
     Codegen(CodegenArgs),
 

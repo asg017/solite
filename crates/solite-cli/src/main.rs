@@ -53,7 +53,6 @@ fn main() {
         cli::Commands::Mcp(args) => commands::mcp::mcp(args),
         cli::Commands::Codegen(cmd) => commands::codegen::codegen(cmd),
         cli::Commands::Tui(cmd) => commands::tui::tui(cmd),
-        cli::Commands::Rpc(cmd) => commands::rpc::rpc(cmd),
         cli::Commands::Fmt(args) => commands::fmt::fmt(args),
         cli::Commands::Lint(args) => commands::lint::lint(args),
         cli::Commands::Lsp(args) => commands::lsp::lsp(args),

@@ -10,3 +10,5 @@ pub mod test;
 pub mod codegen;
 pub mod tui;
 pub mod rpc;
+pub mod fmt;
+pub mod lint;

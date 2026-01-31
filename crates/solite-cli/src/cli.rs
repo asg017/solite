@@ -249,6 +249,42 @@ pub struct TuiArgs {
     pub table: Option<String>,
 }
 
+#[derive(Args, Debug)]
+pub struct FmtArgs {
+    /// SQL files to format (reads from stdin if none provided)
+    pub files: Vec<PathBuf>,
+
+    /// Write formatted output back to files
+    #[arg(short, long)]
+    pub write: bool,
+
+    /// Check if files are formatted (exit 1 if not)
+    #[arg(long)]
+    pub check: bool,
+
+    /// Show diff of formatting changes
+    #[arg(long)]
+    pub diff: bool,
+
+    /// Path to config file
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct LintArgs {
+    /// SQL files to lint (reads from stdin if none provided)
+    pub files: Vec<PathBuf>,
+
+    /// Path to config file
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Apply auto-fixes where available
+    #[arg(long)]
+    pub fix: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -288,9 +324,15 @@ pub enum Commands {
     
     /// Codegen SQL queries into an intermediate representation
     Codegen(CodegenArgs),
-    
+
     /// Tui for exploring a database
     Tui(TuiArgs),
+
+    /// Format SQL files
+    Fmt(FmtArgs),
+
+    /// Lint SQL files for potential issues
+    Lint(LintArgs),
 }
 
 #[derive(Parser)]

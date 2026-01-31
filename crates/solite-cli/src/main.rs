@@ -54,6 +54,8 @@ fn main() {
         cli::Commands::Codegen(cmd) => commands::codegen::codegen(cmd),
         cli::Commands::Tui(cmd) => commands::tui::tui(cmd),
         cli::Commands::Rpc(cmd) => commands::rpc::rpc(cmd),
+        cli::Commands::Fmt(args) => commands::fmt::fmt(args),
+        cli::Commands::Lint(args) => commands::lint::lint(args),
     };
     match result {
         Ok(_) => exit(0),

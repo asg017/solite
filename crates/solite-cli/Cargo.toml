@@ -15,6 +15,9 @@ solite-core = {path="../solite-core"}
 solite-stdlib = {path="../solite-stdlib"}
 solite-lexer = {path="../solite-lexer"}
 solite-mcp = {path="../solite-mcp"}
+solite-fmt = {path="../solite-fmt"}
+solite-analyzer = {path="../solite-analyzer"}
+solite-parser = {path="../solite-parser"}
 rustyline = {version="12.0.0", features = ["derive"]}
 futures = "0.3"
 anyhow.workspace = true

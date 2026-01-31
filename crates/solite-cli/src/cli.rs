@@ -285,6 +285,9 @@ pub struct LintArgs {
     pub fix: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct LspArgs {}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -333,6 +336,9 @@ pub enum Commands {
 
     /// Lint SQL files for potential issues
     Lint(LintArgs),
+
+    /// Start the Language Server Protocol (LSP) server
+    Lsp(LspArgs),
 }
 
 #[derive(Parser)]

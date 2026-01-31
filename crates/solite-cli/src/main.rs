@@ -56,6 +56,7 @@ fn main() {
         cli::Commands::Rpc(cmd) => commands::rpc::rpc(cmd),
         cli::Commands::Fmt(args) => commands::fmt::fmt(args),
         cli::Commands::Lint(args) => commands::lint::lint(args),
+        cli::Commands::Lsp(args) => commands::lsp::lsp(args),
     };
     match result {
         Ok(_) => exit(0),

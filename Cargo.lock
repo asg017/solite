@@ -4063,6 +4063,7 @@ dependencies = [
  "solite-core",
  "solite-fmt",
  "solite-lexer",
+ "solite-lsp",
  "solite-mcp",
  "solite-parser",
  "solite-stdlib",

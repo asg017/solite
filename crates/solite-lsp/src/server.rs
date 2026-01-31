@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-use solite_lsp::completions::{
+use crate::completions::{
     get_completions_extended, CompletionOptions as ExtendedCompletionOptions,
 };
-use solite_lsp::context::detect_context;
+use crate::context::detect_context;
 use solite_schema::{Document, DotCommand, FileSchemaProvider, SchemaProvider, SqlRegion};
 use solite_analyzer::{
     analyze_with_schema, build_schema, find_statement_at_offset, find_symbol_at_offset,
@@ -1851,15 +1851,13 @@ impl LanguageServer for Backend {
     }
 }
 
-#[tokio::main]
-async fn main() {
+/// Run the LSP server on stdin/stdout.
+///
+/// This function blocks until the server is shut down.
+pub async fn run_server() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
 }
-
-
-#[cfg(test)]
-mod tests;

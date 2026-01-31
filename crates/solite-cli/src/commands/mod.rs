@@ -12,3 +12,4 @@ pub mod tui;
 pub mod rpc;
 pub mod fmt;
 pub mod lint;
+pub mod lsp;

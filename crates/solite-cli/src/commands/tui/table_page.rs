@@ -53,6 +53,24 @@ const PREFETCH_THRESHOLD: usize = 50;
 /// Maximum characters to display in a cell before truncating
 const MAX_CELL_DISPLAY_LEN: usize = 200;
 
+/// Rows to count per incremental batch
+const COUNT_BATCH_SIZE: usize = 60493;
+
+/// Spinner characters for counting animation
+const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/// Tracks row count with incremental discovery
+pub(crate) struct RowCount {
+    /// Minimum known row count (from loaded data)
+    known: usize,
+    /// Whether we've found the actual end
+    pub(crate) is_complete: bool,
+    /// Next offset to probe when counting
+    probe_offset: usize,
+    /// Spinner frame for animation
+    spinner_frame: usize,
+}
+
 /// Render an OwnedValue to a display string, truncating if necessary
 fn render_value_for_display(value: &OwnedValue) -> String {
     match value {
@@ -77,19 +95,79 @@ fn render_value_for_display(value: &OwnedValue) -> String {
     }
 }
 
-/// Get total row count for a table
-fn get_row_count(runtime: &Runtime, table: &str) -> usize {
-    let sql = format!(
-        "SELECT COUNT(*) FROM \"{}\"",
-        table.replace('"', "\"\"")
-    );
-    let stmt = match runtime.connection.prepare(&sql) {
-        Ok((_, Some(stmt))) => stmt,
-        _ => return 0,
-    };
-    match stmt.next() {
-        Ok(Some(row)) => row.first().map(|v| v.as_int64() as usize).unwrap_or(0),
-        _ => 0,
+impl RowCount {
+    fn new(initial_known: usize) -> Self {
+        Self {
+            known: initial_known,
+            is_complete: initial_known == 0, // Empty table is complete
+            probe_offset: initial_known,
+            spinner_frame: 0,
+        }
+    }
+
+    /// Update known count from loaded data
+    fn update_from_load(&mut self, window_start: usize, loaded_count: usize) {
+        let new_known = window_start + loaded_count;
+        if new_known > self.known {
+            self.known = new_known;
+            // If we loaded less than a full window, we've found the end
+            if loaded_count < WINDOW_SIZE {
+                self.is_complete = true;
+            }
+        }
+    }
+
+    /// Count a batch of rows to discover more. Returns true if still counting.
+    fn count_batch(&mut self, runtime: &Runtime, table: &str) -> bool {
+        if self.is_complete {
+            return false;
+        }
+
+        let sql = format!(
+            "SELECT 1 FROM \"{}\" LIMIT {} OFFSET {}",
+            table.replace('"', "\"\""),
+            COUNT_BATCH_SIZE,
+            self.probe_offset
+        );
+
+        let stmt = match runtime.connection.prepare(&sql) {
+            Ok((_, Some(stmt))) => stmt,
+            _ => {
+                self.is_complete = true;
+                return false;
+            }
+        };
+
+        let mut batch_count = 0;
+        while let Ok(Some(_)) = stmt.next() {
+            batch_count += 1;
+        }
+
+        self.probe_offset += batch_count;
+        if self.probe_offset > self.known {
+            self.known = self.probe_offset;
+        }
+        // Advance spinner
+        self.spinner_frame = (self.spinner_frame + 1) % SPINNER_CHARS.len();
+
+        if batch_count < COUNT_BATCH_SIZE {
+            self.is_complete = true;
+            false
+        } else {
+            true // More to count
+        }
+    }
+
+    /// Get display string for row count with formatting
+    fn display(&self) -> String {
+        use super::format_number;
+        let formatted = format_number(self.known);
+        if self.is_complete {
+            formatted
+        } else {
+            let spinner = SPINNER_CHARS[self.spinner_frame];
+            format!("{}+ {}", formatted, spinner)
+        }
     }
 }
 
@@ -178,8 +256,8 @@ pub struct TablePage<'a> {
     error: Option<String>,
     copy_popup: CopyPopup,
     primary_keys: Vec<PrimaryKeyInfo>,
-    /// Total number of rows in the table (from COUNT(*))
-    pub(crate) total_rows: usize,
+    /// Row count tracker (streams count incrementally)
+    pub(crate) row_count: RowCount,
     /// Starting row index of the current window
     window_start: usize,
     /// Current sort order (if any)
@@ -188,7 +266,6 @@ pub struct TablePage<'a> {
 
 impl<'a> TablePage<'a> {
     pub(crate) fn new(table_name: &str, runtime: &'a Runtime, theme: TuiTheme) -> Self {
-        let total_rows = get_row_count(runtime, table_name);
         let result = load_table_data(runtime, table_name, None, 0, WINDOW_SIZE);
         let primary_keys = get_primary_keys(runtime, table_name);
         let mut state = TableState::default();
@@ -196,6 +273,7 @@ impl<'a> TablePage<'a> {
             state.select_first();
             state.select_first_column();
         }
+        let row_count = RowCount::new(result.data.rows.len());
         Self {
             runtime,
             theme,
@@ -208,10 +286,15 @@ impl<'a> TablePage<'a> {
             error: result.error,
             copy_popup: CopyPopup::new(),
             primary_keys,
-            total_rows,
+            row_count,
             window_start: 0,
             current_order: None,
         }
+    }
+
+    /// Get the known row count (may be incomplete)
+    pub(crate) fn total_rows(&self) -> usize {
+        self.row_count.known
     }
 
     /// Ensure the given absolute row index is loaded in the current window.
@@ -223,12 +306,15 @@ impl<'a> TablePage<'a> {
         let near_start = absolute_row < self.window_start + PREFETCH_THRESHOLD;
         let near_end = absolute_row + PREFETCH_THRESHOLD >= window_end;
 
-        if absolute_row < self.window_start || absolute_row >= window_end ||
-           (near_start && self.window_start > 0) ||
-           (near_end && window_end < self.total_rows) {
+        // Use row_count.known as estimate, but may load beyond if count is incomplete
+        let should_reload = absolute_row < self.window_start
+            || absolute_row >= window_end
+            || (near_start && self.window_start > 0)
+            || (near_end && !self.row_count.is_complete);
+
+        if should_reload {
             // Center the window around the target row
             let new_start = absolute_row.saturating_sub(WINDOW_SIZE / 2);
-            let new_start = new_start.min(self.total_rows.saturating_sub(WINDOW_SIZE));
 
             let result = load_table_data(
                 self.runtime,
@@ -239,8 +325,10 @@ impl<'a> TablePage<'a> {
             );
 
             if result.error.is_none() {
-                self.data = result.data;
                 self.window_start = new_start;
+                // Update row count from loaded data
+                self.row_count.update_from_load(new_start, result.data.rows.len());
+                self.data = result.data;
             } else {
                 self.error = result.error;
             }
@@ -283,9 +371,11 @@ impl<'a> TablePage<'a> {
             0,
             WINDOW_SIZE,
         );
-        self.data = result.data;
         self.window_start = 0;
         self.current_order = Some(order);
+        // Reset row count - will re-discover during navigation
+        self.row_count = RowCount::new(result.data.rows.len());
+        self.data = result.data;
         // Reset selection to first row after sort
         self.state.select_first();
         if let Some(err) = result.error {
@@ -430,7 +520,7 @@ impl TuiPage for TablePage<'_> {
             KeyCode::Char('j') | KeyCode::Down => {
                 if let Some(current) = self.state.selected() {
                     let absolute = self.window_to_absolute(current);
-                    if absolute + 1 < self.total_rows {
+                    if absolute + 1 < self.row_count.known {
                         let next_absolute = absolute + 1;
                         // Check if we need to load a new window
                         if next_absolute >= self.window_start + self.data.rows.len() {
@@ -470,7 +560,7 @@ impl TuiPage for TablePage<'_> {
                 let page_size = 20; // Approximate visible rows
                 if let Some(current) = self.state.selected() {
                     let absolute = self.window_to_absolute(current);
-                    let target = (absolute + page_size).min(self.total_rows.saturating_sub(1));
+                    let target = (absolute + page_size).min(self.row_count.known.saturating_sub(1));
                     self.ensure_row_loaded(target);
                     if let Some(window_idx) = self.absolute_to_window(target) {
                         self.state.select(Some(window_idx));
@@ -519,7 +609,7 @@ impl TuiPage for TablePage<'_> {
             }
             KeyCode::Char('g') => {
                 // Jump to first row
-                if self.total_rows > 0 {
+                if self.row_count.known > 0 {
                     self.ensure_row_loaded(0);
                     self.state.select(Some(0));
                 }
@@ -527,8 +617,8 @@ impl TuiPage for TablePage<'_> {
             }
             KeyCode::Char('G') => {
                 // Jump to last row
-                if self.total_rows > 0 {
-                    let last_row = self.total_rows - 1;
+                if self.row_count.known > 0 {
+                    let last_row = self.row_count.known - 1;
                     self.ensure_row_loaded(last_row);
                     if let Some(window_idx) = self.absolute_to_window(last_row) {
                         self.state.select(Some(window_idx));
@@ -677,17 +767,25 @@ impl TuiPage for TablePage<'_> {
                     .centered(),
                 message_rect,
             );
-        } else if self.total_rows > 0 {
-            // Show position indicator
+        } else if self.row_count.known > 0 || !self.row_count.is_complete {
+            // Show position indicator with streaming count
+            use super::format_number;
             use ratatui::style::Color;
             let current_row = self.selected_absolute_row().map(|r| r + 1).unwrap_or(0);
-            let position_text = format!("Row {} of {}", current_row, self.total_rows);
+            let current_row_display = format_number(current_row);
+            let count_display = self.row_count.display();
+            let position_text = format!("Row {} of {}", current_row_display, count_display);
             frame.render_widget(
                 Text::from(position_text)
                     .style(Style::new().fg(Color::DarkGray))
                     .centered(),
                 message_rect,
             );
+
+            // Continue counting in background if not complete
+            if !self.row_count.is_complete {
+                self.row_count.count_batch(self.runtime, &self.table_name);
+            }
         }
 
         // Help bar

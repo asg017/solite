@@ -24,6 +24,20 @@ use ratatui::text::{Line, Text};
 use ratatui::Frame;
 use solite_core::sqlite::OwnedValue;
 use solite_core::Runtime;
+use std::time::Duration;
+
+/// Format a number with thousand separators
+pub(crate) fn format_number(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
 
 use crate::cli::TuiArgs;
 
@@ -168,9 +182,11 @@ impl<'a> App<'a> {
         let context_text = match &self.page {
             Page::Listing(listing) => listing.database_name.clone(),
             Page::Table(table_page) => {
-                let row_count = table_page.total_rows;
+                let row_count = table_page.total_rows();
+                let formatted_count = format_number(row_count);
+                let suffix = if table_page.row_count.is_complete { "" } else { "+" };
                 let row_text = if row_count == 1 { "row" } else { "rows" };
-                format!("{} ({} {})", table_page.table_name, row_count, row_text)
+                format!("{} ({}{} {})", table_page.table_name, formatted_count, suffix, row_text)
             }
             Page::Row(row_page, _) => {
                 format!(
@@ -216,9 +232,12 @@ pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
 
     ratatui::run(|terminal| loop {
         terminal.draw(|frame| app.render(frame))?;
-        if let Some(key) = event::read()?.as_key_press_event() {
-            if app.handle_key(key) {
-                break Ok(());
+        // Poll with short timeout to allow UI refresh during counting
+        if event::poll(Duration::from_millis(100))? {
+            if let Some(key) = event::read()?.as_key_press_event() {
+                if app.handle_key(key) {
+                    break Ok(());
+                }
             }
         }
     })
@@ -240,9 +259,12 @@ pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
 
     let result: anyhow::Result<()> = ratatui::run(|terminal| loop {
         terminal.draw(|frame| app.render(frame))?;
-        if let Some(key) = event::read()?.as_key_press_event() {
-            if app.handle_key(key) {
-                break Ok(());
+        // Poll with short timeout to allow UI refresh during counting
+        if event::poll(Duration::from_millis(100))? {
+            if let Some(key) = event::read()?.as_key_press_event() {
+                if app.handle_key(key) {
+                    break Ok(());
+                }
             }
         }
     });

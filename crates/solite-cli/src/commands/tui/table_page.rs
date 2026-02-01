@@ -34,17 +34,72 @@ impl Data {
     }
 }
 
+#[derive(Clone)]
 struct Order {
     column_idx: usize,
     direction: SortDirection,
 }
+
 /// Result of loading table data
 struct LoadResult {
     data: Data,
     error: Option<String>,
 }
 
-fn load_table_data(runtime: &Runtime, table: &str, order: Option<Order>) -> LoadResult {
+/// Configuration for windowed data loading
+const WINDOW_SIZE: usize = 200;
+const PREFETCH_THRESHOLD: usize = 50;
+
+/// Maximum characters to display in a cell before truncating
+const MAX_CELL_DISPLAY_LEN: usize = 200;
+
+/// Render an OwnedValue to a display string, truncating if necessary
+fn render_value_for_display(value: &OwnedValue) -> String {
+    match value {
+        OwnedValue::Null => "NULL".to_owned(),
+        OwnedValue::Integer(i) => i.to_string(),
+        OwnedValue::Double(f) => f.to_string(),
+        OwnedValue::Text(s) => {
+            let text = String::from_utf8_lossy(s);
+            if text.len() > MAX_CELL_DISPLAY_LEN {
+                format!("{}…", &text[..MAX_CELL_DISPLAY_LEN])
+            } else {
+                text.into_owned()
+            }
+        }
+        OwnedValue::Blob(b) => {
+            if b.len() > 20 {
+                format!("[BLOB {} bytes]", b.len())
+            } else {
+                format!("[BLOB]")
+            }
+        }
+    }
+}
+
+/// Get total row count for a table
+fn get_row_count(runtime: &Runtime, table: &str) -> usize {
+    let sql = format!(
+        "SELECT COUNT(*) FROM \"{}\"",
+        table.replace('"', "\"\"")
+    );
+    let stmt = match runtime.connection.prepare(&sql) {
+        Ok((_, Some(stmt))) => stmt,
+        _ => return 0,
+    };
+    match stmt.next() {
+        Ok(Some(row)) => row.first().map(|v| v.as_int64() as usize).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn load_table_data(
+    runtime: &Runtime,
+    table: &str,
+    order: Option<Order>,
+    offset: usize,
+    limit: usize,
+) -> LoadResult {
     let mut sql: String = String::new();
     // Use quoted identifier to handle special table names
     let _ = writeln!(&mut sql, "SELECT * FROM \"{}\"", table.replace('"', "\"\""));
@@ -59,6 +114,7 @@ fn load_table_data(runtime: &Runtime, table: &str, order: Option<Order>) -> Load
             }
         );
     }
+    let _ = writeln!(&mut sql, "LIMIT {} OFFSET {}", limit, offset);
 
     let stmt = match runtime.connection.prepare(&sql) {
         Ok((_, Some(stmt))) => stmt,
@@ -122,11 +178,18 @@ pub struct TablePage<'a> {
     error: Option<String>,
     copy_popup: CopyPopup,
     primary_keys: Vec<PrimaryKeyInfo>,
+    /// Total number of rows in the table (from COUNT(*))
+    pub(crate) total_rows: usize,
+    /// Starting row index of the current window
+    window_start: usize,
+    /// Current sort order (if any)
+    current_order: Option<Order>,
 }
 
 impl<'a> TablePage<'a> {
     pub(crate) fn new(table_name: &str, runtime: &'a Runtime, theme: TuiTheme) -> Self {
-        let result = load_table_data(runtime, table_name, None);
+        let total_rows = get_row_count(runtime, table_name);
+        let result = load_table_data(runtime, table_name, None, 0, WINDOW_SIZE);
         let primary_keys = get_primary_keys(runtime, table_name);
         let mut state = TableState::default();
         if !result.data.rows.is_empty() {
@@ -145,7 +208,62 @@ impl<'a> TablePage<'a> {
             error: result.error,
             copy_popup: CopyPopup::new(),
             primary_keys,
+            total_rows,
+            window_start: 0,
+            current_order: None,
         }
+    }
+
+    /// Ensure the given absolute row index is loaded in the current window.
+    /// If not, reload a window centered around that row.
+    fn ensure_row_loaded(&mut self, absolute_row: usize) {
+        let window_end = self.window_start + self.data.rows.len();
+
+        // Check if row is already in window with enough buffer
+        let near_start = absolute_row < self.window_start + PREFETCH_THRESHOLD;
+        let near_end = absolute_row + PREFETCH_THRESHOLD >= window_end;
+
+        if absolute_row < self.window_start || absolute_row >= window_end ||
+           (near_start && self.window_start > 0) ||
+           (near_end && window_end < self.total_rows) {
+            // Center the window around the target row
+            let new_start = absolute_row.saturating_sub(WINDOW_SIZE / 2);
+            let new_start = new_start.min(self.total_rows.saturating_sub(WINDOW_SIZE));
+
+            let result = load_table_data(
+                self.runtime,
+                &self.table_name,
+                self.current_order.clone(),
+                new_start,
+                WINDOW_SIZE,
+            );
+
+            if result.error.is_none() {
+                self.data = result.data;
+                self.window_start = new_start;
+            } else {
+                self.error = result.error;
+            }
+        }
+    }
+
+    /// Convert absolute row index to window-relative index
+    fn absolute_to_window(&self, absolute: usize) -> Option<usize> {
+        if absolute >= self.window_start && absolute < self.window_start + self.data.rows.len() {
+            Some(absolute - self.window_start)
+        } else {
+            None
+        }
+    }
+
+    /// Convert window-relative index to absolute row index
+    fn window_to_absolute(&self, window_idx: usize) -> usize {
+        self.window_start + window_idx
+    }
+
+    /// Get the currently selected absolute row index
+    fn selected_absolute_row(&self) -> Option<usize> {
+        self.state.selected().map(|window_idx| self.window_to_absolute(window_idx))
     }
 
     fn sort(&mut self, direction: SortDirection) {
@@ -154,15 +272,22 @@ impl<'a> TablePage<'a> {
             .selected_column()
             .unwrap_or(0)
             .saturating_add(self.column_idx_offset);
+        let order = Order {
+            column_idx: col_idx,
+            direction,
+        };
         let result = load_table_data(
             self.runtime,
             &self.table_name,
-            Some(Order {
-                column_idx: col_idx,
-                direction,
-            }),
+            Some(order.clone()),
+            0,
+            WINDOW_SIZE,
         );
         self.data = result.data;
+        self.window_start = 0;
+        self.current_order = Some(order);
+        // Reset selection to first row after sort
+        self.state.select_first();
         if let Some(err) = result.error {
             self.footer_message = Some(format!("Sort error: {}", err));
         }
@@ -272,6 +397,7 @@ impl<'a> TablePage<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
 enum SortDirection {
     Ascending,
     Descending,
@@ -302,11 +428,67 @@ impl TuiPage for TablePage<'_> {
                 HandleKeyResult::None
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.state.select_next();
+                if let Some(current) = self.state.selected() {
+                    let absolute = self.window_to_absolute(current);
+                    if absolute + 1 < self.total_rows {
+                        let next_absolute = absolute + 1;
+                        // Check if we need to load a new window
+                        if next_absolute >= self.window_start + self.data.rows.len() {
+                            self.ensure_row_loaded(next_absolute);
+                        }
+                        // Update selection to new window-relative position
+                        if let Some(new_window_idx) = self.absolute_to_window(next_absolute) {
+                            self.state.select(Some(new_window_idx));
+                        }
+                    }
+                } else {
+                    self.state.select_first();
+                }
                 HandleKeyResult::None
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.state.select_previous();
+                if let Some(current) = self.state.selected() {
+                    let absolute = self.window_to_absolute(current);
+                    if absolute > 0 {
+                        let prev_absolute = absolute - 1;
+                        // Check if we need to load a new window
+                        if prev_absolute < self.window_start {
+                            self.ensure_row_loaded(prev_absolute);
+                        }
+                        // Update selection to new window-relative position
+                        if let Some(new_window_idx) = self.absolute_to_window(prev_absolute) {
+                            self.state.select(Some(new_window_idx));
+                        }
+                    }
+                } else {
+                    self.state.select_first();
+                }
+                HandleKeyResult::None
+            }
+            // Page down (Ctrl+d or PageDown)
+            KeyCode::PageDown => {
+                let page_size = 20; // Approximate visible rows
+                if let Some(current) = self.state.selected() {
+                    let absolute = self.window_to_absolute(current);
+                    let target = (absolute + page_size).min(self.total_rows.saturating_sub(1));
+                    self.ensure_row_loaded(target);
+                    if let Some(window_idx) = self.absolute_to_window(target) {
+                        self.state.select(Some(window_idx));
+                    }
+                }
+                HandleKeyResult::None
+            }
+            // Page up (Ctrl+u or PageUp)
+            KeyCode::PageUp => {
+                let page_size = 20; // Approximate visible rows
+                if let Some(current) = self.state.selected() {
+                    let absolute = self.window_to_absolute(current);
+                    let target = absolute.saturating_sub(page_size);
+                    self.ensure_row_loaded(target);
+                    if let Some(window_idx) = self.absolute_to_window(target) {
+                        self.state.select(Some(window_idx));
+                    }
+                }
                 HandleKeyResult::None
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -336,11 +518,22 @@ impl TuiPage for TablePage<'_> {
                 HandleKeyResult::None
             }
             KeyCode::Char('g') => {
-                self.state.select_first();
+                // Jump to first row
+                if self.total_rows > 0 {
+                    self.ensure_row_loaded(0);
+                    self.state.select(Some(0));
+                }
                 HandleKeyResult::None
             }
             KeyCode::Char('G') => {
-                self.state.select_last();
+                // Jump to last row
+                if self.total_rows > 0 {
+                    let last_row = self.total_rows - 1;
+                    self.ensure_row_loaded(last_row);
+                    if let Some(window_idx) = self.absolute_to_window(last_row) {
+                        self.state.select(Some(window_idx));
+                    }
+                }
                 HandleKeyResult::None
             }
             KeyCode::Char('L') => {
@@ -363,13 +556,14 @@ impl TuiPage for TablePage<'_> {
             }
             // Navigate to row detail view
             KeyCode::Enter => {
-                if let Some((row_idx, _)) = self.state.selected_cell() {
-                    if row_idx < self.data.rows.len() {
+                if let Some((window_idx, _)) = self.state.selected_cell() {
+                    if window_idx < self.data.rows.len() {
+                        let absolute_row = self.window_to_absolute(window_idx);
                         let data = RowPageData {
                             table_name: self.table_name.clone(),
-                            row_index: row_idx,
+                            row_index: absolute_row,
                             columns: self.data.columns.clone(),
-                            values: self.data.rows[row_idx].clone(),
+                            values: self.data.rows[window_idx].clone(),
                             primary_keys: self.primary_keys.clone(),
                         };
                         return HandleKeyResult::Navigate(NavigateToPage::Row(data));
@@ -419,20 +613,15 @@ impl TuiPage for TablePage<'_> {
 
         let rows = self.data.rows.iter().map(|r| {
             Row::new(r.iter().skip(self.column_idx_offset).map(|value| {
+                let display_text = render_value_for_display(value);
+                let text = match value {
+                    OwnedValue::Integer(_) | OwnedValue::Double(_) => {
+                        Text::from(display_text).alignment(HorizontalAlignment::Right)
+                    }
+                    _ => Text::from(display_text),
+                };
                 Cell::default()
-                    .content(match value {
-                        OwnedValue::Null => Text::from("NULL"),
-                        OwnedValue::Integer(i) => {
-                            Text::from(i.to_string()).alignment(HorizontalAlignment::Right)
-                        }
-                        OwnedValue::Double(f) => {
-                            Text::from(f.to_string()).alignment(HorizontalAlignment::Right)
-                        }
-                        OwnedValue::Text(s) => {
-                            Text::from(String::from_utf8_lossy(s).into_owned())
-                        }
-                        OwnedValue::Blob(_) => Text::from("[BLOB]"),
-                    })
+                    .content(text)
                     .style(match value {
                         OwnedValue::Null => Style::new().fg(self.theme.null.clone().into()),
                         OwnedValue::Integer(_) => {
@@ -468,7 +657,7 @@ impl TuiPage for TablePage<'_> {
 
         frame.render_stateful_widget(table, table_rect, &mut self.state);
 
-        // Footer message (copy confirmation, errors, etc.)
+        // Footer message (copy confirmation, errors, position indicator)
         if let Some(msg) = &self.footer_message {
             use ratatui::style::Color;
             let style = if msg.starts_with("Copied") || msg.starts_with("✓") {
@@ -485,6 +674,17 @@ impl TuiPage for TablePage<'_> {
             frame.render_widget(
                 Text::from(format!("Error: {}", error))
                     .style(Style::new().fg(Color::Red))
+                    .centered(),
+                message_rect,
+            );
+        } else if self.total_rows > 0 {
+            // Show position indicator
+            use ratatui::style::Color;
+            let current_row = self.selected_absolute_row().map(|r| r + 1).unwrap_or(0);
+            let position_text = format!("Row {} of {}", current_row, self.total_rows);
+            frame.render_widget(
+                Text::from(position_text)
+                    .style(Style::new().fg(Color::DarkGray))
                     .centered(),
                 message_rect,
             );

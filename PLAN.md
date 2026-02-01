@@ -646,3 +646,41 @@ pub trait SchemaSource {
 - Conversion to `rustyline::completion::Pair`
 - Display formatting (icons, colors)
 - LiveSchemaSource implementation (queries live SQLite database)
+
+---
+
+# TUI TablePage Performance Improvements
+
+## TODO Checklist
+
+- [x] Phase 1: Database-level pagination (LIMIT/OFFSET, COUNT(*))
+- [x] Phase 2: Windowed data loading (only ~200 rows in memory)
+- [x] Phase 3: Cell value truncation (large text/blob values)
+- [x] Phase 4: Position indicator and page navigation (PgUp/PgDn)
+
+---
+
+## Problem
+
+Current `table_page.rs` loads ALL rows into memory and creates Row/Cell widgets for every row on every render frame. This causes:
+- Excessive memory usage (1M rows = 500MB+)
+- Slow initial load (blocks UI)
+- Slow rendering (O(n) widget creation per frame)
+
+## Solution: Windowed Virtual Scrolling
+
+```
+Database: [row 0] ... [row 999,999]
+                 ↓
+Window:   [row 450] ... [row 550]  (100 rows in memory)
+                 ↓
+Visible:  [row 480] ... [row 495]  (15 rows on screen)
+```
+
+## Expected Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Memory (1M rows) | ~500MB | ~5MB |
+| Initial load | O(n) | O(1) |
+| Render work | O(n) | O(visible) |

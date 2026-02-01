@@ -168,7 +168,7 @@ impl<'a> App<'a> {
         let context_text = match &self.page {
             Page::Listing(listing) => listing.database_name.clone(),
             Page::Table(table_page) => {
-                let row_count = table_page.data.rows.len();
+                let row_count = table_page.total_rows;
                 let row_text = if row_count == 1 { "row" } else { "rows" };
                 format!("{} ({} {})", table_page.table_name, row_count, row_text)
             }

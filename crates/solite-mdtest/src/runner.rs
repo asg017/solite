@@ -40,39 +40,59 @@ impl TestResult {
     }
 }
 
-/// Run all tests in a directory
+/// Collect all markdown files recursively from a directory
+fn collect_md_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_md_files(&path, files)?;
+        } else if path.extension().map(|e| e == "md").unwrap_or(false) {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Run all tests in a directory (recursively)
 pub fn run_tests(dir: &Path) -> Result<(), MdTestError> {
     let mut all_passed = true;
     let mut total_tests = 0;
     let mut passed_tests = 0;
 
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
+    // Collect all markdown files recursively
+    let mut md_files = Vec::new();
+    collect_md_files(dir, &mut md_files)?;
+    md_files.sort(); // Consistent ordering
 
-        if path.extension().map(|e| e == "md").unwrap_or(false) {
-            let content = std::fs::read_to_string(&path)?;
-            let tests = crate::parse_markdown(&content, path.to_string_lossy().as_ref())?;
+    for path in md_files {
+        // Print file header with relative path
+        let relative_path = path.strip_prefix(dir).unwrap_or(&path);
+        println!("\n{}:", relative_path.display());
 
-            for test in tests {
-                total_tests += 1;
-                let result = run_test(&test)?;
+        let content = std::fs::read_to_string(&path)?;
+        let tests = crate::parse_markdown(&content, path.to_string_lossy().as_ref())?;
 
-                if result.passed {
-                    passed_tests += 1;
-                    println!("  ✓ {}", test.name);
-                } else {
-                    all_passed = false;
-                    println!("  ✗ {} ({}:{})", test.name, result.source_file, result.source_line);
-                    for failure in &result.failures {
-                        println!("    {}", failure);
-                    }
+        for test in tests {
+            total_tests += 1;
+            let result = run_test(&test)?;
+
+            if result.passed {
+                passed_tests += 1;
+                println!("  \x1b[32m✓\x1b[0m {} \x1b[90m({})\x1b[0m", test.name, test.assertions.len());
+            } else {
+                all_passed = false;
+                println!("  \x1b[31m✗\x1b[0m {} ({}:{})", test.name, result.source_file, result.source_line);
+                for failure in &result.failures {
+                    println!("    {}", failure);
                 }
             }
         }
     }
 
-    println!("\n{}/{} tests passed", passed_tests, total_tests);
+    println!("\n----------------------------------------");
+    println!("Results: {} passed, {} failed, {} total", passed_tests, total_tests - passed_tests, total_tests);
 
     if all_passed {
         Ok(())

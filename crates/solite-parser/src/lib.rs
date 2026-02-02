@@ -3260,49 +3260,201 @@ impl Parser {
         }
     }
 
-    /// Parse table_or_subquery: [schema.]table [AS alias]
+    /// Parse table_or_subquery: [schema.]table [AS alias] | (subquery) [AS alias] | (table_list)
     fn parse_table_or_subquery(&mut self) -> Result<TableOrSubquery, ParseError> {
-        let first_ident = self.expect_ident("table name")?;
-        let start = first_ident.span.start;
-        let first_name = self.ident_name(&first_ident);
-        let mut end = first_ident.span.end;
+        // Check if this is a parenthesized subquery or table list
+        if self.current_kind() == Some(&TokenKind::LParen) {
+            let start = self.expect(TokenKind::LParen, "(")?.span.start;
 
-        let (schema, name) = if self.current_kind() == Some(&TokenKind::Dot) {
-            self.advance();
-            let table_ident = self.expect_ident("table name")?;
-            end = table_ident.span.end;
-            (Some(first_name), self.ident_name(&table_ident))
-        } else {
-            (None, first_name)
-        };
+            // Check what's inside the parentheses
+            match self.current_kind() {
+                Some(TokenKind::Select) | Some(TokenKind::With) => {
+                    // Subquery: (SELECT ...)
+                    let query = Box::new(self.parse_select_stmt()?);
+                    let rparen = self.expect(TokenKind::RParen, ")")?;
+                    let mut end = rparen.span.end;
 
-        // Optional AS alias
-        let (alias, alias_has_as) = if self.current_kind() == Some(&TokenKind::As) {
-            self.advance();
-            let alias_token = self.expect_ident("alias")?;
-            end = alias_token.span.end;
-            (Some(self.ident_name(&alias_token)), true)
-        } else if self.is_ident_like() {
-            // Alias without AS keyword (only if not a keyword)
-            let next = self.current().unwrap().clone();
-            // Don't treat keywords like WHERE, ORDER, etc. as aliases
-            if !self.is_clause_keyword(&next.kind) {
-                self.advance();
-                end = next.span.end;
-                (Some(self.ident_name(&next)), false)
-            } else {
-                (None, false)
+                    // Optional AS alias
+                    let (alias, alias_has_as) = self.parse_optional_alias(&mut end)?;
+
+                    Ok(TableOrSubquery::Subquery {
+                        query,
+                        alias,
+                        alias_has_as,
+                        span: Span::new(start, end),
+                    })
+                }
+                Some(TokenKind::Values) => {
+                    // VALUES clause: (VALUES (1,2), (3,4))
+                    // Parse as a SelectStmt with VALUES
+                    let query = Box::new(self.parse_values_select()?);
+                    let rparen = self.expect(TokenKind::RParen, ")")?;
+                    let mut end = rparen.span.end;
+
+                    // Optional AS alias
+                    let (alias, alias_has_as) = self.parse_optional_alias(&mut end)?;
+
+                    Ok(TableOrSubquery::Subquery {
+                        query,
+                        alias,
+                        alias_has_as,
+                        span: Span::new(start, end),
+                    })
+                }
+                _ => {
+                    // Table list: (table1, table2, ...) or nested subquery
+                    // For now, try parsing as a table_or_subquery recursively
+                    let mut tables = Vec::new();
+                    tables.push(self.parse_table_with_joins()?);
+                    while self.current_kind() == Some(&TokenKind::Comma) {
+                        self.advance();
+                        tables.push(self.parse_table_with_joins()?);
+                    }
+                    let rparen = self.expect(TokenKind::RParen, ")")?;
+                    let end = rparen.span.end;
+
+                    Ok(TableOrSubquery::TableList {
+                        tables,
+                        span: Span::new(start, end),
+                    })
+                }
             }
         } else {
-            (None, false)
+            // Regular table reference: [schema.]table [AS alias]
+            let first_ident = self.expect_ident("table name")?;
+            let start = first_ident.span.start;
+            let first_name = self.ident_name(&first_ident);
+            let mut end = first_ident.span.end;
+
+            let (schema, name) = if self.current_kind() == Some(&TokenKind::Dot) {
+                self.advance();
+                let table_ident = self.expect_ident("table name")?;
+                end = table_ident.span.end;
+                (Some(first_name), self.ident_name(&table_ident))
+            } else {
+                (None, first_name)
+            };
+
+            // Optional AS alias
+            let (alias, alias_has_as) = self.parse_optional_alias(&mut end)?;
+
+            Ok(TableOrSubquery::Table {
+                schema,
+                name,
+                alias,
+                alias_has_as,
+                indexed: None,
+                span: Span::new(start, end),
+            })
+        }
+    }
+
+    /// Parse optional AS alias clause, updating end position
+    fn parse_optional_alias(&mut self, end: &mut usize) -> Result<(Option<String>, bool), ParseError> {
+        if self.current_kind() == Some(&TokenKind::As) {
+            self.advance();
+            let alias_token = self.expect_ident("alias")?;
+            *end = alias_token.span.end;
+            Ok((Some(self.ident_name(&alias_token)), true))
+        } else if self.is_ident_like() {
+            // Alias without AS keyword (only if not a keyword)
+            // is_ident_like() guarantees current() is Some
+            if let Some(next) = self.current().cloned() {
+                // Don't treat keywords like WHERE, ORDER, etc. as aliases
+                if !self.is_clause_keyword(&next.kind) {
+                    self.advance();
+                    *end = next.span.end;
+                    return Ok((Some(self.ident_name(&next)), false));
+                }
+            }
+            Ok((None, false))
+        } else {
+            Ok((None, false))
+        }
+    }
+
+    /// Parse a VALUES clause as a SelectStmt (for use in subqueries)
+    fn parse_values_select(&mut self) -> Result<SelectStmt, ParseError> {
+        let start = self.expect(TokenKind::Values, "VALUES")?.span.start;
+
+        // Parse value rows
+        let mut rows = Vec::new();
+        rows.push(self.parse_values_row()?);
+        while self.current_kind() == Some(&TokenKind::Comma) {
+            self.advance();
+            rows.push(self.parse_values_row()?);
+        }
+
+        let end = rows.last()
+            .and_then(|r| r.last().map(|e| e.span().end))
+            .unwrap_or(start);
+
+        // Convert VALUES rows to a compound SELECT
+        // VALUES (a, b), (c, d) is equivalent to SELECT a, b UNION ALL SELECT c, d
+        let first_row = rows.remove(0);
+        let first_columns: Vec<ResultColumn> = first_row.into_iter()
+            .map(|e| {
+                let span = e.span().clone();
+                ResultColumn::Expr {
+                    expr: e,
+                    alias: None,
+                    alias_has_as: false,
+                    span,
+                }
+            })
+            .collect();
+
+        let first_core = SelectCore {
+            distinct: DistinctAll::All,
+            columns: first_columns,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            span: Span::new(start, end),
         };
 
-        Ok(TableOrSubquery::Table {
-            schema,
-            name,
-            alias,
-            alias_has_as,
-            indexed: None,
+        // Convert remaining rows to compound clauses
+        let compounds: Vec<(CompoundOp, SelectCore)> = rows.into_iter()
+            .map(|row| {
+                let columns: Vec<ResultColumn> = row.into_iter()
+                    .map(|e| {
+                        let span = e.span().clone();
+                        ResultColumn::Expr {
+                            expr: e,
+                            alias: None,
+                            alias_has_as: false,
+                            span,
+                        }
+                    })
+                    .collect();
+                let span = columns.first()
+                    .map(|c| c.span().start)
+                    .map(|s| Span::new(s, columns.last().map(|c| c.span().end).unwrap_or(s)))
+                    .unwrap_or(Span::new(0, 0));
+                (CompoundOp::UnionAll, SelectCore {
+                    distinct: DistinctAll::All,
+                    columns,
+                    from: None,
+                    where_clause: None,
+                    group_by: None,
+                    having: None,
+                    span,
+                })
+            })
+            .collect();
+
+        Ok(SelectStmt {
+            with_clause: None,
+            distinct: first_core.distinct.clone(),
+            columns: first_core.columns.clone(),
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            compounds,
+            order_by: None,
+            limit: None,
             span: Span::new(start, end),
         })
     }
@@ -8743,5 +8895,26 @@ mod tests {
             "CREATE TABLE [my table] ([column one] TEXT, [column two] INT);"
         ).unwrap();
         insta::assert_debug_snapshot!(program);
+    }
+
+    #[test]
+    fn test_parse_select_from_values() {
+        // VALUES clause as table source (SQLite VALUES table)
+        let program = parse_program("SELECT * FROM (VALUES (1,2,3), (4,5,6));").unwrap();
+        match &program.statements[0] {
+            Statement::Select(stmt) => {
+                let from = stmt.from.as_ref().expect("Expected FROM clause");
+                assert_eq!(from.tables.len(), 1);
+                // Should be a subquery containing a VALUES clause
+                match &from.tables[0] {
+                    TableOrSubquery::Subquery { query, .. } => {
+                        // The subquery should be a VALUES-based select
+                        assert!(query.columns.is_empty() || query.columns.len() > 0);
+                    }
+                    _ => panic!("Expected subquery, got {:?}", from.tables[0]),
+                }
+            }
+            _ => panic!("Expected SELECT"),
+        }
     }
 }

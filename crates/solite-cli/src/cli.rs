@@ -249,7 +249,11 @@ pub struct LintArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct LspArgs {}
+pub struct LspArgs {
+    /// Path to config file
+    #[arg(long, default_value_t = true)]
+    pub stdio: bool,
+}
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {

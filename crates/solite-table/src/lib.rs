@@ -63,6 +63,8 @@ pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<Render
     })?;
 
     if column_names.is_empty() {
+        // Still need to step through the statement to execute it (e.g., CREATE TABLE)
+        while stmt.next()?.is_some() {}
         return Ok(RenderResult {
             output: String::new(),
             total_rows: 0,

@@ -3,7 +3,6 @@
 use std::io::stdout;
 use std::time::Duration;
 
-use cli_table::print_stdout;
 use crossterm::{
     execute,
     style::{Color, Print, ResetColor, SetForegroundColor},
@@ -12,9 +11,10 @@ use jiff::fmt::friendly::{FractionalUnit, SpanPrinter};
 use jiff::{Timestamp, ToSpan};
 use solite_core::sqlite::Statement;
 use solite_core::Runtime;
+use solite_table::TableConfig;
 
 use super::format::format_duration;
-use super::status::{get_statement_status, StatementStatus};
+use super::status::get_statement_status;
 
 /// Execute a SQL statement with progress tracking and output.
 pub fn handle_sql(
@@ -51,14 +51,9 @@ pub fn handle_sql(
     pb.finish_and_clear();
 
     // Display results as table
-    let table = crate::ui::table_from_statement(stmt, Some(&crate::ui::CTP_MOCHA_THEME));
-    match table {
-        Ok(Some(table)) => {
-            if let Err(e) = print_stdout(table) {
-                eprintln!("Error printing table: {}", e);
-            }
-        }
-        Ok(None) => {}
+    let config = TableConfig::terminal();
+    match solite_table::print_statement(stmt, &config) {
+        Ok(_) => {}
         Err(err) => {
             eprintln!("Error: {}", err);
         }

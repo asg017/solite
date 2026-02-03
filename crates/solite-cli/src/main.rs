@@ -2,7 +2,6 @@ mod cli;
 mod colors;
 mod commands;
 mod errors;
-mod ui;
 mod themes;
 use std::{env, path::PathBuf, process::exit};
 

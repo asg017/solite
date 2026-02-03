@@ -4,9 +4,10 @@
 //! from the command line, with support for various output formats.
 
 use solite_core::{exporter::ExportFormat, replacement_scans::replacement_scan, Runtime};
+use solite_table::TableConfig;
 use std::{
     fmt,
-    io::{stdout, Write},
+    io::{stdout, IsTerminal, Write},
     path::PathBuf,
 };
 
@@ -122,14 +123,22 @@ fn query_impl(args: QueryArgs, is_exec: bool) -> Result<(), QueryError> {
         return Ok(());
     }
 
-    // Determine output format
-    let format = determine_format(&args);
+    // If stdout is a TTY and no explicit format/output specified, use pretty table
+    let use_table = args.format.is_none() && args.output.is_none() && stdout().is_terminal();
 
-    // Write output
-    // Need to get a mutable reference for write_output
-    let mut stmt = stmt;
-    solite_core::exporter::write_output(&mut stmt, output, format)
-        .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
+    if use_table {
+        let config = TableConfig::terminal();
+        solite_table::print_statement(&stmt, &config)
+            .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
+    } else {
+        // Determine output format
+        let format = determine_format(&args);
+
+        // Write output
+        let mut stmt = stmt;
+        solite_core::exporter::write_output(&mut stmt, output, format)
+            .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
+    }
 
     Ok(())
 }

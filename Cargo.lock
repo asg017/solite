@@ -522,29 +522,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
-name = "cli-table"
-version = "0.4.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b53f9241f288a7b12c56565f04aaeaeeab6b8923d42d99255d4ca428b4d97f89"
-dependencies = [
- "cli-table-derive",
- "csv",
- "termcolor",
- "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "cli-table-derive"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e83a93253aaae7c74eb7428ce4faa6e219ba94886908048888701819f82fb94"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "4.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3753,7 +3730,6 @@ dependencies = [
  "anyhow",
  "arboard",
  "clap 4.5.41",
- "cli-table",
  "codespan-reporting",
  "color-eyre",
  "console",
@@ -3787,6 +3763,7 @@ dependencies = [
  "solite-lsp",
  "solite-parser",
  "solite-stdlib",
+ "solite-table",
  "statistical",
  "tempfile",
  "term_size",
@@ -3952,6 +3929,17 @@ dependencies = [
  "sqlite-url",
  "sqlite-vec",
  "sqlite-xsv",
+]
+
+[[package]]
+name = "solite-table"
+version = "0.0.1-alpha.24"
+dependencies = [
+ "insta",
+ "solite-core",
+ "solite-lexer",
+ "term_size",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

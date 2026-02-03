@@ -5,7 +5,6 @@ use crate::commands::repl::completer::ReplCompleter;
 use crate::commands::repl::highlighter::{ReplHighlighter, highlight_sql};
 use crate::commands::run::format_duration;
 use crate::commands::tui::launch_tui;
-use crate::ui::CTP_MOCHA_THEME;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use solite_core::dot::sh::ShellResult;
@@ -13,9 +12,9 @@ use rustyline::hint::HistoryHinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, CompletionType, Config, EditMode, Editor, Helper, Hinter, Result, Validator};
 
-use cli_table::print_stdout;
 use solite_core::dot::{DotCommand, LoadCommandSource};
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
+use solite_table::TableConfig;
 use std::borrow::Cow::{self, Borrowed, Owned};
 
 use std::cell::RefCell;
@@ -313,10 +312,10 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                 StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
                 StepResult::SqlStatement { stmt, .. } => {
                     let start = std::time::Instant::now();
-                    if let Ok(Some(table)) =
-                        crate::ui::table_from_statement(&stmt, Some(&CTP_MOCHA_THEME))
-                    {
-                        if let Err(e) = print_stdout(table) {
+                    let config = TableConfig::terminal();
+                    match solite_table::print_statement(&stmt, &config) {
+                        Ok(_) => {}
+                        Err(e) => {
                             eprintln!("✗ failed to print table: {}", e);
                         }
                     }

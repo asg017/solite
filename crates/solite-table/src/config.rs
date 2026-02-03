@@ -87,10 +87,16 @@ impl TableConfig {
     }
 
     /// Get the effective max width, auto-detecting terminal if needed.
+    /// For HTML output, returns a large value to show all columns.
     pub fn effective_width(&self) -> usize {
         match self.max_width {
             Some(w) => w,
-            None => term_size::dimensions().map(|(w, _)| w).unwrap_or(120),
+            None => match self.output_mode {
+                // HTML should show all columns - no width limit
+                OutputMode::Html => usize::MAX / 2,
+                // Terminal modes auto-detect or use default
+                _ => term_size::dimensions().map(|(w, _)| w).unwrap_or(120),
+            },
         }
     }
 

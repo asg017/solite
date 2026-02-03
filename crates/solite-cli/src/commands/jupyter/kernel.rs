@@ -8,8 +8,16 @@ use jupyter_protocol::{
     CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput, ExecuteReply,
     ExecutionCount, HelpLink, HistoryReply, InspectReply, IsCompleteReply, IsCompleteReplyStatus,
     JupyterMessage, JupyterMessageContent, KernelInfoReply, LanguageInfo, Media, MediaType,
-    ReplyStatus, Status,
+    ReplyError, ReplyStatus, Status,
 };
+
+/// Messages sent from the runtime task back to the shell handler.
+pub enum ExecutionMessage {
+    /// A display message to send to iopub.
+    Display(JupyterMessage),
+    /// An error occurred during execution.
+    Error { ename: String, evalue: String },
+}
 use runtimelib::{KernelIoPubConnection, KernelShellConnection};
 use solite_core::{Runtime, StepError, StepResult};
 use std::path::PathBuf;
@@ -24,7 +32,7 @@ use super::render::{render_statement, UiResponse};
 pub struct SoliteKernel {
     execution_count: ExecutionCount,
     iopub: KernelIoPubConnection,
-    runtime: mpsc::Sender<(String, JupyterMessage, mpsc::Sender<JupyterMessage>)>,
+    runtime: mpsc::Sender<(String, JupyterMessage, mpsc::Sender<ExecutionMessage>)>,
 }
 
 impl SoliteKernel {
@@ -45,7 +53,7 @@ impl SoliteKernel {
             runtimelib::create_kernel_iopub_connection(connection_info, &session_id).await?;
 
         let (tx, mut rx) =
-            mpsc::channel::<(String, JupyterMessage, mpsc::Sender<JupyterMessage>)>(10);
+            mpsc::channel::<(String, JupyterMessage, mpsc::Sender<ExecutionMessage>)>(10);
 
         // Spawn the runtime handler task
         tokio::spawn(async move {
@@ -55,10 +63,10 @@ impl SoliteKernel {
                 if code.starts_with("@@") {
                     let r = format!("{}\n{:?}", parent.metadata["cellId"], parent);
                     let _ = response
-                        .send(
+                        .send(ExecutionMessage::Display(
                             DisplayData::new(vec![MediaType::Plain(r)].into())
                                 .as_child_of(&parent),
-                        )
+                        ))
                         .await;
                     continue;
                 }
@@ -68,7 +76,7 @@ impl SoliteKernel {
                     code.as_str(),
                     solite_core::BlockSource::JupyerCell,
                 );
-                if let Err(e) = handle_code(&mut rt, response, &parent).await {
+                if let Err(e) = handle_code(&mut rt, &response, &parent).await {
                     eprintln!("Error handling code: {}", e);
                 }
             }
@@ -132,7 +140,11 @@ impl SoliteKernel {
             .await
     }
 
-    async fn execute(&mut self, request: &JupyterMessage) -> Result<()> {
+    /// Execute code and return any error that occurred.
+    async fn execute(
+        &mut self,
+        request: &JupyterMessage,
+    ) -> Result<Option<(String, String)>> {
         let code = match &request.content {
             JupyterMessageContent::ExecuteRequest(req) => req.code.clone(),
             _ => return Err(anyhow::anyhow!("Invalid message type for execution")),
@@ -149,12 +161,32 @@ impl SoliteKernel {
         });
 
         let mut rx = handle.await?;
+        let mut error_info: Option<(String, String)> = None;
+
         while let Some(msg) = rx.recv().await {
-            self.iopub.send(msg).await?;
+            match msg {
+                ExecutionMessage::Display(jupyter_msg) => {
+                    self.iopub.send(jupyter_msg).await?;
+                }
+                ExecutionMessage::Error { ename, evalue } => {
+                    // Send error output to iopub
+                    self.iopub
+                        .send(
+                            ErrorOutput {
+                                ename: ename.clone(),
+                                evalue: evalue.clone(),
+                                traceback: Default::default(),
+                            }
+                            .as_child_of(request),
+                        )
+                        .await?;
+                    error_info = Some((ename, evalue));
+                }
+            }
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        Ok(())
+        Ok(error_info)
     }
 
     /// Handle messages on the shell connection.
@@ -187,20 +219,42 @@ impl SoliteKernel {
             }
 
             JupyterMessageContent::ExecuteRequest(_) => {
+                let execution_count = self.one_up_execution_count();
+
+                // Execute code first, then send reply with appropriate status
+                let (status, error) = match self.execute(parent).await {
+                    Ok(None) => (ReplyStatus::Ok, None),
+                    Ok(Some((ename, evalue))) => (
+                        ReplyStatus::Error,
+                        Some(Box::new(ReplyError {
+                            ename,
+                            evalue,
+                            traceback: Default::default(),
+                        })),
+                    ),
+                    Err(err) => {
+                        self.send_error("ExecutionError", &err.to_string(), parent)
+                            .await?;
+                        (
+                            ReplyStatus::Error,
+                            Some(Box::new(ReplyError {
+                                ename: "ExecutionError".to_string(),
+                                evalue: err.to_string(),
+                                traceback: Default::default(),
+                            })),
+                        )
+                    }
+                };
+
                 let reply = ExecuteReply {
-                    status: ReplyStatus::Ok,
-                    execution_count: self.one_up_execution_count(),
+                    status,
+                    execution_count,
                     user_expressions: Default::default(),
                     payload: Default::default(),
-                    error: None,
+                    error,
                 }
                 .as_child_of(parent);
                 shell.send(reply).await?;
-
-                if let Err(err) = self.execute(parent).await {
-                    self.send_error("ExecutionError", &err.to_string(), parent)
-                        .await?;
-                }
             }
 
             JupyterMessageContent::HistoryRequest(_) => {
@@ -282,7 +336,7 @@ impl SoliteKernel {
 /// Handle code execution within a cell.
 async fn handle_code(
     runtime: &mut Runtime,
-    response: mpsc::Sender<JupyterMessage>,
+    response: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
 ) -> Result<()> {
     loop {
@@ -304,11 +358,14 @@ async fn handle_code(
                             .await?;
                     }
                     Err(err) => {
-                        response.send_plain(format!("{:?}", err), parent).await?;
+                        response
+                            .send_error("RenderError", &format!("{:?}", err))
+                            .await?;
+                        return Ok(());
                     }
                 },
                 StepResult::DotCommand(cmd) => {
-                    handle_dot_command(cmd, runtime, &response, parent).await?;
+                    handle_dot_command(cmd, runtime, response, parent).await?;
                 }
             },
             None => {
@@ -327,10 +384,14 @@ async fn handle_code(
                         &error,
                         Some(offset),
                     );
-                    response.send_plain(error_string, parent).await?;
+                    response.send_error("SQLError", &error_string).await?;
+                    return Ok(());
                 }
                 StepError::ParseDot(error) => {
-                    response.send_plain(error.to_string(), parent).await?;
+                    response
+                        .send_error("DotCommandError", &error.to_string())
+                        .await?;
+                    return Ok(());
                 }
             },
         }

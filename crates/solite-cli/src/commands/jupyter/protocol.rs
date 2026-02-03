@@ -7,6 +7,8 @@ use anyhow::Result;
 use jupyter_protocol::{ClearOutput, DisplayData, JupyterMessage, MediaType, StreamContent};
 use tokio::sync::mpsc;
 
+use super::kernel::ExecutionMessage;
+
 /// Trait for sending Jupyter protocol messages with consistent error handling.
 ///
 /// Implementations of this trait provide a unified interface for sending
@@ -22,6 +24,9 @@ pub trait JupyterSender {
 
     /// Send a clear output message to the frontend.
     async fn send_clear(&self, wait: bool, parent: &JupyterMessage) -> Result<()>;
+
+    /// Send an execution error.
+    async fn send_error(&self, ename: &str, evalue: &str) -> Result<()>;
 
     /// Send plain text display data.
     async fn send_plain(&self, text: impl Into<String>, parent: &JupyterMessage) -> Result<()> {
@@ -55,26 +60,37 @@ pub trait JupyterSender {
     }
 }
 
-/// Implementation of `JupyterSender` for `mpsc::Sender<JupyterMessage>`.
+/// Implementation of `JupyterSender` for `mpsc::Sender<ExecutionMessage>`.
 ///
 /// This allows using the standard tokio mpsc channel as a JupyterSender,
 /// which is useful for the async message handling in the kernel.
-impl JupyterSender for mpsc::Sender<JupyterMessage> {
+impl JupyterSender for mpsc::Sender<ExecutionMessage> {
     async fn send_display(&self, data: DisplayData, parent: &JupyterMessage) -> Result<()> {
-        self.send(data.as_child_of(parent))
+        self.send(ExecutionMessage::Display(data.as_child_of(parent)))
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send display data: {}", e))
     }
 
     async fn send_stream(&self, content: StreamContent, parent: &JupyterMessage) -> Result<()> {
-        self.send(content.as_child_of(parent))
+        self.send(ExecutionMessage::Display(content.as_child_of(parent)))
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send stream content: {}", e))
     }
 
     async fn send_clear(&self, wait: bool, parent: &JupyterMessage) -> Result<()> {
-        self.send(ClearOutput { wait }.as_child_of(parent))
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to send clear output: {}", e))
+        self.send(ExecutionMessage::Display(
+            ClearOutput { wait }.as_child_of(parent),
+        ))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to send clear output: {}", e))
+    }
+
+    async fn send_error(&self, ename: &str, evalue: &str) -> Result<()> {
+        self.send(ExecutionMessage::Error {
+            ename: ename.to_string(),
+            evalue: evalue.to_string(),
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to send error: {}", e))
     }
 }

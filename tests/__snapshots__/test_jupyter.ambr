@@ -4,83 +4,84 @@
 # ---
 # name: test_hello.1
   '''
-  <html>
-   <div>
-    <style>
-  
-    td {
-      text-align: right;
-    }
-    .solite-json-overflow {
-      font-size: 0;
-      color: transparent;
-    }
-    .solite-json-overflow::before {
-      content: "...";
-      font-size: 1rem;
-      color: #666;
-    }
-    .solite-json-overflow::before::selection {
-      color: transparent;
-      background: transparent;
-    }
-  
-    </style>
-    <table>
-     <thead>
-      <tr style="text-align: center;">
-       <th title=" ">
-  1 + 1
-       </th>
-      </tr>
-     </thead>
-     <tbody>
-      <tr>
-       <td style="font-family: monospace">
-  2
-       </td>
-      </tr>
-     </tbody>
-    </table>
-    <div>
-  1 column × 1 row
-    </div>
-   </div>
-  </html>
+  <style>
+  .solite-table {
+      border-collapse: collapse;
+      font-family: monospace;
+      font-size: 14px;
+  }
+  .solite-table th, .solite-table td {
+      border: 1px solid #6c7086;
+      padding: 4px 8px;
+      text-align: left;
+  }
+  .solite-table th {
+      background-color: #313244;
+      color: #cdd6f4;
+      font-weight: bold;
+  }
+  .solite-table tr:nth-child(even) {
+      background-color: #1e1e2e;
+  }
+  .solite-table tr:nth-child(odd) {
+      background-color: #181825;
+  }
+  .solite-table .ellipsis-row {
+      background-color: #45475a;
+      text-align: center;
+      color: #a6adc8;
+      font-style: italic;
+  }
+  .solite-table .ellipsis-col {
+      background-color: #45475a;
+      text-align: center;
+      color: #a6adc8;
+  }
+  .solite-footer {
+      color: #a6adc8;
+      font-size: 12px;
+      margin-top: 4px;
+  }
+  </style>
+  <table class="solite-table">
+  <thead><tr><th>1 + 1</th></tr></thead>
+  <tbody>
+  <tr><td style="text-align: right;"><span style="color: #FAB387; font-family: monospace;">2</span></td></tr>
+  </tbody>
+  </table>
+  <div class="solite-footer">1 column × 1 row</div>
   
   '''
 # ---
 # name: test_hello[error contents: incomplete]
   dict({
-    'data': dict({
-      'text/plain': '''
-        error[1]: SQL logic error
-          ┌─ <anonymous>:1:1
-          │
-        1 │ select 1 + 
-          │ ^ incomplete input
-        
+    'ename': 'SQLError',
+    'evalue': '''
+      error[1]: SQL logic error
+        ┌─ <anonymous>:1:1
+        │
+      1 │ select 1 + 
+        │ ^ incomplete input
+      
   
-      ''',
-    }),
-    'metadata': dict({
-    }),
+    ''',
+    'traceback': list([
+    ]),
   })
 # ---
 # name: test_hello[error contents: wrong num args]
   dict({
-    'data': dict({
-      'text/plain': '''
-        error[1]: SQL logic error
-          ┌─ <anonymous>:1:8
-          │
-        1 │ select substr();
-          │        ^^^^^^ wrong number of arguments to function substr()
-        
+    'ename': 'SQLError',
+    'evalue': '''
+      error[1]: SQL logic error
+        ┌─ <anonymous>:1:8
+        │
+      1 │ select substr();
+        │        ^^^^^^ wrong number of arguments to function substr()
+      
   
-      ''',
-    }),
-    'metadata': dict({
-    }),
+    ''',
+    'traceback': list([
+    ]),
   })
 # ---

@@ -4,7 +4,7 @@
 //! kernel code into dedicated handler functions.
 
 use anyhow::Result;
-use jupyter_protocol::{ClearOutput, DisplayData, JupyterMessage, MediaType};
+use jupyter_protocol::{DisplayData, JupyterMessage, MediaType};
 use solite_core::{
     dot::{sh::ShellResult, DotCommand, LoadCommandSource},
     Runtime,
@@ -12,6 +12,7 @@ use solite_core::{
 use std::fmt::Write;
 use tokio::sync::mpsc;
 
+use super::kernel::ExecutionMessage;
 use super::protocol::JupyterSender;
 use super::render::render_sql_html;
 
@@ -19,7 +20,7 @@ use super::render::render_sql_html;
 pub async fn handle_dot_command(
     cmd: DotCommand,
     runtime: &mut Runtime,
-    sender: &mpsc::Sender<JupyterMessage>,
+    sender: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
 ) -> Result<()> {
     match cmd {
@@ -239,12 +240,8 @@ pub async fn handle_dot_command(
                 let sender = sender_clone.clone();
                 let parent = parent_clone.clone();
                 tokio::spawn(async move {
-                    let _ = sender
-                        .send(ClearOutput { wait: false }.as_child_of(&parent))
-                        .await;
-                    let _ = sender
-                        .send(DisplayData::from(MediaType::Plain(msg)).as_child_of(&parent))
-                        .await;
+                    let _ = sender.send_clear(false, &parent).await;
+                    let _ = sender.send_plain(msg, &parent).await;
                 });
             };
 
@@ -254,7 +251,7 @@ pub async fn handle_dot_command(
                     sender.send_plain(result.report(), parent).await?;
                 }
                 Err(_) => {
-                    sender.send_plain("Benchmark failed", parent).await?;
+                    sender.send_error("BenchmarkError", "Benchmark failed").await?;
                 }
             }
         }

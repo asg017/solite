@@ -76,13 +76,18 @@ impl TableConfig {
     }
 
     /// Create a config for HTML output (Jupyter).
+    /// Shows all rows and full cell contents without truncation.
     pub fn html() -> Self {
         Self {
             output_mode: OutputMode::Html,
             max_width: None,
+            // Show all rows - use large value that won't cause allocation issues
+            head_rows: 1_000_000,
+            tail_rows: 0,
+            // Show full cell contents without truncation
+            max_cell_width: 100_000,
             theme: Some(Theme::catppuccin_mocha()),
             show_footer: true,
-            ..Self::default()
         }
     }
 

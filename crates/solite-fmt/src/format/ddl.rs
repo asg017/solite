@@ -50,17 +50,36 @@ impl FormatNode for CreateTableStmt {
             p.indent();
 
             // Column definitions
+            let total_items = self.columns.len() + self.table_constraints.len();
             for (i, col) in self.columns.iter().enumerate() {
                 if i > 0 {
-                    p.list_separator(true);
+                    p.newline();
                 }
                 col.format(p);
+
+                let is_last = i == total_items - 1;
+                if !is_last {
+                    p.write(",");
+                    // Emit trailing comment (attached to the comma)
+                    p.emit_trailing_comments_in_range(col.span.end, col.span.end + 2);
+                } else {
+                    // Last item: comment attached to column span
+                    p.emit_trailing_comments(col.span.end);
+                }
             }
 
             // Table constraints
-            for constraint in &self.table_constraints {
-                p.list_separator(true);
+            for (i, constraint) in self.table_constraints.iter().enumerate() {
+                p.newline();
                 constraint.format(p);
+
+                let is_last = i == self.table_constraints.len() - 1;
+                if !is_last {
+                    p.write(",");
+                    p.emit_trailing_comments_in_range(constraint.span().end, constraint.span().end + 2);
+                } else {
+                    p.emit_trailing_comments(constraint.span().end);
+                }
             }
 
             p.dedent();
@@ -99,6 +118,9 @@ impl FormatNode for ColumnDef {
             p.space();
             constraint.format(p);
         }
+
+        // Note: trailing comments are handled by the parent (CreateTableStmt)
+        // because they come after the comma, not before it.
     }
 }
 

@@ -72,6 +72,19 @@ static INLINE_ERROR_REGEX: Lazy<Regex> = Lazy::new(|| {
 static INLINE_OK_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"--\s*ok\s*$").expect("Invalid inline ok regex"));
 
+// Regex for inline inlay hint assertions: -- inlay: "column_name"
+static INLINE_INLAY_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"--\s*inlay:\s*"([^"]*)""#).expect("Invalid inlay regex"));
+
+/// An inline inlay hint assertion from `-- inlay:` comments
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineInlayHint {
+    /// Line number (0-indexed)
+    pub line: u32,
+    /// Expected hint label
+    pub label: String,
+}
+
 /// Parse assertions from markdown text (after the SQL code block)
 pub fn parse_assertions(text: &str) -> Vec<Assertion> {
     let mut assertions = Vec::new();
@@ -214,6 +227,24 @@ pub fn parse_inline_diagnostics(sql: &str) -> Vec<InlineDiagnostic> {
     }
 
     diagnostics
+}
+
+/// Parse inline inlay hint assertions from SQL
+pub fn parse_inline_inlay_hints(sql: &str) -> Vec<InlineInlayHint> {
+    let mut hints = Vec::new();
+
+    for (line_num, line) in sql.lines().enumerate() {
+        if let Some(caps) = INLINE_INLAY_REGEX.captures(line) {
+            if let Some(m) = caps.get(1) {
+                hints.push(InlineInlayHint {
+                    line: line_num as u32,
+                    label: m.as_str().to_string(),
+                });
+            }
+        }
+    }
+
+    hints
 }
 
 #[cfg(test)]

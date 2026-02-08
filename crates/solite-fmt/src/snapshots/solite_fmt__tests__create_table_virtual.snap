@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create virtual table docs using fts5(title, content, tokenize='porter')
+
+-- Output:
+create virtual table docs using fts5(title, content, tokenize = 'porter');

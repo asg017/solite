@@ -37,6 +37,16 @@ pub enum TestFailure {
 
     /// Unexpected diagnostic found
     UnexpectedDiagnostic { line: u32, message: String },
+
+    /// Expected inlay hint not found
+    InlayHintMissing { line: u32, expected: String },
+
+    /// Inlay hint has wrong label
+    InlayHintMismatch {
+        line: u32,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl fmt::Display for TestFailure {
@@ -106,6 +116,29 @@ impl fmt::Display for TestFailure {
                     "Unexpected diagnostic on line {}: {}",
                     line + 1,
                     message
+                )
+            }
+
+            TestFailure::InlayHintMissing { line, expected } => {
+                write!(
+                    f,
+                    "Expected inlay hint \"{}\" not found on line {}",
+                    expected,
+                    line + 1
+                )
+            }
+
+            TestFailure::InlayHintMismatch {
+                line,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "Inlay hint mismatch on line {}:\n  Expected: \"{}\"\n  Got: \"{}\"",
+                    line + 1,
+                    expected,
+                    actual
                 )
             }
         }

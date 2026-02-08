@@ -1,0 +1,38 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- CREATE TABLE IF NOT EXISTS queue (
+--     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+--     item_id         TEXT NOT NULL,
+--     status          TEXT NOT NULL DEFAULT 'pending',
+--     priority        INTEGER DEFAULT 0,
+--     attempts        INTEGER DEFAULT 0,
+--     max_attempts    INTEGER DEFAULT 5,
+--     lease_until     INTEGER,
+--     leased_by       TEXT,
+--     created_at      INTEGER NOT NULL,
+--     available_at    INTEGER NOT NULL,
+--     completed_at    INTEGER,
+--     failed_at       INTEGER,
+--     last_error      TEXT
+-- )
+
+-- Output:
+create table if not exists queue(
+  id INTEGER primary key autoincrement,
+  item_id TEXT not null,
+  status TEXT not null default 'pending',
+  priority INTEGER default 0,
+  attempts INTEGER default 0,
+  max_attempts INTEGER default 5,
+  lease_until INTEGER,
+  leased_by TEXT,
+  created_at INTEGER not null,
+  available_at INTEGER not null,
+  completed_at INTEGER,
+  failed_at INTEGER,
+  last_error TEXT
+);

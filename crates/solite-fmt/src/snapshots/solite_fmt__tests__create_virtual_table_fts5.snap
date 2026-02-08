@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create virtual table search using fts5(title, body, content='posts', content_rowid='id')
+
+-- Output:
+create virtual table search using fts5(title, body, content = 'posts', content_rowid = 'id');

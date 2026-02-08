@@ -4,13 +4,7 @@ expression: "snapshot(sql, &config)"
 snapshot_kind: text
 ---
 -- Input:
--- begin; insert into t values (1); commit
+-- create index idx_composite on t(a asc, b desc, c)
 
 -- Output:
-begin;
-
-insert into t
-values
-  (1);
-
-commit;
+create index idx_composite on t(a asc, b desc, c);

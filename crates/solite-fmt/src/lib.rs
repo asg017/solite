@@ -84,15 +84,9 @@ pub fn check_formatted(source: &str, config: &FormatConfig) -> Result<bool, Form
 pub fn format_document(source: &str, config: &FormatConfig) -> Result<String, FormatError> {
     let result = parse_dot_commands(source);
 
-    // Check if we have dot command lines (regions don't cover full source)
-    let has_dot_command_lines = result.sql_regions.len() != 1
-        || result
-            .sql_regions
-            .first()
-            .is_none_or(|r| r.start != 0 || r.end != source.len());
-
-    if !has_dot_command_lines {
-        // No dot commands, format as plain SQL
+    // If there are no dot-prefixed lines, format as plain SQL
+    // (blank lines may split into multiple regions, but that's fine for pure SQL)
+    if !result.has_dot_lines {
         return format_sql(source, config);
     }
 

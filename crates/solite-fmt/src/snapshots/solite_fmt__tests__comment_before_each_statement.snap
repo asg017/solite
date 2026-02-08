@@ -1,5 +1,5 @@
 ---
-source: crates/solite_fmt/src/tests.rs
+source: crates/solite-fmt/src/tests.rs
 expression: "snapshot(sql, &config)"
 snapshot_kind: text
 ---
@@ -14,7 +14,9 @@ snapshot_kind: text
 -- Output:
 -- first query
 select a from t;
+
 -- second query
 select b from u;
+
 -- third query
 select c from v;

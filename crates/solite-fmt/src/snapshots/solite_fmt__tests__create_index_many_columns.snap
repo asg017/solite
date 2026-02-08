@@ -4,13 +4,7 @@ expression: "snapshot(sql, &config)"
 snapshot_kind: text
 ---
 -- Input:
--- begin; insert into t values (1); commit
+-- create index idx_many on t(a, b, c, d, e)
 
 -- Output:
-begin;
-
-insert into t
-values
-  (1);
-
-commit;
+create index idx_many on t(a, b, c, d, e);

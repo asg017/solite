@@ -29,6 +29,8 @@ pub struct SqlRegion {
 pub struct ParseResult {
     pub dot_commands: Vec<DotCommand>,
     pub sql_regions: Vec<SqlRegion>,
+    /// Whether any lines starting with '.' were encountered (recognized or not)
+    pub has_dot_lines: bool,
 }
 
 /// Pre-process source, extracting dot commands and SQL regions.
@@ -51,12 +53,16 @@ pub fn parse_dot_commands(source: &str) -> ParseResult {
     let mut sql_regions = Vec::new();
     let mut current_sql_start: Option<usize> = None;
     let mut byte_offset = 0;
+    let mut has_dot_lines = false;
 
     for line in source.lines() {
         let line_start = byte_offset;
         let line_end = byte_offset + line.len();
 
         if let Some(stripped) = line.strip_prefix('.') {
+            // Track that we saw a dot-prefixed line
+            has_dot_lines = true;
+
             // Finish any current SQL region before the dot command
             if let Some(start) = current_sql_start.take() {
                 // The SQL region ends at the start of this line
@@ -117,6 +123,7 @@ pub fn parse_dot_commands(source: &str) -> ParseResult {
     ParseResult {
         dot_commands,
         sql_regions,
+        has_dot_lines,
     }
 }
 

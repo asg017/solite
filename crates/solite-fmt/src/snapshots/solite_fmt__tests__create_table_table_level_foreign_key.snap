@@ -1,0 +1,16 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table orders (id integer, user_id integer, product_id integer, foreign key (user_id) references users(id) on delete cascade, foreign key (product_id) references products(id))
+
+-- Output:
+create table orders(
+  id integer,
+  user_id integer,
+  product_id integer,
+  foreign key(user_id) references users(id) on delete cascade,
+  foreign key(product_id) references products(id)
+);

@@ -1,0 +1,20 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- CREATE TABLE queue (
+--     id INTEGER PRIMARY KEY AUTOINCREMENT, -- your payload ID
+--     status TEXT NOT NULL DEFAULT 'pending',
+--     lease_until INTEGER, -- unix epoch seconds
+--     leased_by TEXT -- worker ID
+-- )
+
+-- Output:
+create table queue(
+  id INTEGER primary key autoincrement, -- your payload ID
+  status TEXT not null default 'pending',
+  lease_until INTEGER, -- unix epoch seconds
+  leased_by TEXT -- worker ID
+);

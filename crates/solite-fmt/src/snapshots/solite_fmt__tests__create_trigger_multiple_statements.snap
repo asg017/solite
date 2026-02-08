@@ -1,0 +1,20 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create trigger tr_cascade after delete on users begin delete from orders where user_id = old.id; delete from sessions where user_id = old.id; insert into deleted_users values (old.id, datetime('now')); end
+
+-- Output:
+create trigger tr_cascade
+after delete on users
+begin
+  delete from orders
+  where user_id = old.id;
+  delete from sessions
+  where user_id = old.id;
+  insert into deleted_users
+  values
+    (old.id, datetime('now'));
+end;

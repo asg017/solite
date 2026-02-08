@@ -1,0 +1,12 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create index idx_active_users on users(email) where status = 'active' and deleted_at is null
+
+-- Output:
+create index idx_active_users on users(email)
+where status = 'active'
+  and deleted_at is null;

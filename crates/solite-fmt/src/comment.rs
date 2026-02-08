@@ -116,6 +116,17 @@ impl CommentMap {
         self.trailing.get(&span_end)
     }
 
+    /// Get trailing comments within a range of positions.
+    /// Useful when we need to catch comments attached to punctuation (like commas)
+    /// that follows an AST node.
+    pub fn get_trailing_in_range(&self, start: usize, end: usize) -> Vec<&Comment> {
+        self.trailing
+            .iter()
+            .filter(|(&pos, _)| pos >= start && pos <= end)
+            .flat_map(|(_, comments)| comments.iter())
+            .collect()
+    }
+
     /// Check if a byte offset is inside any comment
     pub fn is_in_comment(&self, offset: usize) -> bool {
         self.all_comments

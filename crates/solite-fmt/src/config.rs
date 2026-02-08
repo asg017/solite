@@ -146,7 +146,7 @@ impl Default for FormatConfig {
             line_width: 80,
             comma_position: CommaPosition::Trailing,
             logical_operator_position: LogicalOperatorPosition::Before,
-            statement_separator_lines: 1,
+            statement_separator_lines: 2,
         }
     }
 }

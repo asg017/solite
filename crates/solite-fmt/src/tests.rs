@@ -1136,3 +1136,211 @@ fn comment_before_insert() {
     let config = FormatConfig::default();
     assert_snapshot!(snapshot(sql, &config));
 }
+
+// =============================================================================
+// DDL - CREATE TABLE (comprehensive tests)
+// =============================================================================
+
+#[test]
+fn create_table_queue_pattern() {
+    let sql = "CREATE TABLE IF NOT EXISTS queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id         TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    priority        INTEGER DEFAULT 0,
+    attempts        INTEGER DEFAULT 0,
+    max_attempts    INTEGER DEFAULT 5,
+    lease_until     INTEGER,
+    leased_by       TEXT,
+    created_at      INTEGER NOT NULL,
+    available_at    INTEGER NOT NULL,
+    completed_at    INTEGER,
+    failed_at       INTEGER,
+    last_error      TEXT
+)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_with_inline_comments() {
+    let sql = "CREATE TABLE queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, -- your payload ID
+    status TEXT NOT NULL DEFAULT 'pending',
+    lease_until INTEGER, -- unix epoch seconds
+    leased_by TEXT -- worker ID
+)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_autoincrement() {
+    let sql = "create table t (id integer primary key autoincrement, name text)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_multiple_defaults() {
+    let sql = "create table t (a integer default 0, b text default 'unknown', c real default 0.0, d integer default null)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_complex_defaults() {
+    let sql = "create table t (created_at integer default (strftime('%s', 'now')), updated_at text default (datetime('now')))";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_collate() {
+    let sql = "create table t (name text collate nocase, description text collate binary)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_on_conflict() {
+    let sql = "create table t (id integer primary key on conflict replace, name text unique on conflict ignore)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_foreign_key_actions() {
+    let sql = "create table orders (id integer primary key, user_id integer references users(id) on delete cascade on update set null)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_table_level_foreign_key() {
+    let sql = "create table orders (id integer, user_id integer, product_id integer, foreign key (user_id) references users(id) on delete cascade, foreign key (product_id) references products(id))";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_virtual() {
+    let sql = "create virtual table docs using fts5(title, content, tokenize='porter')";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_strict_without_rowid() {
+    let sql = "create table t (a text primary key, b integer not null) strict, without rowid";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+// =============================================================================
+// DDL - CREATE INDEX (comprehensive tests)
+// =============================================================================
+
+#[test]
+fn create_index_many_columns() {
+    let sql = "create index idx_many on t(a, b, c, d, e)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_index_collate() {
+    let sql = "create index idx_name_nocase on t(name collate nocase)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_index_multiple_with_order() {
+    let sql = "create index idx_composite on t(a asc, b desc, c)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_index_partial_complex() {
+    let sql = "create index idx_active_users on users(email) where status = 'active' and deleted_at is null";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+// =============================================================================
+// DDL - CREATE TRIGGER (comprehensive tests)
+// =============================================================================
+
+#[test]
+fn create_trigger_if_not_exists() {
+    let sql = "create trigger if not exists tr_audit after insert on users begin insert into audit_log values (new.id, 'created'); end";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_trigger_update_of_columns() {
+    let sql = "create trigger tr_update after update of name, email on users begin update users set updated_at = datetime('now') where id = new.id; end";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_trigger_instead_of() {
+    let sql = "create trigger tr_view instead of insert on user_view begin insert into users (name) values (new.name); end";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_trigger_multiple_statements() {
+    let sql = "create trigger tr_cascade after delete on users begin delete from orders where user_id = old.id; delete from sessions where user_id = old.id; insert into deleted_users values (old.id, datetime('now')); end";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_trigger_temp() {
+    let sql = "create temp trigger tr_temp before insert on t begin select raise(abort, 'not allowed'); end";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+// =============================================================================
+// DDL - CREATE VIRTUAL TABLE
+// =============================================================================
+
+#[test]
+fn create_virtual_table_fts5() {
+    let sql = "create virtual table search using fts5(title, body, content='posts', content_rowid='id')";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_virtual_table_rtree() {
+    let sql = "create virtual table locations using rtree(id, minX, maxX, minY, maxY)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+// =============================================================================
+// Comments with blank lines
+// =============================================================================
+
+#[test]
+fn comment_blank_line_then_select() {
+    let sql = "-- a comment\n\nselect * from queue2;";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn multiple_statements_with_comments_and_blank_lines() {
+    let sql = "-- asdf\nselect 1 + 2;\n\n-- zxcv\nselect 3 + 4;";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+

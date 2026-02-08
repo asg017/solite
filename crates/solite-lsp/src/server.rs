@@ -301,6 +301,8 @@ pub(crate) struct Backend {
     lint_results: RwLock<HashMap<Url, Vec<LintResult>>>,
     /// External schemas from .open commands per document (regular files)
     open_schemas: RwLock<HashMap<Url, Schema>>,
+    /// Last edit position per document (byte offset) for contextual inlay hints
+    last_edit_offset: RwLock<HashMap<Url, usize>>,
 }
 
 impl Backend {
@@ -314,6 +316,7 @@ impl Backend {
             notebook_open_schemas: RwLock::new(HashMap::new()),
             lint_results: RwLock::new(HashMap::new()),
             open_schemas: RwLock::new(HashMap::new()),
+            last_edit_offset: RwLock::new(HashMap::new()),
         }
     }
 
@@ -1232,6 +1235,7 @@ impl LanguageServer for Backend {
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -1258,7 +1262,25 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         if let Some(change) = params.content_changes.into_iter().next() {
-            self.on_change(params.text_document.uri, change.text).await;
+            let uri = params.text_document.uri.clone();
+
+            // Track edit position by finding first difference from old text
+            let edit_offset = {
+                let documents = self.documents.read().expect("documents lock poisoned");
+                if let Some(old_text) = documents.get(&uri) {
+                    find_first_difference(old_text, &change.text)
+                } else {
+                    0
+                }
+            };
+
+            // Store the edit position
+            self.last_edit_offset
+                .write()
+                .expect("last_edit_offset lock poisoned")
+                .insert(uri.clone(), edit_offset);
+
+            self.on_change(uri, change.text).await;
         }
     }
 
@@ -1849,6 +1871,61 @@ impl LanguageServer for Backend {
             range: span_to_range(&text, &def_span),
         })))
     }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+
+        // Get document text
+        let text = {
+            let documents = self.documents.read().expect("documents lock poisoned");
+            documents.get(&uri).cloned()
+        };
+
+        let Some(text) = text else {
+            return Ok(Some(vec![]));
+        };
+
+        // Get last edit position for contextual hints
+        let edit_offset = {
+            let offsets = self.last_edit_offset.read().expect("last_edit_offset lock poisoned");
+            offsets.get(&uri).copied()
+        };
+
+        // Use token-based approach for fault tolerance (works with incomplete SQL)
+        // Only show hints for the INSERT statement being edited
+        let hint_infos = crate::inlay_hints::get_inlay_hints_from_tokens_filtered(&text, edit_offset);
+
+        // Convert to LSP InlayHint (offsets are already in original text coordinates)
+        let hints: Vec<InlayHint> = hint_infos
+            .into_iter()
+            .map(|info| {
+                let (line, character) = offset_to_position(&text, info.position);
+                InlayHint {
+                    position: Position { line, character },
+                    label: InlayHintLabel::String(info.label),
+                    kind: Some(InlayHintKind::PARAMETER),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: Some(true), // Space after hint: "[col] value"
+                    data: None,
+                }
+            })
+            .collect();
+
+        Ok(Some(hints))
+    }
+}
+
+/// Find the byte offset of the first difference between two strings
+fn find_first_difference(old: &str, new: &str) -> usize {
+    old.bytes()
+        .zip(new.bytes())
+        .position(|(a, b)| a != b)
+        .unwrap_or(old.len().min(new.len()))
 }
 
 /// Run the LSP server on stdin/stdout.

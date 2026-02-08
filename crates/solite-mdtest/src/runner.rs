@@ -2,7 +2,7 @@
 //!
 //! Runs parsed tests and verifies assertions.
 
-use crate::assertions::Assertion;
+use crate::assertions::{parse_inline_inlay_hints, Assertion};
 use crate::markers::{Marker, MarkerKind};
 use crate::parser::{MdTest, TestFile};
 use crate::reporter::TestFailure;
@@ -10,8 +10,9 @@ use crate::MdTestError;
 use solite_analyzer::{build_schema, Schema};
 use solite_lsp::completions::get_completions_for_context;
 use solite_lsp::context::detect_context;
+use solite_lsp::inlay_hints::get_inlay_hints;
 use solite_parser::parse_program;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Result of running a test
@@ -179,6 +180,9 @@ pub fn run_test(test: &MdTest) -> Result<TestResult, MdTestError> {
     for file in &test.files {
         check_inline_diagnostics(file, &mut failures);
     }
+
+    // Check inline inlay hints
+    check_inlay_hints(&combined_sql, &mut failures);
 
     Ok(TestResult {
         name: test.name.clone(),
@@ -454,6 +458,61 @@ fn check_inline_diagnostics(file: &TestFile, failures: &mut Vec<TestFailure>) {
             }
         }
     }
+}
+
+/// Check inlay hint assertions in the SQL
+fn check_inlay_hints(sql: &str, failures: &mut Vec<TestFailure>) {
+    let expected_hints = parse_inline_inlay_hints(sql);
+    if expected_hints.is_empty() {
+        return; // No inlay assertions in this test
+    }
+
+    // Parse and get actual hints
+    let program = match parse_program(sql) {
+        Ok(p) => p,
+        Err(_) => return, // Can't check hints if we can't parse
+    };
+
+    let actual_hints = get_inlay_hints(&program);
+
+    // Convert actual hints to a map by line number
+    // Multiple hints can be on the same line
+    let actual_by_line: HashMap<u32, Vec<String>> = {
+        let mut map: HashMap<u32, Vec<String>> = HashMap::new();
+        for hint in &actual_hints {
+            let line = offset_to_line(sql, hint.position);
+            map.entry(line).or_default().push(hint.label.clone());
+        }
+        map
+    };
+
+    // Check each expected hint
+    for expected in &expected_hints {
+        let actual_labels = actual_by_line.get(&expected.line);
+        match actual_labels {
+            Some(labels) if labels.contains(&expected.label) => {
+                // Match!
+            }
+            Some(labels) => {
+                failures.push(TestFailure::InlayHintMismatch {
+                    line: expected.line,
+                    expected: expected.label.clone(),
+                    actual: labels.join(", "),
+                });
+            }
+            None => {
+                failures.push(TestFailure::InlayHintMissing {
+                    line: expected.line,
+                    expected: expected.label.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// Convert byte offset to line number (0-indexed)
+fn offset_to_line(text: &str, offset: usize) -> u32 {
+    text[..offset.min(text.len())].matches('\n').count() as u32
 }
 
 #[cfg(test)]

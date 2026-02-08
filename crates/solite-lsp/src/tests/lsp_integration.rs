@@ -433,3 +433,93 @@ SELECT * FROM students;
 
     client.shutdown().await;
 }
+
+#[tokio::test]
+async fn test_formatting() {
+    let mut client = spawn_server().await;
+
+    client.initialize().await;
+    client.initialized().await;
+
+    // Open a document with unformatted SQL
+    let sql = "select a,b,c from t where x=1";
+
+    client.did_open("file:///test.sql", sql).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Request formatting
+    let edits: Option<Vec<TextEdit>> = client
+        .request(
+            "textDocument/formatting",
+            DocumentFormattingParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///test.sql").unwrap(),
+                },
+                options: FormattingOptions {
+                    tab_size: 2,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            },
+        )
+        .await;
+
+    println!("Formatting result: {:?}", edits);
+
+    // Should have edits since the SQL will be reformatted
+    assert!(edits.is_some(), "Expected formatting edits");
+    let edits = edits.unwrap();
+    assert!(!edits.is_empty(), "Expected non-empty formatting edits");
+
+    // The formatted text should be different from the input
+    let new_text = &edits[0].new_text;
+    println!("Formatted text:\n{}", new_text);
+    // Formatter uses lowercase keywords by default
+    assert!(new_text.contains("select"), "Expected select keyword");
+    assert!(new_text.contains("from"), "Expected from keyword");
+    assert!(new_text.contains("where"), "Expected where keyword");
+    // Should have proper formatting (newlines, indentation)
+    assert!(new_text.contains("\n"), "Expected newlines in formatted output");
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn test_formatting_with_parse_error() {
+    let mut client = spawn_server().await;
+
+    client.initialize().await;
+    client.initialized().await;
+
+    // Open a document with invalid SQL
+    let sql = "select a from where"; // Invalid SQL - missing table name
+
+    client.did_open("file:///test.sql", sql).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Request formatting
+    let edits: Option<Vec<TextEdit>> = client
+        .request(
+            "textDocument/formatting",
+            DocumentFormattingParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///test.sql").unwrap(),
+                },
+                options: FormattingOptions {
+                    tab_size: 2,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            },
+        )
+        .await;
+
+    println!("Formatting result for invalid SQL: {:?}", edits);
+
+    // Should return None when SQL can't be parsed
+    assert!(edits.is_none(), "Expected None for invalid SQL, got {:?}", edits);
+
+    client.shutdown().await;
+}

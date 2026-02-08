@@ -258,6 +258,21 @@ impl<'a> Printer<'a> {
         }
     }
 
+    /// Emit trailing comments within a range of positions.
+    /// Useful for catching comments attached to punctuation like commas.
+    pub fn emit_trailing_comments_in_range(&mut self, start: usize, end: usize) {
+        let comments: Vec<_> = self
+            .comment_map
+            .get_trailing_in_range(start, end)
+            .into_iter()
+            .cloned()
+            .collect();
+        for comment in comments {
+            self.space();
+            self.write(&comment.text);
+        }
+    }
+
     /// Check if adding text would exceed line width
     pub fn would_exceed_line_width(&self, additional: usize) -> bool {
         self.current_line_len + additional > self.config.line_width

@@ -1,0 +1,17 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create trigger tr_update after update of name, email on users begin update users set updated_at = datetime('now') where id = new.id; end
+
+-- Output:
+create trigger tr_update
+after update of name, email on users
+begin
+  update users
+  set
+    updated_at = datetime('now')
+  where id = new.id;
+end;

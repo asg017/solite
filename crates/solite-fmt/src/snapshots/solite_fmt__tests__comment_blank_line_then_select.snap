@@ -4,13 +4,10 @@ expression: "snapshot(sql, &config)"
 snapshot_kind: text
 ---
 -- Input:
--- begin; insert into t values (1); commit
+-- -- a comment
+-- 
+-- select * from queue2;
 
 -- Output:
-begin;
-
-insert into t
-values
-  (1);
-
-commit;
+-- a comment
+select * from queue2;

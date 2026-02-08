@@ -1,0 +1,13 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table t (id integer primary key on conflict replace, name text unique on conflict ignore)
+
+-- Output:
+create table t(
+  id integer primary key on conflict replace,
+  name text unique on conflict ignore
+);

@@ -538,6 +538,17 @@ pub enum TableConstraint {
     },
 }
 
+impl TableConstraint {
+    pub fn span(&self) -> &Span {
+        match self {
+            TableConstraint::PrimaryKey { span, .. } => span,
+            TableConstraint::Unique { span, .. } => span,
+            TableConstraint::Check { span, .. } => span,
+            TableConstraint::ForeignKey { span, .. } => span,
+        }
+    }
+}
+
 /// Deferrable constraint setting
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Deferrable {

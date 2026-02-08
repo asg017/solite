@@ -4,6 +4,7 @@
 
 pub mod completions;
 pub mod context;
+pub mod inlay_hints;
 pub mod server;
 
 #[cfg(test)]

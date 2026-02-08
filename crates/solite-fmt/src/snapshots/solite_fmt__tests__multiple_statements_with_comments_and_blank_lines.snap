@@ -4,13 +4,15 @@ expression: "snapshot(sql, &config)"
 snapshot_kind: text
 ---
 -- Input:
--- begin; insert into t values (1); commit
+-- -- asdf
+-- select 1 + 2;
+-- 
+-- -- zxcv
+-- select 3 + 4;
 
 -- Output:
-begin;
+-- asdf
+select 1 + 2;
 
-insert into t
-values
-  (1);
-
-commit;
+-- zxcv
+select 3 + 4;

@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create virtual table locations using rtree(id, minX, maxX, minY, maxY)
+
+-- Output:
+create virtual table locations using rtree(id, minX, maxX, minY, maxY);

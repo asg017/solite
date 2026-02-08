@@ -53,8 +53,8 @@ impl fmt::Display for QueryError {
 impl std::error::Error for QueryError {}
 
 /// Entry point for the query command.
-pub(crate) fn query(args: QueryArgs, is_exec: bool) -> Result<(), ()> {
-    match query_impl(args, is_exec) {
+pub(crate) fn query(args: QueryArgs) -> Result<(), ()> {
+    match query_impl(args) {
         Ok(()) => Ok(()),
         Err(err) => {
             // Don't print SqlError - it's already been reported
@@ -67,7 +67,7 @@ pub(crate) fn query(args: QueryArgs, is_exec: bool) -> Result<(), ()> {
 }
 
 /// Internal implementation of the query command.
-fn query_impl(args: QueryArgs, is_exec: bool) -> Result<(), QueryError> {
+fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
     let (db_path, sql) = parse_arguments(&args)?;
 
     let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()));
@@ -96,8 +96,8 @@ fn query_impl(args: QueryArgs, is_exec: bool) -> Result<(), QueryError> {
     // Prepare statement with replacement scan fallback
     let stmt = prepare_statement(&mut runtime, &sql)?;
 
-    // For query command, only allow read-only statements
-    if !is_exec && !stmt.readonly() {
+    // Only allow read-only statements
+    if !stmt.readonly() {
         return Err(QueryError::ExecutionFailed(
             "Only read-only statements are allowed in `solite query`. \
              Use `solite exec` instead to modify the database."
@@ -111,17 +111,6 @@ fn query_impl(args: QueryArgs, is_exec: bool) -> Result<(), QueryError> {
             .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?,
         None => Box::new(stdout()),
     };
-
-    // For exec with no columns, just execute and return
-    let column_names = stmt
-        .column_names()
-        .map_err(|e| QueryError::ExecutionFailed(format!("{:?}", e)))?;
-
-    if is_exec && column_names.is_empty() {
-        execute_statement(&stmt)?;
-        println!("✔︎");
-        return Ok(());
-    }
 
     // If stdout is a TTY and no explicit format/output specified, use pretty table
     let use_table = args.format.is_none() && args.output.is_none() && stdout().is_terminal();
@@ -193,20 +182,6 @@ fn prepare_statement(
             }
         }
     }
-}
-
-/// Execute a statement to completion (for statements with no result columns).
-fn execute_statement(stmt: &solite_core::sqlite::Statement) -> Result<(), QueryError> {
-    loop {
-        match stmt.next() {
-            Ok(Some(_)) => continue,
-            Ok(None) => break,
-            Err(error) => {
-                return Err(QueryError::ExecutionFailed(format!("{}", error)));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Determine the output format from arguments.

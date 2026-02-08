@@ -96,7 +96,16 @@ fn run_impl(flags: RunArgs) -> Result<()> {
     };
 
     // Create runtime
-    let mut rt = Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()));
+    let mut rt = if flags.readonly {
+        match &database {
+            Some(db) => Runtime::new_readonly(&db.to_string_lossy()),
+            None => {
+                bail!("--readonly requires a database path");
+            }
+        }
+    } else {
+        Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+    };
 
     // Set up tracing if requested
     if flags.trace.is_some() {

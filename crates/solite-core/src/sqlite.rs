@@ -527,8 +527,17 @@ pub struct PrepareError {
 }
 impl Connection {
     pub fn open(path: &str) -> Result<Self, SQLiteError> {
-        let mut connection: *mut sqlite3 = ptr::null_mut();
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI;
+        Self::open_with_flags(path, flags)
+    }
+
+    pub fn open_readonly(path: &str) -> Result<Self, SQLiteError> {
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI;
+        Self::open_with_flags(path, flags)
+    }
+
+    fn open_with_flags(path: &str, flags: i32) -> Result<Self, SQLiteError> {
+        let mut connection: *mut sqlite3 = ptr::null_mut();
         let filename = CString::new(path).unwrap();
         let rc =
             unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };
@@ -812,5 +821,38 @@ mod tests {
             escape_identifier("alex \"garcia\""),
             "alex \"\"garcia\"\"".to_string()
         );
+    }
+
+    #[test]
+    fn test_open_readonly_blocks_writes() {
+        // Create a database with a table first
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
+        {
+            let conn = Connection::open(db_str).unwrap();
+            conn.execute_script("CREATE TABLE t(a TEXT)").unwrap();
+            conn.execute_script("INSERT INTO t VALUES ('hello')").unwrap();
+        }
+
+        // Open readonly and verify reads work
+        let conn = Connection::open_readonly(db_str).unwrap();
+        let (_, stmt) = conn.prepare("SELECT * FROM t").unwrap();
+        let stmt = stmt.unwrap();
+        assert!(stmt.readonly());
+        let row = stmt.next().unwrap();
+        assert!(row.is_some());
+
+        // Verify writes are blocked
+        let result = conn.execute_script("INSERT INTO t VALUES ('world')");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_open_readonly_nonexistent_db_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("does_not_exist.db");
+        let result = Connection::open_readonly(db_path.to_str().unwrap());
+        assert!(result.is_err());
     }
 }

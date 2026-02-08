@@ -13,6 +13,9 @@ pub struct RunArgs {
 
     #[arg(long)]
     pub trace: Option<PathBuf>,
+
+    #[arg(long, alias = "read-only")]
+    pub readonly: bool,
 }
 
 impl RunArgs {

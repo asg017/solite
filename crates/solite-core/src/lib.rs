@@ -180,6 +180,19 @@ impl Runtime {
             initialized_sqlite_parameters_table: false,
         }
     }
+
+    pub fn new_readonly(path: &str) -> Self {
+        let connection = Connection::open_readonly(path).unwrap();
+        unsafe {
+            solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
+        }
+        Runtime {
+            connection,
+            stack: vec![],
+            initialized_sqlite_parameters_table: false,
+        }
+    }
+
     pub fn enqueue(&mut self, name: &str, code: &str, source: BlockSource) {
         self.stack.push(Block {
             name: name.to_string(),
@@ -656,5 +669,53 @@ select not_exist();",
         let rest_index = "select 1;".len();
         let ep = super::extract_epilogue(code, rest_index);
         assert_eq!(ep, Some("--tight".to_string()));
+    }
+
+    #[test]
+    fn test_new_readonly_allows_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
+
+        // Seed a database
+        {
+            let mut rt = Runtime::new(Some(db_str.to_string()));
+            rt.connection
+                .execute_script("CREATE TABLE t(x TEXT); INSERT INTO t VALUES ('hi');")
+                .unwrap();
+        }
+
+        // Open readonly and read
+        let rt = Runtime::new_readonly(db_str);
+        let (_, stmt) = rt.connection.prepare("SELECT x FROM t").unwrap();
+        let stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(row.get(0).unwrap().as_str(), "hi");
+    }
+
+    #[test]
+    fn test_new_readonly_blocks_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
+
+        // Seed a database
+        {
+            let rt = Runtime::new(Some(db_str.to_string()));
+            rt.connection
+                .execute_script("CREATE TABLE t(x TEXT)")
+                .unwrap();
+        }
+
+        // Open readonly and try to write
+        let rt = Runtime::new_readonly(db_str);
+        let result = rt.connection.execute_script("INSERT INTO t VALUES ('nope')");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("readonly")
+        );
     }
 }

@@ -139,6 +139,7 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
         DotCommand::Bench(_) => {
             eprintln!("Warning: .bench command not supported in run mode");
         }
+        DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
     }
 }
 

@@ -330,6 +330,7 @@ pub fn snapshot_file(state: &mut SnapshotState, script: &PathBuf) -> Result<(), 
                         state.results.push(result);
                     }
                 }
+                StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
                 StepResult::DotCommand(cmd) => match cmd {
                     solite_core::dot::DotCommand::Load(load_command) => {
                         if let Err(e) = state.runtime.connection.execute(BASE_FUNCTIONS_CREATE) {
@@ -353,6 +354,14 @@ pub fn snapshot_file(state: &mut SnapshotState, script: &PathBuf) -> Result<(), 
                         open_command.execute(&mut state.runtime);
                     }
                     solite_core::dot::DotCommand::Print(print_command) => print_command.execute(),
+                    solite_core::dot::DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+                    solite_core::dot::DotCommand::Parameter(param_cmd) => {
+                        if let solite_core::dot::ParameterCommand::Set { key, value } = param_cmd {
+                            if let Err(e) = state.runtime.define_parameter(key.clone(), value.to_owned()) {
+                                eprintln!("Warning: Failed to set parameter {}: {}", key, e);
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("Warning: Unhandled dot command: {:?}", other);
                     }

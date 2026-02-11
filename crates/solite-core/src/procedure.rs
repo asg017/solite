@@ -1,25 +1,65 @@
-//! Parsing utilities for codegen annotations.
+//! Procedure types and parsing utilities.
+//!
+//! Procedures are named SQL blocks annotated with `-- name: xxx :annotation`
+//! that can be registered in the runtime and invoked via `.call`.
 
+use crate::sqlite::ColumnMeta;
 use regex::Regex;
+use serde::Serialize;
 use std::sync::LazyLock;
-
-use super::types::{Parameter, ResultType};
 
 /// Regex for parsing `-- name: xxx :annotation` lines.
 static NAME_LINE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^--\s+name:\s+(\w+)((?:\s+:\w+)*)").expect("valid regex"));
 
+/// The expected result type of a procedure.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub enum ResultType {
+    /// Procedure returns no results (INSERT, UPDATE, DELETE, etc.)
+    Void,
+    /// Procedure returns multiple rows
+    Rows,
+    /// Procedure returns exactly one row
+    Row,
+    /// Procedure returns a single value
+    Value,
+    /// Procedure returns a list of single values
+    List,
+}
+
+/// A SQL parameter with optional type annotation.
+///
+/// Parameters can be annotated with types using the `::type` syntax:
+/// - `$name::text` - parameter named "name" with type "text"
+/// - `$id::int` - parameter named "id" with type "int"
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct ProcedureParam {
+    /// The full parameter name as it appears in SQL (e.g., "$name::text")
+    pub full_name: String,
+    /// The parameter name without prefix or type (e.g., "name")
+    pub name: String,
+    /// The annotated type, if any (e.g., "text")
+    pub annotated_type: Option<String>,
+}
+
+/// A named SQL procedure with metadata.
+#[derive(Serialize, Debug, Clone)]
+pub struct Procedure {
+    /// The name of the procedure (from `-- name: xxx`)
+    pub name: String,
+    /// The SQL query text
+    pub sql: String,
+    /// The result type annotation
+    pub result_type: ResultType,
+    /// Parameters used in the query
+    pub parameters: Vec<ProcedureParam>,
+    /// Column metadata for the result set
+    pub columns: Vec<ColumnMeta>,
+}
+
 /// Parse a `-- name: xxx :annotation` line.
 ///
 /// Returns the name and list of annotations (without the leading colon).
-///
-/// # Examples
-///
-/// ```ignore
-/// let (name, annotations) = parse_name_line("-- name: getUsers :rows").unwrap();
-/// assert_eq!(name, "getUsers");
-/// assert_eq!(annotations, vec!["rows"]);
-/// ```
 pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>)> {
     let caps = NAME_LINE_RE.captures(line)?;
     let name = caps.get(1)?.as_str().to_string();
@@ -33,16 +73,16 @@ pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>)> {
     Some((name, annotations))
 }
 
-/// Parse a parameter string into a Parameter struct.
+/// Parse a parameter string into a ProcedureParam struct.
 ///
 /// Handles both simple parameters (`$name`) and typed parameters (`$name::text`).
-pub fn parse_parameter(param: &str) -> Parameter {
+pub fn parse_parameter(param: &str) -> ProcedureParam {
     // Check if it starts with $ or : and contains ::
     if (param.starts_with('$') || param.starts_with(':')) && param.contains("::") {
         if let Some(idx) = param.find("::") {
             let prefix_and_name = &param[..idx];
             let type_annotation = &param[idx + 2..];
-            return Parameter {
+            return ProcedureParam {
                 full_name: param.to_string(),
                 name: prefix_and_name[1..].to_string(),
                 annotated_type: Some(type_annotation.to_string()),
@@ -51,7 +91,7 @@ pub fn parse_parameter(param: &str) -> Parameter {
     }
 
     // Simple parameter without type annotation
-    Parameter {
+    ProcedureParam {
         full_name: param.to_string(),
         name: if param.is_empty() {
             String::new()

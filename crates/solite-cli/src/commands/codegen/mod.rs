@@ -44,7 +44,6 @@
 //! solite codegen queries.sql --schema schema.sql
 //! ```
 
-mod parser;
 mod report;
 mod types;
 

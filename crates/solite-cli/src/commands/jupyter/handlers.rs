@@ -232,6 +232,7 @@ pub async fn handle_dot_command(
                 }
             }
         }
+        DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         DotCommand::Bench(mut cmd) => {
             let sender_clone = sender.clone();
             let parent_clone = parent.clone();

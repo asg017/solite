@@ -1,9 +1,11 @@
 pub mod dot;
+pub mod procedure;
 pub mod replacement_scans;
 pub mod sqlite;
 pub mod exporter;
 
 use crate::dot::{DotCommand, ShellCommand, AskCommand};
+use crate::procedure::Procedure;
 use crate::sqlite::Connection;
 use dot::{parse_dot, ParseDotError};
 use libsqlite3_sys::{
@@ -14,6 +16,7 @@ use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use solite_stdlib::solite_stdlib_init;
 use sqlite::{OwnedValue, SQLiteError, Statement};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::{fmt, path::PathBuf};
 use thiserror::Error;
@@ -74,6 +77,8 @@ pub struct Runtime {
     stack: Vec<Block>,
     //state: State,
     initialized_sqlite_parameters_table: bool,
+    procedures: HashMap<String, Procedure>,
+    loaded_files: std::collections::HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -98,6 +103,7 @@ impl fmt::Display for StepReference {
 pub enum StepResult {
     SqlStatement { stmt: Statement, raw_sql: String },
     DotCommand(dot::DotCommand),
+    ProcedureDefinition(Procedure),
 }
 
 #[derive(Serialize, Debug)]
@@ -178,6 +184,8 @@ impl Runtime {
             stack: vec![],
             //state: State::default(),
             initialized_sqlite_parameters_table: false,
+            procedures: HashMap::new(),
+            loaded_files: std::collections::HashSet::new(),
         }
     }
 
@@ -190,6 +198,8 @@ impl Runtime {
             connection,
             stack: vec![],
             initialized_sqlite_parameters_table: false,
+            procedures: HashMap::new(),
+            loaded_files: std::collections::HashSet::new(),
         }
     }
 
@@ -203,6 +213,18 @@ impl Runtime {
             regions: vec![],
         });
     }
+    pub fn register_procedure(&mut self, proc: Procedure) {
+        self.procedures.insert(proc.name.clone(), proc);
+    }
+
+    pub fn get_procedure(&self, name: &str) -> Option<&Procedure> {
+        self.procedures.get(name)
+    }
+
+    pub fn procedures(&self) -> &HashMap<String, Procedure> {
+        &self.procedures
+    }
+
     pub fn next_stepx(&mut self) -> Option<Result<Step, StepError>> {
         while let Some(mut block) = self.stack.pop() {
             let regions = block.regions.clone();
@@ -267,6 +289,83 @@ impl Runtime {
                     }
                 };
 
+                // Resolve .call to a SqlStatement so test/snapshot/run all
+                // get a prepared statement they already know how to handle.
+                if let DotCommand::Call(ref call_cmd) = cmd {
+                    let stmt_offset_idx = block.offset;
+                    let block_name = block.name.clone();
+                    let line_idx: usize = block.rope.byte_to_line(stmt_offset_idx);
+                    let column_idx = stmt_offset_idx - block.rope.line_to_byte(line_idx);
+
+                    // Extract epilogue from the dot_line (e.g. ".call proc -- 4" → "-- 4")
+                    let epilogue_owned = dot_line.find(" --").map(|idx| dot_line[idx..].to_string());
+
+                    if !rest.is_empty() {
+                        block.offset += dot_line.len();
+                        self.stack.push(block);
+                    }
+
+                    // Load file if specified, resolving relative to the calling file's directory
+                    if let Some(ref file) = call_cmd.file {
+                        let resolved = PathBuf::from(&block_name)
+                            .parent()
+                            .map(|dir| dir.join(file))
+                            .unwrap_or_else(|| PathBuf::from(file));
+                        let resolved_str = resolved.to_string_lossy().to_string();
+                        if let Err(e) = self.load_file(&resolved_str) {
+                            return Some(Err(StepError::ParseDot(
+                                dot::ParseDotError::InvalidArgument(e),
+                            )));
+                        }
+                    }
+
+                    // Look up and prepare the procedure
+                    let proc = match self.get_procedure(&call_cmd.procedure_name) {
+                        Some(p) => p.clone(),
+                        None => {
+                            return Some(Err(StepError::ParseDot(
+                                dot::ParseDotError::InvalidArgument(format!(
+                                    "Unknown procedure: '{}'",
+                                    call_cmd.procedure_name
+                                )),
+                            )));
+                        }
+                    };
+
+                    match self.prepare_with_parameters(&proc.sql) {
+                        Ok((_, Some(stmt))) => {
+                            let raw_sql = stmt.sql();
+                            return Some(Ok(Step {
+                                preamble: None,
+                                epilogue: epilogue_owned,
+                                reference: StepReference {
+                                    block_name,
+                                    line_number: line_idx + 1,
+                                    column_number: column_idx + 1,
+                                    region: regions,
+                                },
+                                result: StepResult::SqlStatement { stmt, raw_sql },
+                            }));
+                        }
+                        Ok((_, None)) => {
+                            return Some(Err(StepError::ParseDot(
+                                dot::ParseDotError::InvalidArgument(format!(
+                                    "Procedure '{}' prepared to empty statement",
+                                    call_cmd.procedure_name
+                                )),
+                            )));
+                        }
+                        Err(error) => {
+                            return Some(Err(StepError::Prepare {
+                                error,
+                                file_name: block_name,
+                                src: String::new(),
+                                offset: 0,
+                            }));
+                        }
+                    }
+                }
+
                 if !rest.is_empty() {
                       block.offset +=  dot_line.len(); //preamble preamble_offset + end_idx + 1;
                       self.stack.push(block);
@@ -299,6 +398,48 @@ impl Runtime {
                     if let Some(rest) = rest {
                         block.offset += rest; // + preamble.map_or(0, |p| p.len()) + 1;
                         self.stack.insert(0, block);
+                    }
+
+                    // Check if this is a procedure definition
+                    // The preamble may contain multiple comment lines (regions, separators, etc.)
+                    // so we look for a `-- name:` line anywhere in the preamble.
+                    if let Some(ref preamble_str) = preamble_owned {
+                        let name_line = preamble_str
+                            .lines()
+                            .map(|l| l.trim())
+                            .find(|l| l.starts_with("-- name:"));
+                        if let Some(name_line) = name_line {
+                            if let Some((name, annotations)) = procedure::parse_name_line(name_line) {
+                                let columns = stmt.column_meta();
+                                let parameters: Vec<_> = stmt
+                                    .parameter_info()
+                                    .iter()
+                                    .map(|p| procedure::parse_parameter(p))
+                                    .collect();
+                                let result_type = procedure::determine_result_type(&annotations, columns.len());
+
+                                let proc = Procedure {
+                                    name: name.clone(),
+                                    sql: stmt.sql(),
+                                    result_type,
+                                    parameters,
+                                    columns,
+                                };
+                                self.procedures.insert(name, proc.clone());
+
+                                return Some(Ok(Step {
+                                    preamble: preamble_owned,
+                                    epilogue: epilogue_owned,
+                                    reference: StepReference {
+                                        block_name,
+                                        line_number: line_idx + 1,
+                                        column_number: column_idx + 1,
+                                        region: regions,
+                                    },
+                                    result: StepResult::ProcedureDefinition(proc),
+                                }));
+                            }
+                        }
                     }
 
                     return Some(Ok(Step {
@@ -344,15 +485,50 @@ impl Runtime {
                 None => return Ok(()),
                 Some(Ok(step)) => {
                     match step.result {
-                        StepResult::SqlStatement { stmt, .. } => stmt.execute().unwrap(),
+                        StepResult::SqlStatement { stmt, .. } => { stmt.execute().unwrap(); }
                         StepResult::DotCommand(_cmd) => todo!(),
-                    };
+                        StepResult::ProcedureDefinition(_) => { /* already registered */ }
+                    }
                     continue;
                 }
                 Some(Err(err)) => return Err(err),
             }
         }
     }
+    /// Load and execute a SQL file, registering any procedures it defines.
+    /// Setup statements (CREATE TABLE, INSERT, etc.) are executed immediately.
+    pub fn load_file(&mut self, path: &str) -> Result<(), String> {
+        if self.loaded_files.contains(path) {
+            return Ok(());
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read '{}': {}", path, e))?;
+        let path_buf = PathBuf::from(path);
+        self.loaded_files.insert(path.to_string());
+        // Temporarily save and clear the stack so next_stepx() only processes
+        // the loaded file (the stack inserts blocks at position 0 after SQL
+        // statements, which would interleave with the caller's blocks).
+        let saved_stack: Vec<Block> = self.stack.drain(..).collect();
+        self.enqueue(path, &content, BlockSource::File(path_buf));
+        let result = loop {
+            match self.next_stepx() {
+                None => break Ok(()),
+                Some(Ok(step)) => match step.result {
+                    StepResult::SqlStatement { stmt, .. } => {
+                        if let Err(e) = stmt.execute() {
+                            break Err(format!("Error executing '{}': {:?}", path, e));
+                        }
+                    }
+                    StepResult::ProcedureDefinition(_) => { /* already registered */ }
+                    StepResult::DotCommand(_) => { /* skip dot commands in loaded files */ }
+                },
+                Some(Err(err)) => break Err(format!("Error loading '{}': {}", path, err)),
+            }
+        };
+        self.stack.extend(saved_stack);
+        result
+    }
+
     pub fn has_next(&self) -> bool {
         !self.stack.is_empty()
     }

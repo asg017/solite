@@ -236,6 +236,7 @@ fn execute_steps(rt: &mut Runtime, is_trace: bool, timer: &mut bool) {
                 StepResult::DotCommand(ref mut cmd) => {
                     handle_dot_command(rt, cmd, timer);
                 }
+                StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
             },
             Some(Err(step_error)) => {
                 handle_step_error(&step_error);

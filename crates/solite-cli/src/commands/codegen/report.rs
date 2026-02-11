@@ -5,7 +5,6 @@ use solite_core::sqlite::Connection;
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
 use std::path::PathBuf;
 
-use super::parser::{determine_result_type, parse_name_line, parse_parameter};
 use super::types::{Export, Report};
 
 /// The type of base database to use for schema validation.
@@ -142,37 +141,20 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
             }
             Some(Ok(ref step)) => match &step.result {
                 StepResult::SqlStatement { stmt, raw_sql: _ } => {
-                    if let Some(preamble) = &step.preamble {
-                        let trimmed = preamble.trim();
-                        if trimmed.starts_with("-- name:") {
-                            let (name, annotations) = parse_name_line(trimmed)
-                                .ok_or_else(|| anyhow!("Invalid name line"))?;
-
-                            let columns = stmt.column_meta();
-                            let parameters: Vec<_> = stmt
-                                .parameter_info()
-                                .iter()
-                                .map(|p| parse_parameter(p))
-                                .collect();
-
-                            let result_type = determine_result_type(&annotations, columns.len());
-
-                            report.exports.push(Export {
-                                name,
-                                parameters,
-                                columns,
-                                sql: stmt.sql(),
-                                result_type,
-                            });
-                            continue;
-                        }
-                    }
-
                     // Not an export, treat as setup
                     report.setup.push(stmt.sql());
                     if let Err(e) = stmt.execute() {
                         return Err(anyhow!("Failed to execute setup: {:?}", e));
                     }
+                }
+                StepResult::ProcedureDefinition(proc) => {
+                    report.exports.push(Export {
+                        name: proc.name.clone(),
+                        parameters: proc.parameters.clone(),
+                        columns: proc.columns.clone(),
+                        sql: proc.sql.clone(),
+                        result_type: proc.result_type.clone(),
+                    });
                 }
                 StepResult::DotCommand(cmd) => {
                     return Err(anyhow!("Unsupported dot command: {:?}", cmd));

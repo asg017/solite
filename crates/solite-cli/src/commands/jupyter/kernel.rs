@@ -367,6 +367,7 @@ async fn handle_code(
                 StepResult::DotCommand(cmd) => {
                     handle_dot_command(cmd, runtime, response, parent).await?;
                 }
+                StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
             },
             None => {
                 return Ok(());

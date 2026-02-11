@@ -78,6 +78,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                 StepResult::DotCommand(cmd) => {
                     handle_dot_command(&cmd, &mut rt);
                 }
+                StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
                 StepResult::SqlStatement { stmt, .. } => {
                     let epilogue = match &step.epilogue {
                         Some(s) => parse_epilogue_comment(s),
@@ -225,6 +226,17 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
                 eprintln!("Warning: Failed to load extension: {:?}", e);
             }
         }
+        DotCommand::Parameter(param_cmd) => {
+            match param_cmd {
+                solite_core::dot::ParameterCommand::Set { key, value } => {
+                    if let Err(e) = rt.define_parameter(key.clone(), value.to_owned()) {
+                        eprintln!("Warning: Failed to set parameter {}: {}", key, e);
+                    }
+                }
+                _ => {}
+            }
+        }
+        DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         other => {
             eprintln!("Warning: Unhandled dot command in test: {:?}", other);
         }

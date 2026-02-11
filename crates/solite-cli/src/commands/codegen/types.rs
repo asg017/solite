@@ -2,35 +2,8 @@
 
 use solite_core::sqlite::ColumnMeta;
 
-/// A SQL parameter with optional type annotation.
-///
-/// Parameters can be annotated with types using the `::type` syntax:
-/// - `$name::text` - parameter named "name" with type "text"
-/// - `$id::int` - parameter named "id" with type "int"
-#[derive(serde::Serialize, Debug, Clone, PartialEq)]
-pub struct Parameter {
-    /// The full parameter name as it appears in SQL (e.g., "$name::text")
-    pub full_name: String,
-    /// The parameter name without prefix or type (e.g., "name")
-    pub name: String,
-    /// The annotated type, if any (e.g., "text")
-    pub annotated_type: Option<String>,
-}
-
-/// The expected result type of a query.
-#[derive(serde::Serialize, Debug, Clone, PartialEq)]
-pub enum ResultType {
-    /// Query returns no results (INSERT, UPDATE, DELETE, etc.)
-    Void,
-    /// Query returns multiple rows
-    Rows,
-    /// Query returns exactly one row
-    Row,
-    /// Query returns a single value
-    Value,
-    /// Query returns a list of single values
-    List,
-}
+pub use solite_core::procedure::ProcedureParam as Parameter;
+pub use solite_core::procedure::ResultType;
 
 /// An exported query with its metadata.
 #[derive(serde::Serialize, Debug, Clone)]

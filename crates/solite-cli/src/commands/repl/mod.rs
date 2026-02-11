@@ -265,6 +265,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Bench(_) => {
             eprintln!("Bench command is not supported in the REPL yet.");
         }
+        DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
     }
 }
 
@@ -310,6 +311,9 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
         match runtime.next_stepx() {
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
+                StepResult::ProcedureDefinition(ref proc) => {
+                    println!("Registered procedure: {}", proc.name);
+                }
                 StepResult::SqlStatement { stmt, .. } => {
                     let start = std::time::Instant::now();
                     let config = TableConfig::terminal();

@@ -29,6 +29,7 @@
 
 mod ask;
 pub mod bench;
+mod call;
 mod clear;
 mod dotenv;
 pub mod env;
@@ -48,6 +49,7 @@ mod vegalite;
 pub use crate::dot::{
     ask::AskCommand,
     bench::BenchCommand,
+    call::CallCommand,
     clear::ClearCommand,
     dotenv::{DotenvCommand, DotenvResult},
     env::{EnvAction, EnvCommand},
@@ -167,6 +169,8 @@ pub enum DotCommand {
     Bench(BenchCommand),
     /// Load .env file.
     Dotenv(DotenvCommand),
+    /// Call a registered procedure.
+    Call(CallCommand),
 }
 
 /// Parse a boolean value from string.
@@ -226,6 +230,27 @@ pub fn parse_dot<S: Into<String>>(
         "timer" => Ok(DotCommand::Timer(parse_bool(&args)?)),
         "param" | "parameter" => Ok(DotCommand::Parameter(parse_parameter(args)?)),
         "env" => Ok(DotCommand::Env(parse_env(args)?)),
+        "call" => {
+            // Strip trailing -- comment (used as epilogue in test assertions)
+            let args_clean = match args.find(" --") {
+                Some(idx) => args[..idx].trim(),
+                None => args.trim(),
+            };
+            let parts: Vec<&str> = args_clean.split_whitespace().collect();
+            match parts.len() {
+                1 => Ok(DotCommand::Call(CallCommand {
+                    file: None,
+                    procedure_name: parts[0].to_string(),
+                })),
+                2 => Ok(DotCommand::Call(CallCommand {
+                    file: Some(parts[0].to_string()),
+                    procedure_name: parts[1].to_string(),
+                })),
+                _ => Err(ParseDotError::InvalidArgument(
+                    "usage: .call [file.sql] procedureName".to_string(),
+                )),
+            }
+        }
         _ => Err(ParseDotError::UnknownCommand(command)),
     }
 }

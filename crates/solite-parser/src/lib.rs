@@ -163,15 +163,128 @@ impl Parser {
         &self.source[span.clone()]
     }
 
+    /// Check if a token kind is a non-reserved keyword that can be used as an identifier.
+    /// In SQLite, most keywords are not truly reserved and can be used as column names,
+    /// table names, etc. without quoting.
+    fn is_keyword_as_ident(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Current
+                | TokenKind::Filter
+                | TokenKind::Partition
+                | TokenKind::Window
+                | TokenKind::Rows
+                | TokenKind::Range
+                | TokenKind::Groups
+                | TokenKind::Unbounded
+                | TokenKind::Preceding
+                | TokenKind::Following
+                | TokenKind::Exclude
+                | TokenKind::Ties
+                | TokenKind::Others
+                | TokenKind::Over
+                | TokenKind::Recursive
+                | TokenKind::Materialized
+                | TokenKind::Action
+                | TokenKind::Abort
+                | TokenKind::Fail
+                | TokenKind::Ignore
+                | TokenKind::Conflict
+                | TokenKind::Do
+                | TokenKind::Nothing
+                | TokenKind::Generated
+                | TokenKind::Always
+                | TokenKind::Stored
+                | TokenKind::Query
+                | TokenKind::Plan
+                | TokenKind::Analyze
+                | TokenKind::Explain
+                | TokenKind::Reindex
+                | TokenKind::Returning
+                | TokenKind::Before
+                | TokenKind::After
+                | TokenKind::Instead
+                | TokenKind::Of
+                | TokenKind::For
+                | TokenKind::Each
+                | TokenKind::Row
+                | TokenKind::Cascade
+                | TokenKind::Restrict
+                | TokenKind::No
+                | TokenKind::Deferrable
+                | TokenKind::Initially
+                | TokenKind::Column
+                | TokenKind::Rename
+                | TokenKind::Trigger
+                | TokenKind::Virtual
+                | TokenKind::Temp
+                | TokenKind::Temporary
+                | TokenKind::Savepoint
+                | TokenKind::Release
+                | TokenKind::Transaction
+                | TokenKind::Deferred
+                | TokenKind::Immediate
+                | TokenKind::Exclusive
+                | TokenKind::End
+                | TokenKind::Replace
+                | TokenKind::View
+                | TokenKind::Indexed
+                | TokenKind::Key
+                | TokenKind::Pragma
+                | TokenKind::Database
+                | TokenKind::Vacuum
+                | TokenKind::Without
+                | TokenKind::To
+                | TokenKind::Within
+                | TokenKind::Raise
+                | TokenKind::Attach
+                | TokenKind::Detach
+                | TokenKind::Add
+                | TokenKind::Asc
+                | TokenKind::Desc
+                | TokenKind::Nulls
+                | TokenKind::First
+                | TokenKind::Last
+                | TokenKind::Collate
+                | TokenKind::Constraint
+                | TokenKind::Primary
+                | TokenKind::Unique
+                | TokenKind::Check
+                | TokenKind::Default
+                | TokenKind::Foreign
+                | TokenKind::References
+                | TokenKind::Autoincrement
+                | TokenKind::Offset
+                | TokenKind::Begin
+                | TokenKind::Commit
+                | TokenKind::Rollback
+                | TokenKind::Glob
+                | TokenKind::Regexp
+                | TokenKind::Match
+                | TokenKind::Escape
+                | TokenKind::Like
+                | TokenKind::Inner
+                | TokenKind::Left
+                | TokenKind::Right
+                | TokenKind::Full
+                | TokenKind::Outer
+                | TokenKind::Cross
+                | TokenKind::Natural
+                | TokenKind::Using
+                | TokenKind::Join
+        )
+    }
+
     /// Check if the current token is any kind of identifier
     fn is_ident_like(&self) -> bool {
-        matches!(
-            self.current_kind(),
+        match self.current_kind() {
             Some(TokenKind::Ident)
                 | Some(TokenKind::QuotedIdent)
                 | Some(TokenKind::BracketIdent)
-                | Some(TokenKind::BacktickIdent)
-        )
+                | Some(TokenKind::BacktickIdent) => true,
+            Some(kind) => Self::is_keyword_as_ident(kind),
+            None => false,
+        }
     }
 
     /// Expect any kind of identifier token
@@ -180,7 +293,7 @@ impl Parser {
             Some(token) if matches!(
                 token.kind,
                 TokenKind::Ident | TokenKind::QuotedIdent | TokenKind::BracketIdent | TokenKind::BacktickIdent
-            ) => {
+            ) || Self::is_keyword_as_ident(&token.kind) => {
                 let token = token.clone();
                 self.advance();
                 Ok(token)
@@ -4156,6 +4269,47 @@ impl Parser {
                     type_name,
                     span: Span::new(span.start, rparen.span.end),
                 })
+            }
+            _ if Self::is_keyword_as_ident(&token.kind) => {
+                let name = self.slice(&token.span).to_string();
+                self.advance();
+
+                // Check for function call: name(...)
+                if self.current_kind() == Some(&TokenKind::LParen) {
+                    return self.parse_function_call(name, span.start);
+                }
+
+                // Check for qualified name: table.column or schema.table.column
+                if self.current_kind() == Some(&TokenKind::Dot) {
+                    self.advance(); // consume dot
+                    let second_token = self.expect_ident("column name")?;
+                    let second_name = self.ident_name(&second_token);
+                    let mut end = second_token.span.end;
+
+                    // Check for third part: schema.table.column
+                    if self.current_kind() == Some(&TokenKind::Dot) {
+                        self.advance(); // consume dot
+                        let third_token = self.expect_ident("column name")?;
+                        let third_name = self.ident_name(&third_token);
+                        end = third_token.span.end;
+                        Ok(Expr::Column {
+                            schema: Some(name),
+                            table: Some(second_name),
+                            column: third_name,
+                            span: Span::new(span.start, end),
+                        })
+                    } else {
+                        // table.column
+                        Ok(Expr::Column {
+                            schema: None,
+                            table: Some(name),
+                            column: second_name,
+                            span: Span::new(span.start, end),
+                        })
+                    }
+                } else {
+                    Ok(Expr::Ident(name, false, span))
+                }
             }
             _ => {
                 let pos = span.start;

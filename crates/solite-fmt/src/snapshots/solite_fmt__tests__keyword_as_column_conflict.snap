@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select conflict from t
+
+-- Output:
+select conflict from t;

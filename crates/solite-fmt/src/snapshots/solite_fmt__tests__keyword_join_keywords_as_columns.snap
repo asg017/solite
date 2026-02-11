@@ -1,0 +1,20 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select inner, left, right, full, outer, cross, natural, using, join from t
+
+-- Output:
+select
+  "inner",
+  "left",
+  "right",
+  "full",
+  "outer",
+  "cross",
+  "natural",
+  using,
+  "join"
+from t;

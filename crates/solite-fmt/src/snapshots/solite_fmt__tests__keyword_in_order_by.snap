@@ -1,0 +1,12 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select * from t order by current asc, action desc
+
+-- Output:
+select *
+from t
+order by current asc, action desc;

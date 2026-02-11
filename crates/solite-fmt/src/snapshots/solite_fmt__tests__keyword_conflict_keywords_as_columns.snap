@@ -1,0 +1,17 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select abort, fail, ignore, conflict, do, nothing from t
+
+-- Output:
+select
+  abort,
+  fail,
+  ignore,
+  conflict,
+  do,
+  nothing
+from t;

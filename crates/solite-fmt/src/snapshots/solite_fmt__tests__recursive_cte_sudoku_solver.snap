@@ -1,0 +1,46 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- WITH RECURSIVE input(sud) AS ( SELECT '53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79' ), digits(z, lp) AS ( SELECT '1', 1 UNION ALL SELECT CAST(lp+1 AS TEXT), lp+1 FROM digits WHERE lp<9 ), x(s, ind) AS ( SELECT sud, instr(sud, '.') FROM input UNION ALL SELECT substr(s, 1, ind-1) || z || substr(s, ind+1), instr( substr(s, 1, ind-1) || z || substr(s, ind+1), '.' ) FROM x, digits AS z WHERE ind>0 AND NOT EXISTS ( SELECT 1 FROM digits AS lp WHERE z.z = substr(s, ((ind-1)/9)*9 + lp, 1) OR z.z = substr(s, ((ind-1)%9) + (lp-1)*9 + 1, 1) OR z.z = substr(s, (((ind-1)/3) % 3) * 3 + ((ind-1)/27) * 27 + lp + ((lp-1) / 3) * 6, 1) ) ) SELECT s FROM x WHERE ind=0
+
+-- Output:
+with recursive
+  input(sud) as (
+    select '53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79'
+  ),
+  digits(z, lp) as (
+    select
+      '1',
+      1
+    union all
+    select
+      cast(lp + 1 as TEXT),
+      lp + 1
+    from digits
+    where lp < 9
+  ),
+  x(s, ind) as (
+    select
+      sud,
+      instr(sud, '.')
+    from input
+    union all
+    select
+      substr(s, 1, ind - 1) || z || substr(s, ind + 1),
+      instr(substr(s, 1, ind - 1) || z || substr(s, ind + 1), '.')
+    from x, digits as z
+    where ind > 0
+      and not exists (
+      select 1
+      from digits as lp
+      where z.z = substr(s, ((ind - 1) / 9) * 9 + lp, 1)
+        or z.z = substr(s, ((ind - 1) % 9) + (lp - 1) * 9 + 1, 1)
+        or z.z = substr(s, (((ind - 1) / 3) % 3) * 3 + ((ind - 1) / 27) * 27 + lp + ((lp - 1) / 3) * 6, 1)
+    )
+  )
+select s
+from x
+where ind = 0;

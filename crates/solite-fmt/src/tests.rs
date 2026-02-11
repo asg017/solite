@@ -361,6 +361,13 @@ fn replace_into() {
     assert_snapshot!(snapshot(sql, &config));
 }
 
+#[test]
+fn insert_with_nested_json_patch() {
+    let sql = "INSERT INTO _history_json_items (timestamp, operation, pk_id, updated_values, [group]) VALUES (strftime('%Y-%m-%d %H:%M:%f', 'now'), 'update', NEW.id, json_patch(json_patch(json_patch('{}', CASE WHEN OLD.name IS NOT NEW.name THEN CASE WHEN NEW.name IS NULL THEN json_object('name', json_object('null', 1)) ELSE json_object('name', NEW.name) END ELSE '{}' END), CASE WHEN OLD.price IS NOT NEW.price THEN CASE WHEN NEW.price IS NULL THEN json_object('price', json_object('null', 1)) ELSE json_object('price', NEW.price) END ELSE '{}' END), CASE WHEN OLD.quantity IS NOT NEW.quantity THEN CASE WHEN NEW.quantity IS NULL THEN json_object('quantity', json_object('null', 1)) ELSE json_object('quantity', NEW.quantity) END ELSE '{}' END), (SELECT id FROM _history_json WHERE current = 1))";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
 // =============================================================================
 // UPDATE statements
 // =============================================================================
@@ -1340,6 +1347,343 @@ fn comment_blank_line_then_select() {
 #[test]
 fn multiple_statements_with_comments_and_blank_lines() {
     let sql = "-- asdf\nselect 1 + 2;\n\n-- zxcv\nselect 3 + 4;";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+// =============================================================================
+// Complex queries
+// =============================================================================
+
+#[test]
+fn recursive_cte_sudoku_solver() {
+    let sql = "WITH RECURSIVE input(sud) AS ( SELECT '53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79' ), digits(z, lp) AS ( SELECT '1', 1 UNION ALL SELECT CAST(lp+1 AS TEXT), lp+1 FROM digits WHERE lp<9 ), x(s, ind) AS ( SELECT sud, instr(sud, '.') FROM input UNION ALL SELECT substr(s, 1, ind-1) || z || substr(s, ind+1), instr( substr(s, 1, ind-1) || z || substr(s, ind+1), '.' ) FROM x, digits AS z WHERE ind>0 AND NOT EXISTS ( SELECT 1 FROM digits AS lp WHERE z.z = substr(s, ((ind-1)/9)*9 + lp, 1) OR z.z = substr(s, ((ind-1)%9) + (lp-1)*9 + 1, 1) OR z.z = substr(s, (((ind-1)/3) % 3) * 3 + ((ind-1)/27) * 27 + lp + ((lp-1) / 3) * 6, 1) ) ) SELECT s FROM x WHERE ind=0";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+// =============================================================================
+// Keywords as identifiers
+// =============================================================================
+
+#[test]
+fn keyword_as_column_current() {
+    let sql = "select current from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_filter() {
+    let sql = "select filter from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_action() {
+    let sql = "select action from events";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_key() {
+    let sql = "select key, value from settings";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_replace() {
+    let sql = "select replace from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_view() {
+    let sql = "select view from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_query() {
+    let sql = "select query from logs";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_row() {
+    let sql = "select row from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_end() {
+    let sql = "select end from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_release() {
+    let sql = "select release from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_plan() {
+    let sql = "select plan from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_partition() {
+    let sql = "select partition from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_offset() {
+    let sql = "select offset from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_default() {
+    let sql = "select default from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_column() {
+    let sql = "select column from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_begin() {
+    let sql = "select begin from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_do() {
+    let sql = "select do from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_nothing() {
+    let sql = "select nothing from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_first() {
+    let sql = "select first, last from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_conflict() {
+    let sql = "select conflict from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_table_name() {
+    let sql = "select * from action";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_table_alias() {
+    let sql = "select filter.id from foo filter";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_qualified_column() {
+    let sql = "select t.current, t.filter, t.action from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_in_where_clause() {
+    let sql = "select * from t where current = 1 and action = 'click'";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_insert_column() {
+    let sql = "insert into t (current, filter, action) values (1, 2, 3)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_update_target() {
+    let sql = "update t set current = 1, action = 'done'";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_create_table_column() {
+    let sql = "create table t (current text, filter integer, action text, key text primary key)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_function_call() {
+    let sql = "select replace('hello world', 'world', 'there')";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_cte_name() {
+    let sql = "with action as (select 1 as id) select * from action";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_in_order_by() {
+    let sql = "select * from t order by current asc, action desc";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_in_group_by() {
+    let sql = "select action, count(*) from events group by action";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_multiple_in_expression() {
+    let sql = "select current + offset + row from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_subquery_column() {
+    let sql = "select * from (select current, filter from t)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_in_case_expression() {
+    let sql = "select case when current = 1 then action else nothing end from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_index_column() {
+    let sql = "create index idx_action on events (action, current)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_window_keywords_as_columns() {
+    let sql = "select rows, range, groups, preceding, following, unbounded, exclude, ties, others from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_trigger_keywords_as_columns() {
+    let sql = "select before, after, instead, each, for from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_transaction_keywords_as_columns() {
+    let sql = "select begin, commit, rollback, savepoint, release, transaction, deferred, immediate, exclusive from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_constraint_keywords_as_columns() {
+    let sql = "select constraint, primary, unique, check, foreign, references, autoincrement, collate from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_conflict_keywords_as_columns() {
+    let sql = "select abort, fail, ignore, conflict, do, nothing from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_misc_keywords_as_columns() {
+    let sql = "select generated, always, stored, analyze, explain, reindex, returning, vacuum, pragma, database, attach, detach from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_ddl_keywords_as_columns() {
+    let sql = "select column, rename, trigger, virtual, temp, temporary, view, indexed, without, add from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_sort_keywords_as_columns() {
+    let sql = "select asc, desc, nulls, first, last from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_join_keywords_as_columns() {
+    let sql = "select inner, left, right, full, outer, cross, natural, using, join from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_comparison_keywords_as_columns() {
+    let sql = "select glob, regexp, match, escape, like from t";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn keyword_as_column_with_alias() {
+    let sql = "select current as cur, action as act from t";
     let config = FormatConfig::default();
     assert_snapshot!(snapshot(sql, &config));
 }

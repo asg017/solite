@@ -1,0 +1,13 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select key, value from settings
+
+-- Output:
+select
+  "key",
+  value
+from settings;

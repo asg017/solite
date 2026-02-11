@@ -1,0 +1,20 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select rows, range, groups, preceding, following, unbounded, exclude, ties, others from t
+
+-- Output:
+select
+  rows,
+  range,
+  groups,
+  preceding,
+  following,
+  unbounded,
+  exclude,
+  ties,
+  others
+from t;

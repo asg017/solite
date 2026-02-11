@@ -1,0 +1,15 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select case when current = 1 then action else nothing end from t
+
+-- Output:
+select
+  case
+    when current = 1 then action
+    else nothing
+  end
+from t;

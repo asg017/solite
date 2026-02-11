@@ -1,0 +1,16 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select asc, desc, nulls, first, last from t
+
+-- Output:
+select
+  "asc",
+  "desc",
+  "nulls",
+  "first",
+  "last"
+from t;

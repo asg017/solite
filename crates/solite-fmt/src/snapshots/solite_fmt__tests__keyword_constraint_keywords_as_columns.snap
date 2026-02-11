@@ -1,0 +1,19 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select constraint, primary, unique, check, foreign, references, autoincrement, collate from t
+
+-- Output:
+select
+  "constraint",
+  "primary",
+  "unique",
+  "check",
+  "foreign",
+  "references",
+  autoincrement,
+  "collate"
+from t;

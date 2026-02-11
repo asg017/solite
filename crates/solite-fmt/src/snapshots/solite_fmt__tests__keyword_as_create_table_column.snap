@@ -1,0 +1,15 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table t (current text, filter integer, action text, key text primary key)
+
+-- Output:
+create table t(
+  current text,
+  filter integer,
+  action text,
+  "key" text primary key
+);

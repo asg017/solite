@@ -258,6 +258,13 @@ pub struct LspArgs {
     pub stdio: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct Sqlite3Args {
+    /// Arguments passed directly to the sqlite3 shell
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -303,6 +310,9 @@ pub enum Commands {
 
     /// Start the Language Server Protocol (LSP) server
     Lsp(LspArgs),
+
+    /// Run the sqlite3 shell directly
+    Sqlite3(Sqlite3Args),
 }
 
 #[derive(Parser)]

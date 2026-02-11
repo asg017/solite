@@ -217,6 +217,25 @@ fn main() {
     }
     build.compile("usleep");
 
+    // Compile shell.c with main() renamed so we can call it from Rust
+    cc::Build::new()
+        .file(amalgammation_src_dir.join("shell.c"))
+        .include(&amalgammation_src_dir)
+        .static_flag(true)
+        .opt_level(3)
+        .define("main", Some("sqlite3_shell_main"))
+        .define("HAVE_READLINE", Some("1"))
+        .define("HAVE_EDITLINE", Some("1"))
+        .warnings(false)
+        .compile("sqlite3_shell");
+
+    // Link libedit (macOS system editline) or readline for the sqlite3 shell
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-lib=edit");
+    } else {
+        println!("cargo:rustc-link-lib=readline");
+    }
+
     println!("cargo:rerun-if-changed=usleep.c");
     println!("cargo:rerun-if-changed=build.rs");
 

@@ -53,38 +53,6 @@ pub use types::{Export, Parameter, Report, ResultType};
 
 use crate::cli::CodegenArgs;
 
-/// Errors that can occur during code generation.
-#[derive(Debug, thiserror::Error)]
-pub enum CodegenError {
-    /// Failed to open database.
-    #[error("Failed to open database: {0}")]
-    DatabaseOpen(String),
-
-    /// Failed to read file.
-    #[error("Failed to read file: {0}")]
-    FileRead(String),
-
-    /// Invalid file path.
-    #[error("Invalid path: {0}")]
-    InvalidPath(String),
-
-    /// SQL execution error.
-    #[error("SQL error: {0}")]
-    SqlError(String),
-
-    /// Failed to prepare statement.
-    #[error("Failed to prepare statement: {0}")]
-    PrepareStatement(String),
-
-    /// Parse error in annotations.
-    #[error("Parse error: {0}")]
-    ParseError(String),
-
-    /// Unsupported dot command.
-    #[error("Unsupported dot command: {0}")]
-    UnsupportedDotCommand(String),
-}
-
 /// Entry point for the codegen command.
 pub(crate) fn codegen(cmd: CodegenArgs) -> Result<(), ()> {
     let db_type = determine_db_type(&cmd.schema);

@@ -1,12 +1,12 @@
 //! Report generation from SQL files.
 
+use anyhow::{anyhow, Result};
 use solite_core::sqlite::Connection;
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
 use std::path::PathBuf;
 
 use super::parser::{determine_result_type, parse_name_line, parse_parameter};
 use super::types::{Export, Report};
-use super::CodegenError;
 
 /// The type of base database to use for schema validation.
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub fn report_from_file(
     source: &str,
     filename: &PathBuf,
     base_db_type: BaseDatabaseType,
-) -> Result<Report, CodegenError> {
+) -> Result<Report> {
     let mut report = Report::new();
 
     let mut rt = Runtime::new(None);
@@ -56,27 +56,26 @@ pub fn report_from_file(
 fn create_connection(
     base_db_type: &BaseDatabaseType,
     report: &mut Report,
-) -> Result<Connection, CodegenError> {
+) -> Result<Connection> {
     match base_db_type {
-        BaseDatabaseType::None => {
-            Connection::open_in_memory().map_err(|e| CodegenError::DatabaseOpen(e.to_string()))
-        }
+        BaseDatabaseType::None => Connection::open_in_memory()
+            .map_err(|e| anyhow!("Failed to open database: {:?}", e)),
         BaseDatabaseType::Database(path) => copy_schema_from_database(path),
         BaseDatabaseType::SqlFile(path) => setup_from_sql_file(path, report),
     }
 }
 
 /// Copy schema from an existing database.
-fn copy_schema_from_database(path: &PathBuf) -> Result<Connection, CodegenError> {
+fn copy_schema_from_database(path: &PathBuf) -> Result<Connection> {
     let path_str = path
         .to_str()
-        .ok_or_else(|| CodegenError::InvalidPath(path.display().to_string()))?;
+        .ok_or_else(|| anyhow!("Invalid path: {}", path.display()))?;
 
     let base_db =
-        Connection::open(path_str).map_err(|e| CodegenError::DatabaseOpen(e.to_string()))?;
+        Connection::open(path_str).map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
 
     let db =
-        Connection::open_in_memory().map_err(|e| CodegenError::DatabaseOpen(e.to_string()))?;
+        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
 
     // Query for all tables and views
     let stmt = match base_db.prepare(
@@ -93,8 +92,8 @@ fn copy_schema_from_database(path: &PathBuf) -> Result<Connection, CodegenError>
         "#,
     ) {
         Ok((_, Some(stmt))) => stmt,
-        Ok((_, None)) => return Err(CodegenError::PrepareStatement("schema query".to_string())),
-        Err(e) => return Err(CodegenError::SqlError(e.to_string())),
+        Ok((_, None)) => return Err(anyhow!("Failed to prepare schema query")),
+        Err(e) => return Err(anyhow!("SQL error: {:?}", e)),
     };
 
     loop {
@@ -105,18 +104,12 @@ fn copy_schema_from_database(path: &PathBuf) -> Result<Connection, CodegenError>
                 let sql_str = sql.as_str();
                 if !sql_str.is_empty() {
                     if let Err(e) = db.execute(sql_str) {
-                        return Err(CodegenError::SqlError(format!(
-                            "Failed to copy schema: {:?}",
-                            e
-                        )));
+                        return Err(anyhow!("Failed to copy schema: {:?}", e));
                     }
                 }
             }
             Err(e) => {
-                return Err(CodegenError::SqlError(format!(
-                    "Failed to read schema: {:?}",
-                    e
-                )))
+                return Err(anyhow!("Failed to read schema: {:?}", e));
             }
         }
     }
@@ -125,21 +118,22 @@ fn copy_schema_from_database(path: &PathBuf) -> Result<Connection, CodegenError>
 }
 
 /// Set up database from a SQL file.
-fn setup_from_sql_file(path: &PathBuf, report: &mut Report) -> Result<Connection, CodegenError> {
+fn setup_from_sql_file(path: &PathBuf, report: &mut Report) -> Result<Connection> {
     let db =
-        Connection::open_in_memory().map_err(|e| CodegenError::DatabaseOpen(e.to_string()))?;
+        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
 
-    let sql = std::fs::read_to_string(path).map_err(|e| CodegenError::FileRead(e.to_string()))?;
+    let sql = std::fs::read_to_string(path)
+        .map_err(|e| anyhow!("Failed to read file {}: {}", path.display(), e))?;
 
     db.execute_script(&sql)
-        .map_err(|e| CodegenError::SqlError(format!("Failed to execute schema: {:?}", e)))?;
+        .map_err(|e| anyhow!("Failed to execute schema: {:?}", e))?;
 
     report.setup.push(sql);
     Ok(db)
 }
 
 /// Process all steps from the runtime.
-fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<(), CodegenError> {
+fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
     loop {
         match rt.next_stepx() {
             None => break,
@@ -152,7 +146,7 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<(), CodegenErr
                         let trimmed = preamble.trim();
                         if trimmed.starts_with("-- name:") {
                             let (name, annotations) = parse_name_line(trimmed)
-                                .ok_or_else(|| CodegenError::ParseError("Invalid name line".to_string()))?;
+                                .ok_or_else(|| anyhow!("Invalid name line"))?;
 
                             let columns = stmt.column_meta();
                             let parameters: Vec<_> = stmt
@@ -177,14 +171,11 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<(), CodegenErr
                     // Not an export, treat as setup
                     report.setup.push(stmt.sql());
                     if let Err(e) = stmt.execute() {
-                        return Err(CodegenError::SqlError(format!(
-                            "Failed to execute setup: {:?}",
-                            e
-                        )));
+                        return Err(anyhow!("Failed to execute setup: {:?}", e));
                     }
                 }
                 StepResult::DotCommand(cmd) => {
-                    return Err(CodegenError::UnsupportedDotCommand(format!("{:?}", cmd)));
+                    return Err(anyhow!("Unsupported dot command: {:?}", cmd));
                 }
             },
         }
@@ -192,18 +183,14 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<(), CodegenErr
     Ok(())
 }
 
-/// Convert a step error to a codegen error.
-fn handle_step_error(error: StepError) -> CodegenError {
+fn handle_step_error(error: StepError) -> anyhow::Error {
     match error {
-        StepError::ParseDot(e) => CodegenError::ParseError(format!("Dot command error: {:?}", e)),
+        StepError::ParseDot(e) => anyhow!("Dot command parse error: {:?}", e),
         StepError::Prepare {
             file_name,
             offset,
             error,
             ..
-        } => CodegenError::PrepareStatement(format!(
-            "{}:{}: {:?}",
-            file_name, offset, error
-        )),
+        } => anyhow!("Failed to prepare statement at {}:{}: {:?}", file_name, offset, error),
     }
 }

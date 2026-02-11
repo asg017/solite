@@ -3768,7 +3768,6 @@ dependencies = [
  "tempfile",
  "term_size",
  "termcolor",
- "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]

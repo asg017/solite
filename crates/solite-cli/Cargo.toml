@@ -46,7 +46,6 @@ markdown = "1.0.0-alpha.23"
 mdast_util_to_markdown = "0.0.1"
 crossterm = "0.29.0"
 jiff = "0.2.14"
-thiserror = "2.0.12"
 statistical = "1.0.0"
 
 runtimelib = { version = "0.25.0", features = ["tokio-runtime"] }

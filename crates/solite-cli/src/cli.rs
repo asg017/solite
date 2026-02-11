@@ -5,8 +5,8 @@ use solite_core::exporter::ExportFormat;
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    pub database: Option<PathBuf>,
-    pub script: Option<PathBuf>,
+    /// Positional args: [database] [script.sql] [procedureName]
+    pub args: Vec<String>,
 
     #[arg(long, short = 'p', num_args = 2)]
     pub parameters: Vec<String>,

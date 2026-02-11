@@ -37,6 +37,7 @@ mod test_status;
 
 use std::ffi::OsStr;
 use std::fs::read_to_string;
+use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use nbformat::{parse_notebook, Notebook};
@@ -59,40 +60,103 @@ pub(crate) fn run(flags: RunArgs) -> Result<(), ()> {
     }
 }
 
+/// Classification of a positional argument.
+enum InputType {
+    Script(PathBuf),
+    Database(PathBuf),
+    Procedure(String),
+}
+
+/// Classify a positional argument by file extension.
+fn classify_arg(s: &str) -> InputType {
+    let path = std::path::Path::new(s);
+    match path.extension().and_then(OsStr::to_str) {
+        Some("sql") | Some("ipynb") => InputType::Script(PathBuf::from(s)),
+        Some("db") | Some("sqlite") | Some("sqlite3") => InputType::Database(PathBuf::from(s)),
+        _ => InputType::Procedure(s.to_string()),
+    }
+}
+
+/// Parsed positional arguments for the run command.
+#[derive(Debug)]
+struct ParsedArgs {
+    database: Option<PathBuf>,
+    script: Option<PathBuf>,
+    procedure: Option<String>,
+}
+
+/// Parse positional arguments into database, script, and procedure.
+///
+/// Procedure name must follow immediately after the script file.
+/// Valid forms:
+///   solite run script.sql
+///   solite run script.sql procedureName
+///   solite run db.db script.sql
+///   solite run db.db script.sql procedureName
+///   solite run script.sql procedureName db.db
+///   solite run script.sql db.db
+fn parse_args(args: &[String]) -> Result<ParsedArgs> {
+    let mut database: Option<PathBuf> = None;
+    let mut script: Option<PathBuf> = None;
+    let mut procedure: Option<String> = None;
+
+    let classified: Vec<InputType> = args.iter().map(|a| classify_arg(a)).collect();
+
+    for (i, input) in classified.into_iter().enumerate() {
+        match input {
+            InputType::Script(path) => {
+                if script.is_some() {
+                    bail!("Multiple script files provided");
+                }
+                script = Some(path);
+            }
+            InputType::Database(path) => {
+                if database.is_some() {
+                    bail!("Multiple database files provided");
+                }
+                database = Some(path);
+            }
+            InputType::Procedure(name) => {
+                // Procedure name must follow immediately after a script file
+                let prev_was_script =
+                    i > 0 && matches!(classify_arg(&args[i - 1]), InputType::Script(_));
+                if !prev_was_script {
+                    bail!("Procedure name '{name}' must follow a .sql file");
+                }
+                if procedure.is_some() {
+                    bail!("Multiple procedure names provided");
+                }
+                procedure = Some(name);
+            }
+        }
+    }
+
+    Ok(ParsedArgs {
+        database,
+        script,
+        procedure,
+    })
+}
+
 /// Internal implementation of the run command.
 fn run_impl(flags: RunArgs) -> Result<()> {
-    // Determine database and script from arguments
-    let (database, script) = match (flags.database, flags.script) {
-        (Some(a), Some(b)) => {
-            // If first arg is .sql, swap them
-            if a.extension().and_then(OsStr::to_str) == Some("sql") {
-                (Some(b), a)
-            } else {
-                (Some(a), b)
-            }
-        }
-        (Some(input), None) | (None, Some(input)) => {
-            let ext = input.extension().and_then(OsStr::to_str);
-            match ext {
-                Some("sql") | Some("ipynb") => (None, input),
-                Some("db") | Some("sqlite") | Some("sqlite3") => {
-                    // Open REPL for database files
-                    crate::commands::repl::repl(ReplArgs {
-                        database: Some(input),
-                    })
-                    .map_err(|_| anyhow::anyhow!("Failed to open REPL"))?;
-                    return Ok(());
-                }
-                Some(ext) => bail!("Unknown file type: {ext}"),
-                None => bail!("Unknown file type: no extension"),
-            }
-        }
-        (None, None) => {
-            // No arguments - open REPL
-            crate::commands::repl::repl(ReplArgs { database: None })
-                .map_err(|_| anyhow::anyhow!("Failed to open REPL"))?;
-            return Ok(());
-        }
+    let parsed = parse_args(&flags.args)?;
+    let ParsedArgs {
+        database,
+        script,
+        procedure,
+    } = parsed;
+
+    // No args → REPL; only a database → REPL on that db
+    if script.is_none() && procedure.is_none() {
+        crate::commands::repl::repl(ReplArgs { database })
+            .map_err(|_| anyhow::anyhow!("Failed to open REPL"))?;
+        return Ok(());
+    }
+
+    let script = match script {
+        Some(s) => s,
+        None => bail!("No SQL script provided"),
     };
 
     // Create runtime
@@ -120,16 +184,40 @@ fn run_impl(flags: RunArgs) -> Result<()> {
         }
     }
 
-    // Load and enqueue script
-    enqueue_script(&mut rt, &script)?;
+    match procedure {
+        Some(proc_name) => {
+            // Load the file (execute setup, register procedures), then call one
+            let script_str = script.to_string_lossy().to_string();
+            rt.load_file(&script_str)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    // Execute
-    let mut timer = true;
-    execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
+            let proc = rt
+                .get_procedure(&proc_name)
+                .ok_or_else(|| anyhow::anyhow!("Unknown procedure: '{proc_name}'"))?
+                .clone();
 
-    // Write trace output if requested
-    if let Some(trace_path) = flags.trace {
-        write_trace_output(&rt, &trace_path)?;
+            match rt.prepare_with_parameters(&proc.sql) {
+                Ok((_, Some(stmt))) => {
+                    let config = solite_table::TableConfig::terminal();
+                    solite_table::print_statement(&stmt, &config)
+                        .map_err(|e| anyhow::anyhow!("Error executing procedure: {e}"))?;
+                }
+                Ok((_, None)) => bail!("Procedure '{proc_name}' prepared to empty statement"),
+                Err(e) => bail!("Error preparing procedure '{proc_name}': {e:?}"),
+            }
+        }
+        None => {
+            // Normal script execution
+            enqueue_script(&mut rt, &script)?;
+
+            let mut timer = true;
+            execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
+
+            // Write trace output if requested
+            if let Some(trace_path) = flags.trace {
+                write_trace_output(&rt, &trace_path)?;
+            }
+        }
     }
 
     Ok(())
@@ -277,4 +365,162 @@ fn write_trace_output(rt: &Runtime, trace_path: &std::path::Path) -> Result<()> 
         .context("Failed to write trace")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(strs: &[&str]) -> Vec<String> {
+        strs.iter().map(|s| s.to_string()).collect()
+    }
+
+    // classify_arg
+
+    #[test]
+    fn classify_sql() {
+        assert!(matches!(classify_arg("script.sql"), InputType::Script(_)));
+    }
+
+    #[test]
+    fn classify_ipynb() {
+        assert!(matches!(
+            classify_arg("notebook.ipynb"),
+            InputType::Script(_)
+        ));
+    }
+
+    #[test]
+    fn classify_db() {
+        assert!(matches!(classify_arg("my.db"), InputType::Database(_)));
+    }
+
+    #[test]
+    fn classify_sqlite() {
+        assert!(matches!(
+            classify_arg("my.sqlite"),
+            InputType::Database(_)
+        ));
+    }
+
+    #[test]
+    fn classify_sqlite3() {
+        assert!(matches!(
+            classify_arg("my.sqlite3"),
+            InputType::Database(_)
+        ));
+    }
+
+    #[test]
+    fn classify_procedure() {
+        assert!(matches!(
+            classify_arg("listUsers"),
+            InputType::Procedure(_)
+        ));
+    }
+
+    // parse_args – valid forms
+
+    #[test]
+    fn parse_script_only() {
+        let p = parse_args(&args(&["script.sql"])).unwrap();
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.sql"));
+        assert!(p.database.is_none());
+        assert!(p.procedure.is_none());
+    }
+
+    #[test]
+    fn parse_script_procedure() {
+        let p = parse_args(&args(&["script.sql", "listUsers"])).unwrap();
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.sql"));
+        assert_eq!(p.procedure.unwrap(), "listUsers");
+        assert!(p.database.is_none());
+    }
+
+    #[test]
+    fn parse_db_script() {
+        let p = parse_args(&args(&["my.db", "script.sql"])).unwrap();
+        assert_eq!(p.database.unwrap(), PathBuf::from("my.db"));
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.sql"));
+        assert!(p.procedure.is_none());
+    }
+
+    #[test]
+    fn parse_db_script_procedure() {
+        let p = parse_args(&args(&["my.db", "script.sql", "listUsers"])).unwrap();
+        assert_eq!(p.database.unwrap(), PathBuf::from("my.db"));
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.sql"));
+        assert_eq!(p.procedure.unwrap(), "listUsers");
+    }
+
+    #[test]
+    fn parse_script_procedure_db() {
+        let p = parse_args(&args(&["script.sql", "listUsers", "my.db"])).unwrap();
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.sql"));
+        assert_eq!(p.procedure.unwrap(), "listUsers");
+        assert_eq!(p.database.unwrap(), PathBuf::from("my.db"));
+    }
+
+    #[test]
+    fn parse_script_db() {
+        let p = parse_args(&args(&["script.sql", "my.db"])).unwrap();
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.sql"));
+        assert_eq!(p.database.unwrap(), PathBuf::from("my.db"));
+        assert!(p.procedure.is_none());
+    }
+
+    #[test]
+    fn parse_no_args() {
+        let p = parse_args(&args(&[])).unwrap();
+        assert!(p.script.is_none());
+        assert!(p.database.is_none());
+        assert!(p.procedure.is_none());
+    }
+
+    #[test]
+    fn parse_db_only() {
+        let p = parse_args(&args(&["my.db"])).unwrap();
+        assert!(p.script.is_none());
+        assert_eq!(p.database.unwrap(), PathBuf::from("my.db"));
+        assert!(p.procedure.is_none());
+    }
+
+    // parse_args – error cases
+
+    #[test]
+    fn error_procedure_before_script() {
+        let err = parse_args(&args(&["listUsers", "script.sql"])).unwrap_err();
+        assert!(err.to_string().contains("must follow a .sql file"));
+    }
+
+    #[test]
+    fn error_bare_procedure() {
+        let err = parse_args(&args(&["listUsers"])).unwrap_err();
+        assert!(err.to_string().contains("must follow a .sql file"));
+    }
+
+    #[test]
+    fn error_procedure_after_db() {
+        let err = parse_args(&args(&["my.db", "listUsers"])).unwrap_err();
+        assert!(err.to_string().contains("must follow a .sql file"));
+    }
+
+    #[test]
+    fn error_multiple_scripts() {
+        let err = parse_args(&args(&["a.sql", "b.sql"])).unwrap_err();
+        assert!(err.to_string().contains("Multiple script files"));
+    }
+
+    #[test]
+    fn error_multiple_databases() {
+        let err = parse_args(&args(&["a.db", "b.db", "script.sql"])).unwrap_err();
+        assert!(err.to_string().contains("Multiple database files"));
+    }
+
+    #[test]
+    fn error_multiple_procedures() {
+        let err = parse_args(&args(&["script.sql", "proc1", "proc2"])).unwrap_err();
+        // proc2 doesn't follow a script, so it fails with "must follow"
+        assert!(err.to_string().contains("must follow a .sql file"));
+    }
 }

@@ -265,6 +265,11 @@ pub struct Sqlite3Args {
     pub args: Vec<String>,
 }
 
+#[derive(Args, Debug)]
+pub struct SchemaArgs {
+    pub database: PathBuf,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -313,6 +318,9 @@ pub enum Commands {
 
     /// Run the sqlite3 shell directly
     Sqlite3(Sqlite3Args),
+
+    /// Print the schema of a database
+    Schema(SchemaArgs),
 }
 
 #[derive(Parser)]

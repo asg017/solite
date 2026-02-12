@@ -13,3 +13,4 @@ pub mod fmt;
 pub mod lint;
 pub mod lsp;
 pub mod sqlite3;
+pub mod schema;

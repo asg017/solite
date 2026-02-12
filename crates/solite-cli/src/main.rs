@@ -55,6 +55,7 @@ fn main() {
         cli::Commands::Lint(args) => commands::lint::lint(args),
         cli::Commands::Lsp(args) => commands::lsp::lsp(args),
         cli::Commands::Sqlite3(args) => commands::sqlite3::sqlite3(args.args),
+        cli::Commands::Schema(args) => commands::schema::schema(args.database),
     };
     match result {
         Ok(_) => exit(0),

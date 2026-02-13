@@ -882,26 +882,64 @@ pub(crate) fn compute_semantic_tokens(text: &str) -> Vec<SemanticToken> {
                 &mut cast_paren_depth,
             );
 
+            let token_text = &text[token.span.start..token.span.end];
             let (line, start) = offset_to_position(text, token.span.start);
-            let length = (token.span.end - token.span.start) as u32;
 
-            let delta_line = line - prev_line;
-            let delta_start = if delta_line == 0 {
-                start - prev_start
+            if token_text.contains('\n') {
+                // Multiline token: emit one SemanticToken per line
+                let lines: Vec<&str> = token_text.split('\n').collect();
+                for (j, segment) in lines.iter().enumerate() {
+                    let seg_len = segment.len() as u32;
+                    if j == 0 {
+                        // First line: delta from previous token
+                        let delta_line = line - prev_line;
+                        let delta_start = if delta_line == 0 {
+                            start - prev_start
+                        } else {
+                            start
+                        };
+                        semantic_tokens.push(SemanticToken {
+                            delta_line,
+                            delta_start,
+                            length: seg_len,
+                            token_type,
+                            token_modifiers_bitset: 0,
+                        });
+                    } else {
+                        // Continuation lines: delta_line=1, start at column 0
+                        semantic_tokens.push(SemanticToken {
+                            delta_line: 1,
+                            delta_start: 0,
+                            length: seg_len,
+                            token_type,
+                            token_modifiers_bitset: 0,
+                        });
+                    }
+                }
+                // Update prev position to last sub-token's line/col
+                prev_line = line + (lines.len() as u32 - 1);
+                prev_start = 0; // last sub-token starts at col 0
             } else {
-                start
-            };
+                let length = (token.span.end - token.span.start) as u32;
 
-            semantic_tokens.push(SemanticToken {
-                delta_line,
-                delta_start,
-                length,
-                token_type,
-                token_modifiers_bitset: 0,
-            });
+                let delta_line = line - prev_line;
+                let delta_start = if delta_line == 0 {
+                    start - prev_start
+                } else {
+                    start
+                };
 
-            prev_line = line;
-            prev_start = start;
+                semantic_tokens.push(SemanticToken {
+                    delta_line,
+                    delta_start,
+                    length,
+                    token_type,
+                    token_modifiers_bitset: 0,
+                });
+
+                prev_line = line;
+                prev_start = start;
+            }
         }
 
     semantic_tokens

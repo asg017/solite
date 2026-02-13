@@ -73,3 +73,17 @@ fn snapshot_semantic_tokens_check_constraint() {
         "CREATE TABLE t (x INT CHECK(x > 0), y TEXT DEFAULT 'hello');"
     ));
 }
+
+#[test]
+fn snapshot_semantic_tokens_multiline_string() {
+    assert_snapshot!(format_semantic_tokens(
+        "SELECT 'hello\nworld\n!';"
+    ));
+}
+
+#[test]
+fn snapshot_semantic_tokens_multiline_string_two_lines() {
+    assert_snapshot!(format_semantic_tokens(
+        "select 'this is correctly highlighted\nthis isnt';"
+    ));
+}

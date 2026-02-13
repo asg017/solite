@@ -542,6 +542,31 @@ mod tests {
     }
 
     #[test]
+    fn test_lex_multiline_string() {
+        let tokens = lex("SELECT 'line1\nline2\nline3';");
+        assert_eq!(tokens.len(), 3, "tokens: {:?}", tokens.iter().map(|t| &t.kind).collect::<Vec<_>>());
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::String);
+        assert_eq!(tokens[2].kind, TokenKind::Semicolon);
+    }
+
+    #[test]
+    fn test_lex_multiline_string_in_table_function() {
+        let input = "select * from bytecode('\ncreate table t as\nselect *\nfrom t\nlimit 2000000');";
+        let tokens = lex(input);
+        // SELECT * FROM bytecode( STRING ) ;
+        assert_eq!(tokens.len(), 8, "tokens: {:?}", tokens.iter().map(|t| &t.kind).collect::<Vec<_>>());
+        assert_eq!(tokens[0].kind, TokenKind::Select);
+        assert_eq!(tokens[1].kind, TokenKind::Star);
+        assert_eq!(tokens[2].kind, TokenKind::From);
+        assert_eq!(tokens[3].kind, TokenKind::Ident); // bytecode
+        assert_eq!(tokens[4].kind, TokenKind::LParen);
+        assert_eq!(tokens[5].kind, TokenKind::String);
+        assert_eq!(tokens[6].kind, TokenKind::RParen);
+        assert_eq!(tokens[7].kind, TokenKind::Semicolon);
+    }
+
+    #[test]
     fn test_case_insensitive() {
         let tokens = lex("select null");
         assert_eq!(tokens[0].kind, TokenKind::Select);

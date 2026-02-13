@@ -8,6 +8,10 @@ pub struct RunArgs {
     /// Positional args: [database] [script.sql] [procedureName]
     pub args: Vec<String>,
 
+    /// Execute SQL/dot commands from the given string (instead of a .sql file)
+    #[arg(long, short = 'c')]
+    pub command: Option<String>,
+
     #[arg(long, short = 'p', num_args = 2)]
     pub parameters: Vec<String>,
 

@@ -64,6 +64,7 @@ pub enum BlockSource {
     File(PathBuf),
     Repl,
     JupyerCell,
+    CommandFlag,
 }
 
 #[derive(Default)]

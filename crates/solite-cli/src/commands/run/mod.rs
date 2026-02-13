@@ -147,6 +147,47 @@ fn run_impl(flags: RunArgs) -> Result<()> {
         procedure,
     } = parsed;
 
+    // -c flag: treat the string as inline SQL, no scripts/procedures allowed
+    if let Some(ref command) = flags.command {
+        if script.is_some() {
+            bail!("-c/--command cannot be combined with a .sql file");
+        }
+        if procedure.is_some() {
+            bail!("-c/--command cannot be combined with a procedure name");
+        }
+
+        let mut rt = if flags.readonly {
+            match &database {
+                Some(db) => Runtime::new_readonly(&db.to_string_lossy()),
+                None => bail!("--readonly requires a database path"),
+            }
+        } else {
+            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+        };
+
+        if flags.trace.is_some() {
+            setup_tracing(&rt)?;
+        }
+
+        for chunk in flags.parameters.chunks(2) {
+            if chunk.len() == 2 {
+                rt.define_parameter(chunk[0].clone(), chunk[1].clone())
+                    .map_err(|e| anyhow::anyhow!("Failed to set parameter: {e}"))?;
+            }
+        }
+
+        rt.enqueue("<command>", command, BlockSource::CommandFlag);
+
+        let mut timer = true;
+        execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
+
+        if let Some(trace_path) = flags.trace {
+            write_trace_output(&rt, &trace_path)?;
+        }
+
+        return Ok(());
+    }
+
     // No args → REPL; only a database → REPL on that db
     if script.is_none() && procedure.is_none() {
         crate::commands::repl::repl(ReplArgs { database })

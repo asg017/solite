@@ -272,8 +272,8 @@ pub enum Commands {
     #[command(alias = "q")]
     Query(QueryArgs),
 
-    #[command(alias = "exec")]
     /// Execute a write SQL statement on a database
+    #[command(alias = "exec")]
     Execute(ExecuteArgs),
 
     /// Run SQL-based inline tests in a single file
@@ -295,7 +295,8 @@ pub enum Commands {
     Tui(TuiArgs),
 
     /// Format SQL files
-    Fmt(FmtArgs),
+    #[command(alias = "fmt")]
+    Format(FmtArgs),
 
     /// Lint SQL files for potential issues
     Lint(LintArgs),
@@ -310,15 +311,48 @@ pub enum Commands {
     Schema(SchemaArgs),
 }
 
+const HELP_TEMPLATE: &str = "\
+{name} {version}
+{about}
+
+{usage-heading} {usage}
+
+Options:
+{options}
+Scripting and Query Execution:
+  run              Run SQL scripts
+  repl             Start a REPL on a SQLite database
+  query            Run a read-only SQL query and output results to a file
+  execute          Execute a write SQL statement on a database
+  schema           Print the schema of a database
+
+Tooling:
+  jupyter          Manage the Solite Jupyter kernel
+  tui              Tui for exploring a database
+  test             Run SQL-based inline tests in a single file
+  bench            Run benchmarks on SQL statements
+  codegen          Codegen SQL queries into an intermediate representation
+  docs             Tooling for documenting SQLite extensions
+
+SQL:
+  format           Format SQL files
+  lint             Lint SQL files for potential issues
+  lsp              Start the Language Server Protocol (LSP) server
+
+Compatibility:
+  sqlite3          Run the sqlite3 shell directly
+";
+
 #[derive(Parser)]
 #[command(
-  name = "solite", 
+  name = "solite",
   author,
-  long_version = env!("CARGO_PKG_VERSION"), 
-  about = "Solite CLI", 
+  long_version = env!("CARGO_PKG_VERSION"),
+  about = "Solite CLI",
   version,
   subcommand_required = false,
   arg_required_else_help = false,
+  help_template = HELP_TEMPLATE,
 )]
 pub struct Cli {
     #[command(subcommand)]

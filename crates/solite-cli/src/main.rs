@@ -50,7 +50,7 @@ fn main() {
         cli::Commands::Bench(args) => commands::bench::bench(args),
         cli::Commands::Codegen(cmd) => commands::codegen::codegen(cmd),
         cli::Commands::Tui(cmd) => commands::tui::tui(cmd),
-        cli::Commands::Fmt(args) => commands::fmt::fmt(args),
+        cli::Commands::Format(args) => commands::fmt::fmt(args),
         cli::Commands::Lint(args) => commands::lint::lint(args),
         cli::Commands::Lsp(args) => commands::lsp::lsp(args),
         cli::Commands::Sqlite3(args) => commands::sqlite3::sqlite3(args.args),

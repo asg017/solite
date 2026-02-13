@@ -44,7 +44,6 @@ fn main() {
         cli::Commands::Query(args) => commands::query::query(args),
         cli::Commands::Execute(args) => commands::exec::exec(args),
         cli::Commands::Repl(args) => commands::repl::repl(args),
-        cli::Commands::Snap(cmd) => commands::snapshot::snapshot(cmd),
         cli::Commands::Test(cmd) => commands::test::test(cmd),
         cli::Commands::Jupyter(cmd) => commands::jupyter::jupyter(cmd),
         cli::Commands::Docs(cmd) => commands::docs::docs(cmd),

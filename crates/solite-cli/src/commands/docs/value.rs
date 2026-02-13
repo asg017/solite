@@ -1,6 +1,6 @@
 //! Value display utilities for documentation.
 
-use crate::commands::snapshot::{ValueCopy, ValueCopyValue};
+use crate::commands::test::snap::{ValueCopy, ValueCopyValue};
 use solite_core::sqlite::escape_string;
 
 /// Display a copied SQLite value as a string for documentation.

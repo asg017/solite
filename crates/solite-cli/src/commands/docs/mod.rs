@@ -46,7 +46,7 @@ use mdast_util_to_markdown::to_markdown;
 use solite_core::Runtime;
 
 use crate::cli::{DocsCommand, DocsInlineArgs, DocsNamespace};
-use crate::commands::snapshot::{copy, snapshot_value};
+use crate::commands::test::snap::{copy, snapshot_value};
 use crate::errors::{report_error, report_error_string};
 
 use sql::{
@@ -229,7 +229,7 @@ fn process_code_block(
                     }
                 } else {
                     // Has columns - collect results
-                    let mut results: Vec<Vec<crate::commands::snapshot::ValueCopy>> = vec![];
+                    let mut results: Vec<Vec<crate::commands::test::snap::ValueCopy>> = vec![];
                     loop {
                         match stmt.next() {
                             Ok(Some(row)) => {

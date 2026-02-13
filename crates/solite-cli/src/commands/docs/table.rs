@@ -1,6 +1,6 @@
 //! Table rendering for documentation output.
 
-use crate::commands::snapshot::ValueCopy;
+use crate::commands::test::snap::ValueCopy;
 
 use super::value::display_value;
 

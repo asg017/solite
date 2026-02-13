@@ -124,22 +124,6 @@ pub struct CodegenArgs {
 }
 
 
-#[derive(Args, Debug)]
-pub struct SnapNamespace {
-    #[command(subcommand)]
-    pub command: SnapCommand,
-}
-
-#[derive(Args, Debug)]
-pub struct SnapTestArgs {
-    pub file: PathBuf,
-
-    #[arg(long)]
-    pub trace: Option<PathBuf>,
-
-    #[arg(long)]
-    pub verbose: bool,
-}
 
 #[derive(Args, Debug)]
 pub struct TestArgs {
@@ -150,12 +134,14 @@ pub struct TestArgs {
 
     #[arg(long)]
     pub verbose: bool,
-}
 
-#[derive(Subcommand, Debug)]
-pub enum SnapCommand {
-    Test(SnapTestArgs),
-    Review(SnapTestArgs),
+    /// Auto-accept all snapshot changes (new, updated, orphaned)
+    #[arg(long, short = 'u')]
+    pub update: bool,
+
+    /// Interactively review each snapshot change
+    #[arg(long)]
+    pub review: bool,
 }
 
 #[derive(Args, Debug)]
@@ -285,9 +271,6 @@ pub enum Commands {
     #[command(alias = "exec")]
     /// Execute a write SQL statement on a database
     Execute(ExecuteArgs),
-
-    /// Snapshot testing for extensions and SQL statements
-    Snap(SnapNamespace),
 
     /// Run SQL-based inline tests in a single file
     Test(TestArgs),

@@ -5,7 +5,6 @@ pub mod exec;
 pub mod docs;
 pub mod bench;
 pub mod jupyter;
-pub mod snapshot;
 pub mod test;
 pub mod codegen;
 pub mod tui;

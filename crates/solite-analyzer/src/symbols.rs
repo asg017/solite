@@ -230,6 +230,33 @@ fn collect_table_or_subquery(scope: &mut StatementScope, table: &TableOrSubquery
                 );
             }
         }
+        TableOrSubquery::TableFunction {
+            name,
+            alias,
+            span,
+            ..
+        } => {
+            if let Some(alias_name) = alias {
+                scope.table_aliases.insert(
+                    alias_name.to_lowercase(),
+                    TableAliasInfo {
+                        table_name: name.clone(),
+                        alias_span: span.clone(),
+                        full_span: span.clone(),
+                    },
+                );
+            }
+            if alias.is_none() {
+                scope.table_aliases.insert(
+                    name.to_lowercase(),
+                    TableAliasInfo {
+                        table_name: name.clone(),
+                        alias_span: span.clone(),
+                        full_span: span.clone(),
+                    },
+                );
+            }
+        }
         TableOrSubquery::Subquery { alias, span, .. } => {
             if let Some(alias_name) = alias {
                 scope.table_aliases.insert(
@@ -470,6 +497,23 @@ fn find_symbol_in_table_or_subquery(
                     ));
                 }
                 // Otherwise return a table reference
+                return Some((
+                    ResolvedSymbol::Table {
+                        name: name.clone(),
+                        span: span.clone(),
+                    },
+                    span.clone(),
+                ));
+            }
+        }
+        TableOrSubquery::TableFunction { name, args, span, .. } => {
+            if offset >= span.start && offset <= span.end {
+                // Check if cursor is on the function name or args
+                for arg in args {
+                    if let Some(result) = find_symbol_in_expr(arg, source, offset, scope, schema) {
+                        return Some(result);
+                    }
+                }
                 return Some((
                     ResolvedSymbol::Table {
                         name: name.clone(),

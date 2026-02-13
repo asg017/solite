@@ -593,4 +593,17 @@ mod tests {
         assert_eq!(tokens[3].kind, TokenKind::Asc);
         assert_eq!(tokens[6].kind, TokenKind::Desc);
     }
+
+    #[test]
+    fn test_lex_table_function() {
+        let tokens = lex("generate_series(1, 10, 2)");
+        assert_eq!(tokens[0].kind, TokenKind::Ident);
+        assert_eq!(tokens[1].kind, TokenKind::LParen);
+        assert_eq!(tokens[2].kind, TokenKind::Integer);
+        assert_eq!(tokens[3].kind, TokenKind::Comma);
+        assert_eq!(tokens[4].kind, TokenKind::Integer);
+        assert_eq!(tokens[5].kind, TokenKind::Comma);
+        assert_eq!(tokens[6].kind, TokenKind::Integer);
+        assert_eq!(tokens[7].kind, TokenKind::RParen);
+    }
 }

@@ -102,6 +102,16 @@ impl MissingAsAlias {
                     });
                 }
             }
+            TableOrSubquery::TableFunction { alias: Some(alias), alias_has_as, span, .. } => {
+                if !alias_has_as {
+                    diagnostics.push(LintDiagnostic {
+                        rule_id: self.id(),
+                        message: format!("Table function alias '{}' should use AS keyword", alias),
+                        span: span.clone(),
+                        severity: ctx.config.get_severity(self.id(), self.default_severity()),
+                    });
+                }
+            }
             TableOrSubquery::Subquery { alias: Some(alias), alias_has_as, span, .. } => {
                 if !alias_has_as {
                     diagnostics.push(LintDiagnostic {

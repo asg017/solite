@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select g.value from generate_series(1, 10) as g
+
+-- Output:
+select g.value from generate_series(1, 10) as g;

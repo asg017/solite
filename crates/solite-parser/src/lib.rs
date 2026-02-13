@@ -3244,6 +3244,7 @@ impl Parser {
     fn table_or_subquery_end(&self, t: &TableOrSubquery) -> usize {
         match t {
             TableOrSubquery::Table { span, .. } => span.end,
+            TableOrSubquery::TableFunction { span, .. } => span.end,
             TableOrSubquery::Subquery { span, .. } => span.end,
             TableOrSubquery::TableList { span, .. } => span.end,
             TableOrSubquery::Join { span, .. } => span.end,
@@ -3261,6 +3262,7 @@ impl Parser {
 
             let start = match &left {
                 TableOrSubquery::Table { span, .. } => span.start,
+                TableOrSubquery::TableFunction { span, .. } => span.start,
                 TableOrSubquery::Subquery { span, .. } => span.start,
                 TableOrSubquery::TableList { span, .. } => span.start,
                 TableOrSubquery::Join { span, .. } => span.start,
@@ -3447,6 +3449,30 @@ impl Parser {
             } else {
                 (None, first_name)
             };
+
+            // Check for table-valued function: name(args...)
+            if schema.is_none() && self.current_kind() == Some(&TokenKind::LParen) {
+                self.advance(); // consume '('
+                let mut args = Vec::new();
+                if self.current_kind() != Some(&TokenKind::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.current_kind() == Some(&TokenKind::Comma) {
+                        self.advance();
+                        args.push(self.parse_expr()?);
+                    }
+                }
+                end = self.expect(TokenKind::RParen, ")")?.span.end;
+
+                let (alias, alias_has_as) = self.parse_optional_alias(&mut end)?;
+
+                return Ok(TableOrSubquery::TableFunction {
+                    name,
+                    args,
+                    alias,
+                    alias_has_as,
+                    span: Span::new(start, end),
+                });
+            }
 
             // Optional AS alias
             let (alias, alias_has_as) = self.parse_optional_alias(&mut end)?;
@@ -9070,5 +9096,50 @@ mod tests {
             }
             _ => panic!("Expected SELECT"),
         }
+    }
+
+    #[test]
+    fn test_parse_table_function() {
+        let program = parse_program("SELECT value FROM generate_series(1, 10, 2);").unwrap();
+        match &program.statements[0] {
+            Statement::Select(stmt) => {
+                let from = stmt.from.as_ref().expect("Expected FROM clause");
+                match &from.tables[0] {
+                    TableOrSubquery::TableFunction { name, args, alias, .. } => {
+                        assert_eq!(name, "generate_series");
+                        assert_eq!(args.len(), 3);
+                        assert!(alias.is_none());
+                    }
+                    other => panic!("Expected TableFunction, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected SELECT"),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_function_with_alias() {
+        let program = parse_program("SELECT g.value FROM generate_series(1, 10) AS g;").unwrap();
+        match &program.statements[0] {
+            Statement::Select(stmt) => {
+                let from = stmt.from.as_ref().expect("Expected FROM clause");
+                match &from.tables[0] {
+                    TableOrSubquery::TableFunction { name, args, alias, alias_has_as, .. } => {
+                        assert_eq!(name, "generate_series");
+                        assert_eq!(args.len(), 2);
+                        assert_eq!(alias, &Some("g".to_string()));
+                        assert!(*alias_has_as);
+                    }
+                    other => panic!("Expected TableFunction, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected SELECT"),
+        }
+    }
+
+    #[test]
+    fn snapshot_table_function() {
+        let program = parse_program("SELECT value FROM generate_series(1, 10, 2);").unwrap();
+        insta::assert_debug_snapshot!(program);
     }
 }

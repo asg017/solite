@@ -397,6 +397,14 @@ pub enum TableOrSubquery {
         alias_has_as: bool,
         span: Span,
     },
+    /// Table-valued function call: name(args) [AS alias]
+    TableFunction {
+        name: String,
+        args: Vec<Expr>,
+        alias: Option<String>,
+        alias_has_as: bool,
+        span: Span,
+    },
     /// (table_or_subquery, ...)
     TableList {
         tables: Vec<TableOrSubquery>,

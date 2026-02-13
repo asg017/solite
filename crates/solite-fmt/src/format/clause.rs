@@ -111,6 +111,19 @@ impl FormatNode for TableOrSubquery {
                     }
                 }
             }
+            TableOrSubquery::TableFunction {
+                name,
+                args,
+                alias,
+                alias_has_as,
+                ..
+            } => {
+                format_identifier(p, name);
+                p.write("(");
+                format_list(p, args, false, |p, arg| arg.format(p));
+                p.write(")");
+                format_alias(p, alias, *alias_has_as);
+            }
             TableOrSubquery::Subquery {
                 query,
                 alias,

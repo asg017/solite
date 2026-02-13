@@ -422,6 +422,11 @@ fn walk_table_or_subquery<F>(
 {
     match table {
         solite_ast::TableOrSubquery::Table { .. } => {}
+        solite_ast::TableOrSubquery::TableFunction { args, .. } => {
+            for arg in args {
+                walk_expr_recursive(arg, ctx, check);
+            }
+        }
         solite_ast::TableOrSubquery::Subquery { query, .. } => {
             walk_select_stmt(query, ctx, check);
         }

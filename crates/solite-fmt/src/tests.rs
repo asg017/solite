@@ -1688,3 +1688,17 @@ fn keyword_as_column_with_alias() {
     assert_snapshot!(snapshot(sql, &config));
 }
 
+#[test]
+fn select_from_table_function() {
+    let sql = "select value from generate_series(1, 10, 2)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn select_from_table_function_with_alias() {
+    let sql = "select g.value from generate_series(1, 10) as g";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+

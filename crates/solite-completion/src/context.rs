@@ -669,6 +669,8 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
         AfterJoin,
         AfterJoinTable,
         AfterJoinOn,
+        /// Inside table function args — tracking paren depth, returns to `resume` state
+        InTableFunctionArgs { depth: usize, for_join: bool },
         Other,
     }
 
@@ -695,6 +697,19 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
         }
 
         state = match (&state, &token.kind) {
+            // Table function args: track paren depth
+            (SimpleState::InTableFunctionArgs { depth, for_join }, TokenKind::LParen) => {
+                SimpleState::InTableFunctionArgs { depth: depth + 1, for_join: *for_join }
+            }
+            (SimpleState::InTableFunctionArgs { depth, for_join }, TokenKind::RParen) => {
+                if *depth <= 1 {
+                    if *for_join { SimpleState::AfterJoinTable } else { SimpleState::AfterFromTable }
+                } else {
+                    SimpleState::InTableFunctionArgs { depth: depth - 1, for_join: *for_join }
+                }
+            }
+            (SimpleState::InTableFunctionArgs { .. }, _) => state.clone(),
+
             (_, TokenKind::From) => {
                 // Could be SELECT FROM or DELETE FROM
                 SimpleState::AfterFrom
@@ -702,6 +717,9 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
             (SimpleState::AfterFrom, kind) if is_ident_token(kind) => {
                 current_table_name = Some(token_text());
                 SimpleState::AfterFromTable
+            }
+            (SimpleState::AfterFromTable, TokenKind::LParen) => {
+                SimpleState::InTableFunctionArgs { depth: 1, for_join: false }
             }
             (SimpleState::AfterFromTable, TokenKind::As) => SimpleState::ExpectAlias,
             (SimpleState::AfterFromTable, kind) if is_ident_token(kind) => {
@@ -732,6 +750,9 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
             (SimpleState::AfterJoin, kind) if is_ident_token(kind) => {
                 join_right_table = Some(TableRef::new(token_text(), None));
                 SimpleState::AfterJoinTable
+            }
+            (SimpleState::AfterJoinTable, TokenKind::LParen) => {
+                SimpleState::InTableFunctionArgs { depth: 1, for_join: true }
             }
             (SimpleState::AfterJoinTable, TokenKind::As) => SimpleState::AfterJoinTable,
             (SimpleState::AfterJoinTable, kind) if is_ident_token(kind) => {
@@ -794,6 +815,7 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
         ExpectAlias,
         AfterJoin,
         AfterJoinTable,
+        InTableFunctionArgs { depth: usize, for_join: bool },
         Done,
     }
 
@@ -817,6 +839,19 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
         }
 
         state = match (&state, &token.kind) {
+            // Table function args: track paren depth
+            (LookState::InTableFunctionArgs { depth, for_join }, TokenKind::LParen) => {
+                LookState::InTableFunctionArgs { depth: depth + 1, for_join: *for_join }
+            }
+            (LookState::InTableFunctionArgs { depth, for_join }, TokenKind::RParen) => {
+                if *depth <= 1 {
+                    if *for_join { LookState::AfterJoinTable } else { LookState::AfterFromTable }
+                } else {
+                    LookState::InTableFunctionArgs { depth: depth - 1, for_join: *for_join }
+                }
+            }
+            (LookState::InTableFunctionArgs { .. }, _) => state.clone(),
+
             (LookState::LookingForFrom, TokenKind::From) => LookState::AfterFrom,
             (LookState::LookingForFrom, _) => LookState::LookingForFrom,
 
@@ -825,6 +860,9 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
                 LookState::AfterFromTable
             }
 
+            (LookState::AfterFromTable, TokenKind::LParen) => {
+                LookState::InTableFunctionArgs { depth: 1, for_join: false }
+            }
             (LookState::AfterFromTable, TokenKind::As) => LookState::ExpectAlias,
             (LookState::AfterFromTable, kind) if is_ident_token(kind) => {
                 // Implicit alias
@@ -857,6 +895,9 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
             (LookState::AfterJoin, kind) if is_ident_token(kind) => {
                 current_table_name = Some(token_text());
                 LookState::AfterJoinTable
+            }
+            (LookState::AfterJoinTable, TokenKind::LParen) => {
+                LookState::InTableFunctionArgs { depth: 1, for_join: true }
             }
             (LookState::AfterJoinTable, TokenKind::As) => LookState::AfterJoinTable,
             (LookState::AfterJoinTable, kind) if is_ident_token(kind) => {

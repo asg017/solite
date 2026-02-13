@@ -693,6 +693,17 @@ fn add_table_to_context<'a>(
                 ctx.add_table(effective_name, name, info);
             }
         }
+        TableOrSubquery::TableFunction { name, alias, .. } => {
+            let table_key = name.to_lowercase();
+            let table_info = cte_tables.get(&table_key)
+                .or_else(|| local_tables.get(&table_key))
+                .or_else(|| external_schema.and_then(|s| s.get_table(&table_key)));
+
+            if let Some(info) = table_info {
+                let effective_name = alias.as_ref().unwrap_or(name);
+                ctx.add_table(effective_name, name, info);
+            }
+        }
         TableOrSubquery::Subquery { .. } => {
             // Subqueries create their own scope - we don't add their columns
             // to the outer context. They're validated separately.
@@ -850,6 +861,9 @@ fn check_unknown_tables_recursive(
                     span.clone(),
                 ));
             }
+        }
+        TableOrSubquery::TableFunction { .. } => {
+            // Table functions are runtime functions, not schema tables — skip validation
         }
         TableOrSubquery::Subquery { query, .. } => {
             // Recursively analyze subquery with its own scope

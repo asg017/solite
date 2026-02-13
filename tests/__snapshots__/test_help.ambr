@@ -93,10 +93,16 @@
     [ARGS]...  Positional args: [database] [script.sql] [procedureName]
   
   Options:
-    -p, --parameters <PARAMETERS> <PARAMETERS>  
-        --trace <TRACE>                         
-        --readonly                              
-    -h, --help                                  Print help
+    -c, --command <COMMAND>
+            Execute SQL/dot commands from the given string (instead of a .sql file)
+    -p, --parameters <PARAMETERS> <PARAMETERS>
+            
+        --trace <TRACE>
+            
+        --readonly
+            
+    -h, --help
+            Print help
   
   '''
 # ---

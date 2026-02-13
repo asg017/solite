@@ -37,6 +37,7 @@ mod test_status;
 
 use std::ffi::OsStr;
 use std::fs::read_to_string;
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -177,6 +178,49 @@ fn run_impl(flags: RunArgs) -> Result<()> {
         }
 
         rt.enqueue("<command>", command, BlockSource::CommandFlag);
+
+        let mut timer = true;
+        execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
+
+        if let Some(trace_path) = flags.trace {
+            write_trace_output(&rt, &trace_path)?;
+        }
+
+        return Ok(());
+    }
+
+    // Stdin piped input: treat as inline SQL, no scripts/procedures allowed
+    if !io::stdin().is_terminal() && script.is_none() && flags.command.is_none() {
+        if procedure.is_some() {
+            bail!("stdin input cannot be combined with a procedure name");
+        }
+
+        let mut sql = String::new();
+        io::stdin()
+            .read_to_string(&mut sql)
+            .context("Failed to read from stdin")?;
+
+        let mut rt = if flags.readonly {
+            match &database {
+                Some(db) => Runtime::new_readonly(&db.to_string_lossy()),
+                None => bail!("--readonly requires a database path"),
+            }
+        } else {
+            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+        };
+
+        if flags.trace.is_some() {
+            setup_tracing(&rt)?;
+        }
+
+        for chunk in flags.parameters.chunks(2) {
+            if chunk.len() == 2 {
+                rt.define_parameter(chunk[0].clone(), chunk[1].clone())
+                    .map_err(|e| anyhow::anyhow!("Failed to set parameter: {e}"))?;
+            }
+        }
+
+        rt.enqueue("<stdin>", &sql, BlockSource::Stdin);
 
         let mut timer = true;
         execute_steps(&mut rt, flags.trace.is_some(), &mut timer);

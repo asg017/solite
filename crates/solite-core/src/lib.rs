@@ -65,6 +65,7 @@ pub enum BlockSource {
     Repl,
     JupyerCell,
     CommandFlag,
+    Stdin,
 }
 
 #[derive(Default)]

@@ -13,7 +13,6 @@ mod hover;
 mod lsp_integration;
 mod semantic_tokens;
 
-use super::*;
 use crate::completions::{get_completions_for_context, quote_identifier_if_needed};
 use crate::context::{detect_context, extract_used_insert_columns, CompletionContext, TableRef};
 use solite_analyzer::{build_schema, Schema};

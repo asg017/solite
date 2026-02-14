@@ -3585,7 +3585,7 @@ impl Parser {
 
         Ok(SelectStmt {
             with_clause: None,
-            distinct: first_core.distinct.clone(),
+            distinct: first_core.distinct,
             columns: first_core.columns.clone(),
             from: None,
             where_clause: None,
@@ -9089,7 +9089,7 @@ mod tests {
                 match &from.tables[0] {
                     TableOrSubquery::Subquery { query, .. } => {
                         // The subquery should be a VALUES-based select
-                        assert!(query.columns.is_empty() || query.columns.len() > 0);
+                        assert!(query.columns.is_empty() || !query.columns.is_empty());
                     }
                     _ => panic!("Expected subquery, got {:?}", from.tables[0]),
                 }

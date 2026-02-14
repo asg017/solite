@@ -1,4 +1,3 @@
-use pkg_config::Library;
 use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,7 +24,7 @@ fn generate_builtins() {
 
     writeln!(
         file,
-        "pub static BUILTIN_FUNCTIONS: &'static [&'static str] = &{:?};",
+        "pub static BUILTIN_FUNCTIONS: &[&str] = &{:?};",
         functions
     )
     .unwrap();

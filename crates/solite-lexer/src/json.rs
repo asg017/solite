@@ -274,7 +274,7 @@ mod tests {
             let tokens = tokenize(test);
             let v: Vec<String> = tokens
                 .iter()
-                .map(|t| (&test[t.start..t.end]).to_string())
+                .map(|t| test[t.start..t.end].to_string())
                 .collect();
             let result: Vec<(&String, &Token)> = v.iter().zip(&tokens).collect();
             insta::assert_debug_snapshot!(format!("json_test_{i}"), result);

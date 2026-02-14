@@ -268,11 +268,10 @@ pub fn render_steps(steps: Vec<BytecodeStep>) -> String {
         if matches!(
             opcode,
             "Next" | "Prev" | "VNext" | "VPrev" | "SorterNext" | "NextIfOpen" | "PrevIfOpen"
-        ) {
-            if p2op < n_indent {
-                for i in p2op..i_op {
-                    ai_indent[i] += 2;
-                }
+        ) && p2op < n_indent
+        {
+            for item in &mut ai_indent[p2op..i_op] {
+                *item += 2;
             }
         }
 
@@ -285,8 +284,8 @@ pub fn render_steps(steps: Vec<BytecodeStep>) -> String {
             );
 
             if is_loop_target || p1 != 0 {
-                for i in p2op..i_op {
-                    ai_indent[i] += 2;
+                for item in &mut ai_indent[p2op..i_op] {
+                    *item += 2;
                 }
             }
         }

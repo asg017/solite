@@ -46,7 +46,7 @@ impl SchemaCommand {
 
         let mut schemas = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
-            if let Some(value) = row.get(0) {
+            if let Some(value) = row.first() {
                 let sql = value.as_str();
                 if !sql.is_empty() {
                     schemas.push(sql.to_owned());

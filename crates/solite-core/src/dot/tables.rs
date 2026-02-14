@@ -56,7 +56,7 @@ impl TablesCommand {
 
         let mut tables = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
-            if let Some(value) = row.get(0) {
+            if let Some(value) = row.first() {
                 tables.push(value.as_str().to_owned());
             }
         }

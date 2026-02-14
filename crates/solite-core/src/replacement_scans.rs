@@ -4,10 +4,7 @@ pub fn replacement_scan(
     error: &SQLiteError,
     connection: &Connection,
 ) -> Option<Result<Statement, ()>> {
-    let table_name = match error.message.as_str().strip_prefix("no such table: ") {
-        Some(table_name) => table_name,
-        None => return None,
-    };
+    let table_name = error.message.as_str().strip_prefix("no such table: ")?;
 
     /* TODO:
      * - [ ] .csv.gz, ztsd, zip, etc

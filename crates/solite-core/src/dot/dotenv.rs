@@ -56,7 +56,7 @@ impl DotenvCommand {
     /// - Returns `DotError::InvalidData` if the file contains invalid entries
     pub fn execute(&self) -> Result<DotenvResult, DotError> {
         let current_dir =
-            std::env::current_dir().map_err(|e| DotError::Io(e))?;
+            std::env::current_dir().map_err(DotError::Io)?;
         let path = current_dir.join(".env");
 
         if !path.exists() {

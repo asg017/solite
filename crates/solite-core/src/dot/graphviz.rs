@@ -106,7 +106,7 @@ impl GraphvizCommand {
 
         let mut tables = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
-            if let Some(value) = row.get(0) {
+            if let Some(value) = row.first() {
                 tables.push(value.as_str().to_owned());
             }
         }
@@ -126,17 +126,16 @@ impl GraphvizCommand {
         let mut columns = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
             let name = row
-                .get(0)
+                .first()
                 .map(|v| v.as_str().to_owned())
                 .unwrap_or_default();
             let col_type = row
                 .get(1)
                 .map(|v| v.as_str().to_owned())
                 .unwrap_or_default();
-            let is_pk = row.get(2).map_or(false, |v| match &v.value {
-                ValueRefXValue::Int(i) => *i > 0,
-                _ => false,
-            });
+            let is_pk = row
+                .get(2)
+                .is_some_and(|v| matches!(&v.value, ValueRefXValue::Int(i) if *i > 0));
 
             columns.push(Column {
                 name,
@@ -165,7 +164,7 @@ impl GraphvizCommand {
         let mut fks = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
             let from_column = row
-                .get(0)
+                .first()
                 .map(|v| v.as_str().to_owned())
                 .unwrap_or_default();
             let to_table = row
@@ -209,7 +208,7 @@ impl GraphvizCommand {
             .prepare(&query)
             .ok()
             .and_then(|(_, stmt)| stmt)
-            .map_or(false, |stmt| stmt.next().is_ok_and(|r| r.is_some()))
+            .is_some_and(|stmt| stmt.next().is_ok_and(|r| r.is_some()))
     }
 
     /// Generate the DOT graph definition.

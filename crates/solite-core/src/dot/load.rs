@@ -51,7 +51,7 @@ fn load_extension_from_sitepackages(
             entry
                 .path()
                 .extension()
-                .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
+                .is_some_and(|ext| ext == "so" || ext == "dll" || ext == "dylib")
         })
         .map(|entry| entry.path())
         .collect();

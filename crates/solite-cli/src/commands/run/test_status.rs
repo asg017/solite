@@ -6,7 +6,7 @@ mod tests {
     /// Execute SQL and return the StatementStatus from bytecode analysis.
     /// Optionally runs setup SQL first (e.g., CREATE TABLE).
     fn status_for_sql(setup: Option<&str>, sql: &str) -> StatementStatus {
-        let mut rt = Runtime::new(None);
+        let rt = Runtime::new(None);
         if let Some(setup_sql) = setup {
             rt.connection.execute_script(setup_sql).unwrap();
         }
@@ -19,7 +19,7 @@ mod tests {
     /// Debug helper: print bytecode for a statement
     #[allow(dead_code)]
     fn debug_bytecode(setup: Option<&str>, sql: &str) {
-        let mut rt = Runtime::new(None);
+        let rt = Runtime::new(None);
         if let Some(setup_sql) = setup {
             rt.connection.execute_script(setup_sql).unwrap();
         }

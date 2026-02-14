@@ -37,7 +37,7 @@ pub fn render_table(columns: &[String], results: &[Vec<ValueCopy>]) -> String {
     // Convert values to strings
     let str_results: Vec<Vec<String>> = results
         .iter()
-        .map(|row| row.iter().map(|v| display_value(v)).collect())
+        .map(|row| row.iter().map(display_value).collect())
         .collect();
 
     // Calculate column widths

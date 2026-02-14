@@ -44,8 +44,8 @@ fn compute_line_span(lines: &[&str], line: usize) -> (usize, usize) {
     }
 
     let mut start = 0usize;
-    for i in 0..(line - 1) {
-        start += lines[i].len();
+    for l in &lines[..line - 1] {
+        start += l.len();
         start += 1; // newline
     }
 

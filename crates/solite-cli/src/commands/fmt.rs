@@ -3,7 +3,7 @@
 use crate::cli::FmtArgs;
 use solite_fmt::{check_formatted, format_document, FormatConfig, FormatError};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 
 pub fn fmt(args: FmtArgs) -> Result<(), ()> {
     match fmt_impl(args) {

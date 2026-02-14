@@ -53,10 +53,6 @@ use sql::{
     BASE_FUNCTIONS_CREATE, BASE_MODULES_CREATE, LOADED_FUNCTIONS_CREATE, LOADED_MODULES_CREATE,
 };
 use table::render_table;
-use value::display_value;
-
-// Re-export for external use
-pub use value::display_value as docs_display_value;
 
 /// Errors that can occur during documentation generation.
 #[derive(Debug)]
@@ -126,9 +122,7 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     if let Some(children) = ast.children_mut() {
         for node in children.iter_mut() {
             if let Node::Code(code) = node {
-                if let Err(e) = process_code_block(&rt, code, &args) {
-                    return Err(e);
-                }
+                process_code_block(&rt, code, &args)?;
             }
         }
     }

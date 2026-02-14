@@ -52,8 +52,8 @@ impl Validator for ReplValidator {
             return Ok(ValidationResult::Valid(None));
         }
         if input.trim_start().starts_with(".export") {
-            match input.trim_start().splitn(2, '\n').nth(1) {
-                Some(rest) => {
+            match input.trim_start().split_once('\n') {
+                Some((_, rest)) => {
                     if solite_core::sqlite::complete(rest) {
                         return Ok(ValidationResult::Valid(None));
                     } else {
@@ -98,7 +98,6 @@ struct ReplHelper {
  *   - numbers
  *   - comments
  */
-
 impl Highlighter for ReplHelper {
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,

@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use solite_core::sqlite::Connection;
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::types::{Export, Report};
 
@@ -65,7 +65,7 @@ fn create_connection(
 }
 
 /// Copy schema from an existing database.
-fn copy_schema_from_database(path: &PathBuf) -> Result<Connection> {
+fn copy_schema_from_database(path: &Path) -> Result<Connection> {
     let path_str = path
         .to_str()
         .ok_or_else(|| anyhow!("Invalid path: {}", path.display()))?;

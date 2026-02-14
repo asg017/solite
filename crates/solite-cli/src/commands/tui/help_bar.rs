@@ -38,6 +38,7 @@ impl<'a> HelpItem<'a> {
 enum HelpBarEntry<'a> {
     Item(HelpItem<'a>),
     /// Plain text displayed in secondary style
+    #[allow(dead_code)]
     Text(&'a str),
     /// Separator (vertical bar)
     Separator,
@@ -46,6 +47,7 @@ enum HelpBarEntry<'a> {
 /// Builder for creating help bar content
 pub struct HelpBar<'a> {
     items: Vec<HelpBarEntry<'a>>,
+    #[allow(dead_code)]
     theme: Option<&'a TuiTheme>,
 }
 
@@ -58,6 +60,7 @@ impl<'a> HelpBar<'a> {
     }
 
     /// Set the theme for styling
+    #[allow(dead_code)]
     pub fn theme(mut self, theme: &'a TuiTheme) -> Self {
         self.theme = Some(theme);
         self
@@ -78,6 +81,7 @@ impl<'a> HelpBar<'a> {
     }
 
     /// Add plain text (useful for navigation hints)
+    #[allow(dead_code)]
     pub fn text(mut self, text: &'a str) -> Self {
         self.items.push(HelpBarEntry::Text(text));
         self

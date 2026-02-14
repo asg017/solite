@@ -137,7 +137,7 @@ mod tests {
         let (_, stmt) = rt.connection.prepare(sql).unwrap();
         let stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
-        row.get(0).unwrap().as_str().to_string()
+        row.first().unwrap().as_str().to_string()
     }
 
     // --- parse_arguments tests ---

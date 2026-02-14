@@ -12,6 +12,7 @@ use jupyter_protocol::{
 };
 
 /// Messages sent from the runtime task back to the shell handler.
+#[allow(clippy::large_enum_variant)]
 pub enum ExecutionMessage {
     /// A display message to send to iopub.
     Display(JupyterMessage),
@@ -26,7 +27,7 @@ use uuid::Uuid;
 
 use super::handlers::handle_dot_command;
 use super::protocol::JupyterSender;
-use super::render::{render_statement, UiResponse};
+use super::render::render_statement;
 
 /// The Solite Jupyter kernel.
 pub struct SoliteKernel {

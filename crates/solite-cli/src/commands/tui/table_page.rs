@@ -18,7 +18,9 @@ use solite_core::Runtime;
 
 pub(crate) struct Data {
     pub(crate) columns: Vec<String>,
+    #[allow(dead_code)]
     column_widths: Vec<usize>,
+    #[allow(dead_code)]
     max_row_widths: Vec<usize>,
     pub(crate) rows: Vec<Vec<OwnedValue>>,
 }
@@ -94,7 +96,7 @@ fn render_value_for_display(value: &OwnedValue) -> String {
             if b.len() > 20 {
                 format!("[BLOB {} bytes]", b.len())
             } else {
-                format!("[BLOB]")
+                "[BLOB]".to_string()
             }
         }
     }
@@ -827,7 +829,7 @@ mod tests {
         // Create text where truncation point falls inside a multi-byte emoji
         // 📍 is 4 bytes, so put it near the 200-byte boundary
         let mut text = "x".repeat(197); // 197 ASCII chars
-        text.push_str("📍"); // 4-byte emoji at position 197-200
+        text.push('📍'); // 4-byte emoji at position 197-200
         text.push_str("more text after");
 
         let value = OwnedValue::Text(text.into_bytes());

@@ -12,6 +12,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct HtmlDoc;
 
+#[allow(dead_code)]
 impl HtmlDoc {
     pub fn new() -> Self {
         HtmlDoc
@@ -37,6 +38,7 @@ pub struct Element {
     text: Option<String>,
 }
 
+#[allow(dead_code)]
 impl Element {
     pub fn new(tag: impl Into<String>) -> Self {
         Self {
@@ -210,7 +212,7 @@ mod tests {
         div.attr("class", "section");
         div.style("color", "red");
         div.style("display", "block");
-        let mut p = div.p();
+        let p = div.p();
         p.set_text("asdf");
         let html = div.to_html();
         assert_eq!(

@@ -32,6 +32,7 @@ impl CopyOption {
         }
     }
 
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             CopyOption::Cell => "Copy the selected cell value",

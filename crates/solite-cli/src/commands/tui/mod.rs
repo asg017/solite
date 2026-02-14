@@ -41,10 +41,6 @@ pub(crate) fn format_number(n: usize) -> String {
 
 use crate::cli::TuiArgs;
 
-pub use copy_popup::{CopyOption, CopyPopup};
-pub use help_bar::HelpBar;
-pub use utils::{popup_area, popup_area_fixed, truncate_string};
-
 enum NavigateToPage {
     Listing,
     Table(String),
@@ -65,6 +61,7 @@ enum HandleKeyResult {
     None,
     Quit,
     Navigate(NavigateToPage),
+    #[allow(dead_code)]
     ShowMessage(String),
 }
 
@@ -88,6 +85,7 @@ fn copy_to_clipboard(content: &str) -> std::result::Result<(), String> {
 }
 
 /// Copy an OwnedValue to the clipboard
+#[allow(dead_code)]
 fn copy(value: &OwnedValue) -> std::result::Result<(), String> {
     copy_to_clipboard(&value_to_string(value))
 }
@@ -227,7 +225,7 @@ impl<'a> App<'a> {
 
 pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
     let theme = CTP_MOCHA_THEME.clone();
-    let page = Page::Listing(ListingPage::new(&runtime, &theme));
+    let page = Page::Listing(ListingPage::new(runtime, &theme));
     let mut app = App { runtime, page, theme: theme.clone() };
 
     ratatui::run(|terminal| loop {
@@ -254,7 +252,7 @@ pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
         theme: theme.clone(),
     };
     if let Some(table_name) = cmd.table {
-        app.page = Page::Table(TablePage::new(&table_name, &app.runtime, theme.clone()));
+        app.page = Page::Table(TablePage::new(&table_name, app.runtime, theme.clone()));
     } 
 
     let result: anyhow::Result<()> = ratatui::run(|terminal| loop {

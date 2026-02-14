@@ -23,7 +23,7 @@ fn main() {
                 if let Some(path) = args
                     .get(1)
                     .map(PathBuf::from)
-                    .filter(|p: &PathBuf| p.extension().map_or(false, |ext| ext == "db"))
+                    .filter(|p: &PathBuf| p.extension().is_some_and(|ext| ext == "db"))
                 {
                     Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),
@@ -58,8 +58,8 @@ fn main() {
     };
     match result {
         Ok(_) => exit(0),
-        Err(err) => {
-            //eprintln!("{}", err);
+        Err(_err) => {
+            //eprintln!("{}", _err);
             exit(1);
         }
     }

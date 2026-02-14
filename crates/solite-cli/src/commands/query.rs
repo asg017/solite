@@ -187,7 +187,7 @@ fn prepare_statement(
 /// Determine the output format from arguments.
 fn determine_format(args: &QueryArgs) -> ExportFormat {
     match &args.format {
-        Some(format) => format.clone().into(),
+        Some(format) => (*format).into(),
         None => match &args.output {
             Some(p) => solite_core::exporter::format_from_path(p).unwrap_or(ExportFormat::Json),
             None => ExportFormat::Json,

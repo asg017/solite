@@ -48,8 +48,6 @@ mod report;
 mod types;
 
 pub use report::{report_from_file, BaseDatabaseType};
-pub use types::{Export, Parameter, Report, ResultType};
-
 use crate::cli::CodegenArgs;
 
 /// Entry point for the codegen command.
@@ -113,6 +111,7 @@ fn determine_db_type(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::types::Report;
     use insta::assert_yaml_snapshot;
     use std::path::PathBuf;
 

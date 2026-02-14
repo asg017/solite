@@ -12,13 +12,13 @@
 /// ```
 pub fn parse_epilogue_comment(ep: &str) -> String {
     let s = ep.trim();
-    let s = if s.starts_with("--") {
-        s[2..].trim()
+    let s = if let Some(rest) = s.strip_prefix("--") {
+        rest.trim()
     } else if s.starts_with("/*") && s.ends_with("*/") {
-        s[2..s.len() - 2].trim()
-    } else if s.starts_with("/*") {
+        s.strip_prefix("/*").unwrap().strip_suffix("*/").unwrap().trim()
+    } else if let Some(rest) = s.strip_prefix("/*") {
         // unterminated block style: strip leading /*
-        s[2..].trim()
+        rest.trim()
     } else {
         s
     };
@@ -101,8 +101,8 @@ pub fn compute_offset_from_reference(content: &str, ref_display: &str) -> Option
     }
 
     let mut offset = 0usize;
-    for i in 0..(line - 1) {
-        offset += lines[i].len();
+    for l in &lines[..line - 1] {
+        offset += l.len();
         offset += 1; // newline
     }
 

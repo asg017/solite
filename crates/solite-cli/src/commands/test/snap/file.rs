@@ -88,7 +88,7 @@ pub fn generate_snapshot_contents(source: String, stmt: &Statement) -> Option<St
     // multiple rows
     else {
         for row in results {
-            let _ = write!(&mut snapshot_contents, "{{\n");
+            let _ = writeln!(&mut snapshot_contents, "{{");
             for (value, column_name) in row.iter().zip(&columns) {
                 let _ = writeln!(
                     &mut snapshot_contents,
@@ -97,7 +97,7 @@ pub fn generate_snapshot_contents(source: String, stmt: &Statement) -> Option<St
                     snapshot_value(value)
                 );
             }
-            let _ = write!(&mut snapshot_contents, "}}\n");
+            let _ = writeln!(&mut snapshot_contents, "}}");
         }
     }
     let _ = writeln!(&mut snapshot_contents);

@@ -38,6 +38,7 @@ pub static STATEMENT_CELL_CSS: LazyLock<String> = LazyLock::new(|| {
 /// - Numbers: peach
 /// - Null: subtext
 /// - Booleans: maroon
+#[allow(dead_code)]
 pub fn render_json_cell(element: &mut Element, contents: &str) {
     let td = element.child("td");
     td.style(

@@ -160,8 +160,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                             let maybe_offset =
                                 compute_offset_from_reference(&content, &ref_display);
 
-                            if epilogue.starts_with("error:") {
-                                let expected = epilogue["error:".len()..].trim();
+                            if let Some(expected) = epilogue.strip_prefix("error:").map(str::trim) {
                                 if expected == err.message {
                                     stats.record_success();
                                     print!("{}", Style::new().green().apply_to("."));
@@ -281,14 +280,13 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
                 eprintln!("Warning: Failed to load extension: {:?}", e);
             }
         }
-        DotCommand::Parameter(param_cmd) => match param_cmd {
-            solite_core::dot::ParameterCommand::Set { key, value } => {
+        DotCommand::Parameter(param_cmd) => {
+            if let solite_core::dot::ParameterCommand::Set { key, value } = param_cmd {
                 if let Err(e) = rt.define_parameter(key.clone(), value.to_owned()) {
                     eprintln!("Warning: Failed to set parameter {}: {}", key, e);
                 }
             }
-            _ => {}
-        },
+        }
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         other => {
             eprintln!("Warning: Unhandled dot command in test: {:?}", other);

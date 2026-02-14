@@ -9,6 +9,5 @@ pub mod html;
 pub mod syntax;
 pub mod table;
 
-pub use html::{Element, HtmlDoc};
-pub use syntax::{render_json_cell, render_sql_html, STATEMENT_CELL_CSS};
-pub use table::{render_statement, UiResponse};
+pub use syntax::render_sql_html;
+pub use table::render_statement;

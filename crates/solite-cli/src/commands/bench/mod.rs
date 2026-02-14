@@ -44,6 +44,7 @@ use stats::{average, max, min, stddev};
 
 /// Error type for benchmark operations.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum BenchError {
     /// Failed to load an extension.
     ExtensionLoad(String),

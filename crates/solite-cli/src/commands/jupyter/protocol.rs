@@ -55,6 +55,7 @@ pub trait JupyterSender {
     }
 
     /// Send stderr stream content.
+    #[allow(dead_code)]
     async fn send_stderr(&self, text: &str, parent: &JupyterMessage) -> Result<()> {
         self.send_stream(StreamContent::stderr(text), parent).await
     }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, path::{Path, PathBuf}};
+use std::{collections::HashMap, env, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::ExportFormat;
@@ -23,6 +23,7 @@ pub struct RunArgs {
 }
 
 impl RunArgs {
+    #[allow(dead_code)]
     pub fn params(&self) -> HashMap<String, String> {
         self.parameters
             .chunks(2)
@@ -57,9 +58,9 @@ pub enum QueryFormat {
     Clipboard,
 }
 
-impl Into<ExportFormat> for QueryFormat {
-    fn into(self) -> ExportFormat {
-        match self {
+impl From<QueryFormat> for ExportFormat {
+    fn from(value: QueryFormat) -> ExportFormat {
+        match value {
             QueryFormat::Csv => ExportFormat::Csv,
             QueryFormat::Tsv => ExportFormat::Tsv,
             QueryFormat::Json => ExportFormat::Json,

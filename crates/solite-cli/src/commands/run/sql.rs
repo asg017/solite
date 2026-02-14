@@ -93,7 +93,7 @@ fn setup_trace_statement(runtime: &Runtime, stmt: &Statement) -> Option<i64> {
         }
     };
 
-    insert_stmt.bind_text(1, &stmt.sql());
+    insert_stmt.bind_text(1, stmt.sql());
 
     match insert_stmt.nextx() {
         Ok(Some(row)) => Some(row.value_at(0).as_int64()),

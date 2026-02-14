@@ -6,6 +6,7 @@ use solite_table::TableConfig;
 
 /// Response containing both text and HTML representations of a result.
 pub struct UiResponse {
+    #[allow(dead_code)]
     pub text: String,
     pub html: Option<String>,
 }

@@ -63,23 +63,8 @@ impl fmt::Display for SQLiteError {
     }
 }
 
-fn escape_identifier(identifer: &str) -> String {
-    let n = identifer.len();
-    let s = CString::new(identifer).unwrap();
-    unsafe {
-        let x = sqlite3_str_new(ptr::null_mut());
-        sqlite3_str_appendf(x, c"%w".as_ptr(), s.as_ptr());
-        let s = sqlite3_str_finish(x);
-        let cpy = CStr::from_ptr(s).to_string_lossy().into_owned();
-        sqlite3_free(s.cast());
-        cpy
-    }
-    //let _rc = unsafe { sqlite3_bind_text(self.statement, i, s.as_ptr(), n as i32, SQLITE_TRANSIENT()) };
-}
-
 // Use the SQLite printf '%Q' conversion to escape a string as a SQL string literal, surrounded by single quotes.
 pub fn escape_string(value: &str) -> String {
-    let n = value.len();
     let s = CString::new(value).unwrap();
     unsafe {
         let x = sqlite3_str_new(ptr::null_mut());
@@ -228,6 +213,7 @@ impl Statement {
         }
     }
     /// https://www.sqlite.org/c3ref/expanded_sql.html
+    #[allow(clippy::result_unit_err)]
     pub fn expanded_sql(&self) -> Result<String, ()> {
         let result = unsafe { sqlite3_expanded_sql(self.statement) };
         if result.is_null() {
@@ -253,10 +239,8 @@ impl Statement {
           _ => None,
         }
     }
-    pub fn explain(&self, emode: i32) {
-        unsafe {
-            //sqlite3_stmt_explain(self.statement, emode);
-        }
+    pub fn explain(&self, _emode: i32) {
+        // TODO: sqlite3_stmt_explain(self.statement, emode);
     }
     pub fn column_names(&self) -> Result<Vec<String>, Utf8Error> {
         unsafe {
@@ -300,7 +284,7 @@ impl Statement {
             columns
         }
     }
-    pub fn next(&self) -> Result<Option<Vec<ValueRefX>>, SQLiteError> {
+    pub fn next(&self) -> Result<Option<Vec<ValueRefX<'_>>>, SQLiteError> {
         let rc = unsafe { sqlite3_step(self.statement) };
         match rc {
             SQLITE_DONE => Ok(None),
@@ -414,7 +398,7 @@ impl Statement {
             for i in 0..n {
                 let name = sqlite3_bind_parameter_name(self.statement, i + 1);
                 let name = CStr::from_ptr(name).to_string_lossy().to_string();
-                bind_parameters.push(format!("{}", name));
+                bind_parameters.push(name.to_string());
             }
             bind_parameters
         }
@@ -461,7 +445,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
         let db: *mut sqlite3 = sqlite3_db_handle(pstmt);
         let db = Connection {
             connection: db,
-            owned: false,
+            _owned: false,
         };
 
         let stmt = db
@@ -496,7 +480,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
                         p2,
                         p3,
                         p4: p4.to_string(),
-                        p5: p5,
+                        p5,
                         comment: comment.to_string(),
                         subprog,
                         nexec,
@@ -514,7 +498,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
 /// https://www.sqlite.org/c3ref/sqlite3.html
 pub struct Connection {
     connection: *mut sqlite3,
-    owned: bool,
+    _owned: bool,
 }
 
 // NOT Sync, sqlite limitation
@@ -549,7 +533,7 @@ impl Connection {
             }
             Ok(Connection {
                 connection,
-                owned: true,
+                _owned: true,
             })
         } else {
             let err = unsafe { SQLiteError::from_latest(connection, rc) };
@@ -569,15 +553,12 @@ impl Connection {
         if rc == SQLITE_OK {
             unsafe {
                 let v = 1;
-                let x = sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, &v);
+                sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, &v);
                 sqlite3_db_config(connection, 1018, 1, &v);
-                //sqlite3_db_config(connection, 1018, 0, &v);
-                //let x = sqlite3_enable_load_extension(connection, 1);
-                //sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION);
             }
             Ok(Connection {
                 connection,
-                owned: true,
+                _owned: true,
             })
         } else {
             let err = unsafe { SQLiteError::from_latest(connection, rc) };
@@ -587,6 +568,8 @@ impl Connection {
             Err(err)
         }
     }
+    /// # Safety
+    /// The returned pointer must not outlive the `Connection`.
     pub unsafe fn db(&self) -> *mut sqlite3 {
         self.connection
     }
@@ -630,7 +613,8 @@ impl Connection {
         Ok(())
     }
 
-    pub fn execute(&self, sql: &str) -> Result<usize, /* TODO */ ()> {
+    #[allow(clippy::result_unit_err)]
+    pub fn execute(&self, sql: &str) -> Result<usize, ()> {
         let stmt = self.prepare(sql).unwrap().1.unwrap();
         Ok(stmt.execute().unwrap())
     }
@@ -654,27 +638,20 @@ impl Connection {
         where
             F: FnMut(&T) -> bool,
         {
-            //let boxed_handler: *mut F = p_arg.cast::<(F, T)>();
-            //let x = p_arg.cast::<(F, T)>();
-            //let r = ((*x).0)(&(*x).1);
             let x = p_arg.cast::<(*mut F, *mut T)>();
             let r = (*((*x).0))(&(*(*x).1));
-            return if r { 1 } else { 0 };
+            if r { 1 } else { 0 }
         }
         if let Some(handle) = handle {
             unsafe {
-                //let boxed_handler = Box::new(handle);
                 let x: *mut F = Box::into_raw(Box::new(handle));
                 let y: *mut T = Box::into_raw(Box::new(aux));
-                ///let boxed_handler = Box::new((handle, aux));
                 let boxed_handler = Box::into_raw(Box::new((x, y)));
                 sqlite3_progress_handler(
                     self.connection,
                     ops,
                     Some(call_boxed_closure::<F, T>),
                     boxed_handler.cast(),
-                    //&*boxed_handler as *const (F, T) as *mut _,
-                    //&*boxed_handler as *const F as *mut _,
                 );
             }
         }
@@ -814,15 +791,6 @@ mod tests {
         assert!(!complete("select 1"));
         // TODO handle
         //assert!(!complete("select '\0'"));
-    }
-
-    #[test]
-    fn test_escape_identifier() {
-        assert_eq!(escape_identifier("alex"), "alex".to_string());
-        assert_eq!(
-            escape_identifier("alex \"garcia\""),
-            "alex \"\"garcia\"\"".to_string()
-        );
     }
 
     #[test]

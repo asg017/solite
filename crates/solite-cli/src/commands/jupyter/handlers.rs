@@ -204,7 +204,7 @@ pub async fn handle_dot_command(
                 Ok(data) => {
                     sender.send_clear(true, parent).await?;
                     sender
-                        .send_display(DisplayData::from(MediaType::VegaLiteV4(data)), parent)
+                        .send_display(DisplayData::from(MediaType::VegaLiteV4(serde_json::Value::Object(data))), parent)
                         .await?;
                     sender.send_clear(true, parent).await?;
                 }

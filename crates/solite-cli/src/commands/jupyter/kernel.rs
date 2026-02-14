@@ -139,6 +139,7 @@ impl SoliteKernel {
                 .as_child_of(parent),
             )
             .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     /// Execute code and return any error that occurred.
@@ -312,11 +313,11 @@ impl SoliteKernel {
             language_info: LanguageInfo {
                 name: "sqlite".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                mimetype: "text/x.sqlite".to_string(),
-                file_extension: ".sql".to_string(),
-                pygments_lexer: "sqlite".to_string(),
-                codemirror_mode: CodeMirrorMode::Simple("sql".to_string()),
-                nbconvert_exporter: "script".to_string(),
+                mimetype: Some("text/x.sqlite".to_string()),
+                file_extension: Some(".sql".to_string()),
+                pygments_lexer: Some("sqlite".to_string()),
+                codemirror_mode: Some(CodeMirrorMode::Simple("sql".to_string())),
+                nbconvert_exporter: Some("script".to_string()),
             },
             banner: "Solite Kernel".to_string(),
             help_links: vec![HelpLink {

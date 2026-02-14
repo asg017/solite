@@ -173,7 +173,7 @@ fn record_trace_steps(runtime: &Runtime, stmt: &Statement, trace_stmt_id: i64) {
     };
 
     trace_stmt.bind_int64(1, trace_stmt_id);
-    trace_stmt.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer");
+    unsafe { trace_stmt.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer") };
 
     if let Err(e) = trace_stmt.execute() {
         eprintln!("Warning: Failed to record trace steps: {:?}", e);

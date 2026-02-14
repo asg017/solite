@@ -24,7 +24,9 @@ pub struct SQLiteError {
 }
 
 impl SQLiteError {
-    pub fn from_latest(db: *mut sqlite3, result_code: i32) -> Self {
+    /// # Safety
+    /// `db` must be a valid, non-null pointer to an open sqlite3 database.
+    pub unsafe fn from_latest(db: *mut sqlite3, result_code: i32) -> Self {
         let message = unsafe {
             let message = sqlite3_errmsg(db);
             let message = CStr::from_ptr(message);
@@ -315,10 +317,9 @@ impl Statement {
                 }
                 Ok(Some(row))
             }
-            rc => Err(SQLiteError::from_latest(
-                unsafe { sqlite3_db_handle(self.statement) },
-                rc,
-            )),
+            rc => Err(unsafe {
+                SQLiteError::from_latest(sqlite3_db_handle(self.statement), rc)
+            }),
         }
     }
 
@@ -331,10 +332,9 @@ impl Statement {
                 statement: self.statement,
                 phantom: std::marker::PhantomData,
             })),
-            rc => Err(SQLiteError::from_latest(
-                unsafe { sqlite3_db_handle(self.statement) },
-                rc,
-            )),
+            rc => Err(unsafe {
+                SQLiteError::from_latest(sqlite3_db_handle(self.statement), rc)
+            }),
         }
     }
 
@@ -350,10 +350,9 @@ impl Statement {
                 SQLITE_DONE => break,
                 SQLITE_ROW => continue,
                 _ => {
-                    return Err(SQLiteError::from_latest(
-                        unsafe { sqlite3_db_handle(self.statement) },
-                        rc,
-                    ))
+                    return Err(unsafe {
+                        SQLiteError::from_latest(sqlite3_db_handle(self.statement), rc)
+                    })
                 }
             }
         }
@@ -381,8 +380,9 @@ impl Statement {
         };
     }
 
-    // TODO expose destructor interface here?
-    pub fn bind_pointer(&self, i: i32, p: *mut c_void, name: &CStr) {
+    /// # Safety
+    /// `p` must be a valid pointer for the given pointer type `name`.
+    pub unsafe fn bind_pointer(&self, i: i32, p: *mut c_void, name: &CStr) {
         unsafe { sqlite3_bind_pointer(self.statement, i, p, name.as_ptr(), None) };
     }
     pub fn bind_text<S: AsRef<str>>(&self, i: i32, value: S) {
@@ -453,7 +453,9 @@ pub struct BytecodeStep {
     pub nexec: i64,
     pub ncycle: i64,
 }
-pub fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
+/// # Safety
+/// `pstmt` must be a valid, non-null pointer to a prepared sqlite3 statement.
+pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
     let mut steps = vec![];
     unsafe {
         let db: *mut sqlite3 = sqlite3_db_handle(pstmt);
@@ -550,7 +552,7 @@ impl Connection {
                 owned: true,
             })
         } else {
-            let err = SQLiteError::from_latest(connection, rc);
+            let err = unsafe { SQLiteError::from_latest(connection, rc) };
             unsafe {
                 sqlite3_close(connection);
             }
@@ -578,7 +580,7 @@ impl Connection {
                 owned: true,
             })
         } else {
-            let err = SQLiteError::from_latest(connection, rc);
+            let err = unsafe { SQLiteError::from_latest(connection, rc) };
             unsafe {
                 sqlite3_close(connection);
             }
@@ -640,7 +642,7 @@ impl Connection {
         if rc == SQLITE_OK {
             Ok(())
         } else {
-            Err(SQLiteError::from_latest(self.connection, rc))
+            Err(unsafe { SQLiteError::from_latest(self.connection, rc) })
         }
     }
 
@@ -724,7 +726,7 @@ impl Connection {
                 Ok((rest, Some(Statement { statement: stmt })))
             }
         } else {
-            Err(SQLiteError::from_latest(self.connection, rc))
+            Err(unsafe { SQLiteError::from_latest(self.connection, rc) })
         }
     }
 

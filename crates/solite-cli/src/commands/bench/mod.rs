@@ -254,7 +254,7 @@ pub fn bench(args: BenchArgs) -> Result<(), ()> {
                 ));
             }
 
-            steps = bytecode_steps(stmt.pointer());
+            steps = unsafe { bytecode_steps(stmt.pointer()) };
         }
 
         pb.finish_and_clear();

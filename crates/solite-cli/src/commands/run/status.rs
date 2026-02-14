@@ -62,7 +62,7 @@ impl StatementStatus {
 
 /// Extract the status of a statement from its bytecode.
 pub fn get_statement_status(stmt: *mut sqlite3_stmt) -> StatementStatus {
-    let steps = bytecode_steps(stmt);
+    let steps = unsafe { bytecode_steps(stmt) };
 
     // Check for DELETE operations
     let deletes: Vec<_> = steps

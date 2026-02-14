@@ -228,7 +228,7 @@ impl BenchCommand {
                 cb(elapsed);
             }
 
-            let steps = bytecode_steps(self.statement.pointer());
+            let steps = unsafe { bytecode_steps(self.statement.pointer()) };
             report = render_steps(steps);
         }
 

@@ -52,7 +52,7 @@ pub enum StepError {
 pub struct Block {
     // either file name or "[stdin]" or "[script]" or something
     name: String,
-    source: BlockSource,
+    _source: BlockSource,
     contents: String,
     rope: Rope,
     offset: usize,
@@ -124,9 +124,8 @@ fn extract_epilogue(code: &str, rest_index: usize) -> Option<String> {
         return None;
     }
     let rest = &code[rest_index..];
-    let mut chars = rest.char_indices();
     let mut first_non_ws_idx: Option<usize> = None;
-    while let Some((idx, c)) = chars.next() {
+    for (idx, c) in rest.char_indices() {
         if c == '\n' {
             // newline before any comment -> not an epilogue
             return None;
@@ -137,10 +136,7 @@ fn extract_epilogue(code: &str, rest_index: usize) -> Option<String> {
         first_non_ws_idx = Some(idx);
         break;
     }
-    let idx = match first_non_ws_idx {
-        Some(i) => i,
-        None => return None,
-    };
+    let idx = first_non_ws_idx?;
     let rem = &rest[idx..];
     if rem.starts_with("--") {
         // include leading whitespace before comment
@@ -208,7 +204,7 @@ impl Runtime {
     pub fn enqueue(&mut self, name: &str, code: &str, source: BlockSource) {
         self.stack.push(Block {
             name: name.to_string(),
-            source,
+            _source: source,
             contents: code.to_string(),
             rope: Rope::from_str(code),
             offset: 0,
@@ -230,10 +226,7 @@ impl Runtime {
     pub fn next_stepx(&mut self) -> Option<Result<Step, StepError>> {
         while let Some(mut block) = self.stack.pop() {
             let regions = block.regions.clone();
-            let current = match (&block.contents).get(block.offset..) {
-                Some(code) => code,
-                None => return None,
-            };
+            let current = block.contents.get(block.offset..)?;
             let (code, preamble) = extract_preamble(current);
             if let Some(preamble) = preamble {
                 block.offset += code.as_ptr() as usize - preamble.as_ptr() as usize;
@@ -387,7 +380,7 @@ impl Runtime {
                 }));
             }
 
-            match self.prepare_with_parameters(&code) {
+            match self.prepare_with_parameters(code) {
                 Ok((rest, Some(stmt))) => {
                     let stmt_offset_idx = block.offset; // + preamble.map_or(0, |p| p.len()) + 1;
                     let block_name = block.name.clone();
@@ -481,6 +474,7 @@ impl Runtime {
         None
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn execute_to_completion(&mut self) -> Result<(), StepError> {
         loop {
             match self.next_stepx() {
@@ -611,7 +605,7 @@ impl Runtime {
         stmt.bind_text(1, key);
         stmt.next()
             .unwrap()
-            .map(|v| OwnedValue::from_value_ref(v.get(0).unwrap()))
+            .map(|v| OwnedValue::from_value_ref(v.first().unwrap()))
     }
 }
 
@@ -725,7 +719,7 @@ mod tests {
             .unwrap();
         let mut fns = vec![];
         while let Ok(Some(row)) = stmt.next() {
-            fns.push(row.get(0).unwrap().as_str().to_string());
+            fns.push(row.first().unwrap().as_str().to_string());
         }
         fns
     }
@@ -737,7 +731,7 @@ mod tests {
             .unwrap();
         let mut fns = vec![];
         while let Ok(Some(row)) = stmt.next() {
-            fns.push(row.get(0).unwrap().as_str().to_string());
+            fns.push(row.first().unwrap().as_str().to_string());
         }
         let mut sql = String::new();
         sql += "select ";
@@ -779,7 +773,7 @@ mod tests {
             .1
             .unwrap();
         assert_eq!(
-            stmt.next().unwrap().unwrap().get(0).unwrap().as_str(),
+            stmt.next().unwrap().unwrap().first().unwrap().as_str(),
             "3.50.1"
         );
         insta::assert_yaml_snapshot!(functions_of(&runtime.connection));
@@ -810,9 +804,8 @@ select not_exist();",
             let step = rt.next_stepx();
             assert_yaml_snapshot!(format!("step-{idx}"), step);
             idx += 1;
-            match step {
-                None => break,
-                _ => (),
+            if step.is_none() {
+                break;
             }
         }
     }
@@ -857,7 +850,7 @@ select not_exist();",
 
         // Seed a database
         {
-            let mut rt = Runtime::new(Some(db_str.to_string()));
+            let rt = Runtime::new(Some(db_str.to_string()));
             rt.connection
                 .execute_script("CREATE TABLE t(x TEXT); INSERT INTO t VALUES ('hi');")
                 .unwrap();
@@ -868,7 +861,7 @@ select not_exist();",
         let (_, stmt) = rt.connection.prepare("SELECT x FROM t").unwrap();
         let stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
-        assert_eq!(row.get(0).unwrap().as_str(), "hi");
+        assert_eq!(row.first().unwrap().as_str(), "hi");
     }
 
     #[test]

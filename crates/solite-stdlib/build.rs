@@ -34,6 +34,7 @@ fn build_sqlite_org_extension(
     name: &str,
     out_dir: &Path,
     amalgammation_src_dir: &PathBuf,
+    c_opt_level: u32,
     //zlib: Library,
 ) {
     let c_file = format!("{name}.c");
@@ -60,7 +61,7 @@ fn build_sqlite_org_extension(
     let mut build = cc::Build::new();
     build
         .file(&c_file_path)
-        .flag("-O3")
+        .opt_level(c_opt_level)
         .warnings(false)
         .include(amalgammation_src_dir);
     //.includes(zlib.include_paths);
@@ -114,6 +115,14 @@ fn amalgammation_from_sqlite_org(out_dir: PathBuf) -> PathBuf {
 fn main() {
     generate_builtins();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // Use -O0 for dev builds to speed up C compilation (~15s savings)
+    let c_opt_level: u32 = if env::var("PROFILE").unwrap_or_default() == "release" {
+        3
+    } else {
+        0
+    };
+
     println!("cargo:rerun-if-env-changed=SOLITE_AMALGAMMATION_DIR");
     let amalgammation_src_dir = env::var("SOLITE_AMALGAMMATION_DIR")
     .map(PathBuf::from)
@@ -124,7 +133,7 @@ fn main() {
         .file(amalgammation_src_dir.join("sqlite3.c"))
         .include(&amalgammation_src_dir)
         .static_flag(true)
-        .opt_level(3)
+        .opt_level(c_opt_level)
         .flag("-DSQLITE_ENABLE_RTREE")
         .flag("-DSQLITE_SOUNDEX")
         .flag("-DSQLITE_ENABLE_GEOPOLY")
@@ -198,7 +207,8 @@ fn main() {
         build_sqlite_org_extension(
             ext,
             &out_dir,
-            &amalgammation_src_dir, /*, zlib.clone() */
+            &amalgammation_src_dir,
+            c_opt_level, /*, zlib.clone() */
         );
     }
 
@@ -207,7 +217,7 @@ fn main() {
         .file("./usleep.c")
         .warnings(false)
         .include(&amalgammation_src_dir)
-        .opt_level(3);
+        .opt_level(c_opt_level);
     if !cfg!(target_os = "windows") {
         build.static_flag(true);
     }
@@ -221,7 +231,7 @@ fn main() {
         .file(amalgammation_src_dir.join("shell.c"))
         .include(&amalgammation_src_dir)
         .static_flag(true)
-        .opt_level(3)
+        .opt_level(c_opt_level)
         .define("main", Some("sqlite3_shell_main"))
         .define("HAVE_READLINE", Some("1"))
         .define("HAVE_EDITLINE", Some("1"))

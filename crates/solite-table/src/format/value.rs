@@ -1,5 +1,6 @@
 //! Value formatting for cells.
 
+use crate::format::html_escape;
 use crate::format::json::format_json;
 use crate::theme::{Theme, RESET};
 use crate::types::{CellValue, ValueType};
@@ -38,7 +39,19 @@ fn format_cell_with_theme(display: &str, value_type: ValueType, theme: &Theme) -
 }
 
 /// Format a cell for HTML output.
-pub fn format_cell_html(cell: &CellValue, theme: Option<&Theme>, max_width: usize) -> String {
+pub fn format_cell_html(
+    cell: &CellValue,
+    theme: Option<&Theme>,
+    max_width: usize,
+    json_interactive: bool,
+) -> String {
+    // For interactive JSON, skip truncation and use the full value
+    if json_interactive && cell.value_type == ValueType::Json {
+        if let Some(theme) = theme {
+            return crate::format::json::format_json_interactive_html(&cell.display, theme);
+        }
+    }
+
     let display = truncate_to_width(&cell.display, max_width);
     let escaped = html_escape(&display);
 
@@ -109,14 +122,6 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
 
     result.push('…');
     result
-}
-
-/// Escape HTML special characters.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 #[cfg(test)]

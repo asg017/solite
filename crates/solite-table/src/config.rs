@@ -38,6 +38,8 @@ pub struct TableConfig {
     pub theme: Option<Theme>,
     /// Whether to show the footer with row/column counts.
     pub show_footer: bool,
+    /// Whether to render JSON cells with an interactive tree viewer (HTML only).
+    pub json_interactive: bool,
 }
 
 impl Default for TableConfig {
@@ -50,6 +52,7 @@ impl Default for TableConfig {
             max_cell_width: 100,
             theme: Some(Theme::catppuccin_mocha()),
             show_footer: true,
+            json_interactive: false,
         }
     }
 }
@@ -88,6 +91,7 @@ impl TableConfig {
             max_cell_width: 100_000,
             theme: Some(Theme::catppuccin_mocha()),
             show_footer: true,
+            json_interactive: true,
         }
     }
 

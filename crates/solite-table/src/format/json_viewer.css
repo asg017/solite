@@ -1,0 +1,89 @@
+.solite-json-tree {
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.4;
+}
+.solite-json-tree .jt-row {
+    white-space: nowrap;
+}
+.solite-json-tree .jt-inline {
+    display: inline-block;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.solite-json-tree .jt-caret {
+    cursor: pointer;
+    user-select: none;
+    display: inline-block;
+    width: 1em;
+    text-align: center;
+    color: var(--jt-footer);
+}
+.solite-json-tree .jt-caret:hover {
+    color: var(--jt-text);
+}
+.solite-json-tree .jt-key {
+    color: var(--jt-key);
+}
+.solite-json-tree .jt-str {
+    color: var(--jt-str);
+}
+.solite-json-tree .jt-num {
+    color: var(--jt-num);
+}
+.solite-json-tree .jt-bool {
+    color: var(--jt-bool);
+}
+.solite-json-tree .jt-null {
+    color: var(--jt-null);
+    font-style: italic;
+}
+.solite-json-tree .jt-bracket {
+    color: var(--jt-footer);
+}
+.solite-json-tree .jt-preview {
+    color: var(--jt-footer);
+}
+.solite-json-tree .jt-indent {
+    display: inline-block;
+    width: 1.5em;
+}
+.solite-json-tree .jt-more {
+    color: var(--jt-footer);
+    cursor: pointer;
+    font-style: italic;
+}
+.solite-json-tree .jt-more:hover {
+    text-decoration: underline;
+    color: var(--jt-text);
+}
+.solite-json-cell {
+    position: relative;
+    display: inline-block;
+}
+.solite-json-cell .jt-copy {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: var(--jt-bg);
+    border: 1px solid var(--jt-border);
+    border-radius: 3px;
+    color: var(--jt-footer);
+    font-size: 11px;
+    padding: 1px 5px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-family: monospace;
+    z-index: 1;
+}
+.solite-json-cell:hover .jt-copy {
+    opacity: 1;
+}
+.solite-json-cell .jt-copy:hover {
+    color: var(--jt-text);
+    border-color: var(--jt-footer);
+}

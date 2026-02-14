@@ -1,5 +1,6 @@
-//! JSON syntax highlighting.
+//! JSON syntax highlighting and interactive viewer.
 
+use crate::format::html_escape;
 use crate::theme::{Theme, RESET};
 use solite_lexer::json::{tokenize, Kind, StringContext};
 
@@ -105,12 +106,45 @@ pub fn format_json_html(contents: &str, theme: &Theme) -> String {
     output
 }
 
-/// Escape HTML special characters.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+/// Format a JSON cell for interactive HTML display.
+/// Returns a `<span>` with `data-json` attribute containing the raw JSON,
+/// and the flat syntax-highlighted HTML as fallback content.
+pub fn format_json_interactive_html(contents: &str, theme: &Theme) -> String {
+    let fallback = format_json_html(contents, theme);
+    let escaped_json = html_escape(contents);
+    format!(
+        "<span class=\"solite-json-cell\" data-json=\"{}\">{}</span>",
+        escaped_json, fallback
+    )
+}
+
+/// CSS for the interactive JSON inspector (static, uses CSS custom properties).
+pub fn json_viewer_css() -> &'static str {
+    include_str!("json_viewer.css")
+}
+
+/// Self-contained JS for the interactive JSON viewer.
+pub fn json_viewer_js() -> &'static str {
+    include_str!("json_viewer.js")
+}
+
+/// Generate inline CSS custom property declarations for the JSON viewer theme.
+/// Intended to be used as a `style` attribute on the container element.
+pub fn json_viewer_theme_vars(theme: &Theme) -> String {
+    format!(
+        "--jt-key: {}; --jt-str: {}; --jt-num: {}; --jt-bool: {}; \
+         --jt-null: {}; --jt-footer: {}; --jt-text: {}; \
+         --jt-border: {}; --jt-bg: {};",
+        theme.json_key.to_hex_string(),
+        theme.json_string.to_hex_string(),
+        theme.json_number.to_hex_string(),
+        theme.json_boolean.to_hex_string(),
+        theme.null.to_hex_string(),
+        theme.footer.to_hex_string(),
+        theme.text.to_hex_string(),
+        theme.border.to_hex_string(),
+        theme.header.to_hex_string(),
+    )
 }
 
 #[cfg(test)]
@@ -123,7 +157,6 @@ mod tests {
         let json = r#"{"key": "value"}"#;
         let formatted = format_json(json, &theme);
 
-        // Should contain the original text (without checking exact ANSI codes)
         assert!(formatted.contains("key"));
         assert!(formatted.contains("value"));
         assert!(formatted.contains("{"));
@@ -141,7 +174,51 @@ mod tests {
     }
 
     #[test]
-    fn test_html_escape() {
-        assert_eq!(html_escape("<>&\""), "&lt;&gt;&amp;&quot;");
+    fn test_format_json_interactive_html() {
+        let theme = Theme::catppuccin_mocha();
+        let json = r#"{"name": "Alice"}"#;
+        let result = format_json_interactive_html(json, &theme);
+
+        assert!(result.starts_with("<span class=\"solite-json-cell\""));
+        assert!(result.contains("data-json=\""));
+        // Fallback content should be inside the span
+        assert!(result.contains("<span style="));
+    }
+
+    #[test]
+    fn test_format_json_interactive_html_escapes_json() {
+        let theme = Theme::catppuccin_mocha();
+        let json = r#"{"html": "<b>bold</b>"}"#;
+        let result = format_json_interactive_html(json, &theme);
+
+        // data-json attribute must have HTML-escaped content
+        assert!(result.contains("&lt;b&gt;bold&lt;/b&gt;"));
+    }
+
+    #[test]
+    fn test_json_viewer_theme_vars() {
+        let theme = Theme::catppuccin_mocha();
+        let vars = json_viewer_theme_vars(&theme);
+
+        assert!(vars.contains("--jt-key:"));
+        assert!(vars.contains("--jt-str:"));
+        assert!(vars.contains("--jt-num:"));
+        assert!(vars.contains("--jt-bool:"));
+        assert!(vars.contains("--jt-null:"));
+        assert!(vars.contains("#89B4FA")); // json_key blue
+    }
+
+    #[test]
+    fn test_json_viewer_css_is_valid() {
+        let css = json_viewer_css();
+        assert!(css.contains(".solite-json-tree"));
+        assert!(css.contains("var(--jt-key)"));
+    }
+
+    #[test]
+    fn test_json_viewer_js_is_valid() {
+        let js = json_viewer_js();
+        assert!(js.contains("solite-json-cell"));
+        assert!(js.contains("sessionStorage"));
     }
 }

@@ -1,6 +1,7 @@
 //! HTML rendering for Jupyter notebooks.
 
 use crate::config::TableConfig;
+use crate::format::html_escape;
 use crate::format::value::format_cell_html;
 use crate::types::{CellValue, ColumnInfo, TableLayout};
 
@@ -56,9 +57,26 @@ pub fn render_html(
 ) -> String {
     let mut html = String::new();
 
+    // Wrap in container div for scoped JS queries
+    if config.json_interactive {
+        if let Some(ref theme) = config.theme {
+            html.push_str(&format!(
+                "<div class=\"solite-output\" style=\"{}\">\n",
+                crate::format::json::json_viewer_theme_vars(theme)
+            ));
+        } else {
+            html.push_str("<div class=\"solite-output\">\n");
+        }
+    } else {
+        html.push_str("<div class=\"solite-output\">\n");
+    }
+
     // Style tag
     html.push_str("<style>");
     html.push_str(TABLE_CSS);
+    if config.json_interactive {
+        html.push_str(crate::format::json::json_viewer_css());
+    }
     html.push_str("</style>\n");
 
     // Table
@@ -125,6 +143,16 @@ pub fn render_html(
         html.push_str(&format!("<div class=\"solite-footer\">{} × {}</div>\n", col_text, row_text));
     }
 
+    // Add interactive JSON viewer script
+    if config.json_interactive {
+        html.push_str("<script>");
+        html.push_str(crate::format::json::json_viewer_js());
+        html.push_str("</script>\n");
+    }
+
+    // Close container div
+    html.push_str("</div>\n");
+
     html
 }
 
@@ -145,7 +173,7 @@ fn render_html_row(
             CellValue::new(String::new(), crate::types::ValueType::Null, crate::types::Alignment::Left)
         });
 
-        let formatted = format_cell_html(&cell, config.theme.as_ref(), config.max_cell_width);
+        let formatted = format_cell_html(&cell, config.theme.as_ref(), config.max_cell_width, config.json_interactive);
 
         // Add alignment style
         let align_style = match cell.alignment {
@@ -163,13 +191,6 @@ fn render_html_row(
 
     html.push_str("</tr>\n");
     html
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 #[cfg(test)]

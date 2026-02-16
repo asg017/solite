@@ -443,6 +443,21 @@ pub fn build_schema(program: &Program) -> Schema {
                 );
             }
 
+            Statement::CreateVirtualTable(create) => {
+                let table_key = create.table_name.to_lowercase();
+                schema.tables.insert(
+                    table_key.clone(),
+                    TableInfo {
+                        columns: HashSet::new(),
+                        original_columns: Vec::new(),
+                        without_rowid: true,
+                        doc: None,
+                        column_docs: HashMap::new(),
+                    },
+                );
+                schema.original_names.insert(table_key, create.table_name.clone());
+            }
+
             Statement::DropTable(drop) => {
                 let table_key = drop.table_name.to_lowercase();
                 schema.tables.remove(&table_key);
@@ -977,6 +992,18 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
                     column_docs,
                 });
             }
+            Statement::CreateVirtualTable(create) => {
+                // Register virtual table so subsequent SELECTs can reference it.
+                // Columns are unknown at parse time, so leave them empty.
+                let table_key = create.table_name.to_lowercase();
+                tables.insert(table_key, TableInfo {
+                    columns: HashSet::new(),
+                    original_columns: Vec::new(),
+                    without_rowid: true,
+                    doc: None,
+                    column_docs: HashMap::new(),
+                });
+            }
             // Other statement types - no specific analysis yet
             Statement::Insert(_)
             | Statement::Update(_)
@@ -984,7 +1011,6 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
             | Statement::CreateIndex(_)
             | Statement::CreateView(_)
             | Statement::CreateTrigger(_)
-            | Statement::CreateVirtualTable(_)
             | Statement::AlterTable(_)
             | Statement::DropTable(_)
             | Statement::DropIndex(_)

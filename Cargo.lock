@@ -3811,6 +3811,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "solite-analyzer",
@@ -3820,6 +3821,7 @@ dependencies = [
  "solite-lexer",
  "solite-parser",
  "solite-schema",
+ "solite-stdlib",
  "tokio",
  "tower-lsp",
 ]

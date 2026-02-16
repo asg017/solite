@@ -392,6 +392,49 @@ fn introspect_view(
     })
 }
 
+/// Discover eponymous virtual table modules and their visible columns.
+///
+/// Queries `PRAGMA module_list` for all registered modules, then attempts to
+/// prepare `SELECT * FROM <module>` for each one. Modules that support
+/// eponymous access (like `generate_series`, `json_each`, pragma vtabs, etc.)
+/// will succeed, and their column names are extracted from the prepared statement.
+/// Non-eponymous modules are silently skipped.
+///
+/// The caller is responsible for initializing extensions on the connection
+/// (e.g. via `solite_stdlib_init`) before calling this function.
+///
+/// Returns a vec of `(module_name, column_names)` pairs.
+pub fn discover_virtual_table_columns(conn: &Connection) -> Vec<(String, Vec<String>)> {
+    let mut result = Vec::new();
+
+    // Get all registered modules
+    let Ok(mut stmt) = conn.prepare("SELECT name FROM pragma_module_list") else {
+        return result;
+    };
+    let Ok(modules) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+        return result;
+    };
+    let module_names: Vec<String> = modules.filter_map(|r| r.ok()).collect();
+
+    for module in &module_names {
+        // Try to prepare a SELECT to discover visible columns.
+        // This works for eponymous virtual tables without actually executing anything.
+        let sql = format!("SELECT * FROM \"{}\"", module);
+        if let Ok(probe) = conn.prepare(&sql) {
+            let columns: Vec<String> = probe
+                .column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            if !columns.is_empty() {
+                result.push((module.clone(), columns));
+            }
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,5 +854,28 @@ mod tests {
         let sql = table.sql.as_ref().unwrap();
         assert!(sql.contains("CREATE TABLE"));
         assert!(sql.contains("users"));
+    }
+
+    #[test]
+    fn test_discover_virtual_table_columns_finds_builtins() {
+        let conn = create_test_db();
+        let vtabs = discover_virtual_table_columns(&conn);
+
+        // json_each is built into modern SQLite
+        let json_each = vtabs.iter().find(|(name, _)| name == "json_each");
+        assert!(json_each.is_some(), "Should discover json_each");
+        let (_, cols) = json_each.unwrap();
+        assert!(cols.contains(&"key".to_string()));
+        assert!(cols.contains(&"value".to_string()));
+        assert!(cols.contains(&"type".to_string()));
+    }
+
+    #[test]
+    fn test_discover_virtual_table_columns_returns_vec() {
+        let conn = create_test_db();
+        let vtabs = discover_virtual_table_columns(&conn);
+
+        // Should find at least some built-in modules
+        assert!(!vtabs.is_empty(), "Should discover at least some virtual tables");
     }
 }

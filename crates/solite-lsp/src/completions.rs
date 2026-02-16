@@ -10,7 +10,9 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat,
 };
 
-use crate::context::{extract_used_insert_columns, CompletionContext, CteRef, TableRef};
+use crate::context::{
+    extract_used_insert_columns, extract_used_select_columns, CompletionContext, CteRef, TableRef,
+};
 
 /// Extended completion options for LSP-specific features
 #[derive(Default)]
@@ -190,9 +192,33 @@ pub fn get_completions_extended(
             }
         }
 
-        // Column name contexts with tables in scope
-        CompletionContext::SelectColumns { ref tables, ref ctes }
-        | CompletionContext::WhereClause { ref tables, ref ctes }
+        // SELECT columns — filter out already-used columns
+        CompletionContext::SelectColumns { ref tables, ref ctes } => {
+            if let Some(schema) = schema {
+                let used_columns: HashSet<String> =
+                    if let (Some(text), Some(offset)) = (options.document_text, options.cursor_offset)
+                    {
+                        extract_used_select_columns(text, offset)
+                    } else {
+                        HashSet::new()
+                    };
+                let has_star = used_columns.contains("*");
+                suggest_columns_from_tables(schema, tables, ctes)
+                    .into_iter()
+                    .filter(|item| {
+                        if has_star {
+                            return false;
+                        }
+                        !used_columns.contains(&item.label.to_lowercase())
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
+        }
+
+        // Other column name contexts with tables in scope
+        CompletionContext::WhereClause { ref tables, ref ctes }
         | CompletionContext::GroupByClause { ref tables, ref ctes }
         | CompletionContext::HavingClause { ref tables, ref ctes }
         | CompletionContext::OrderByClause { ref tables, ref ctes } => {

@@ -794,3 +794,41 @@ fn test_strict_without_rowid_no_rowid() {
     assert!(completions.iter().any(|c| c.label == "v"), "Should suggest v");
     assert!(!completions.iter().any(|c| c.label == "rowid"), "Should NOT suggest rowid for STRICT WITHOUT ROWID table");
 }
+
+// ========================================
+// SELECT Column Deduplication Tests
+// ========================================
+
+#[test]
+fn test_select_column_filtering() {
+    let schema = build_test_schema("CREATE TABLE t (id, name, email);");
+    let completions = get_completions_with_text("SELECT id, ", &schema);
+
+    assert!(!completions.iter().any(|c| c.label == "id"), "Should NOT suggest id (already used)");
+    assert!(completions.iter().any(|c| c.label == "name"), "Should suggest name");
+    assert!(completions.iter().any(|c| c.label == "email"), "Should suggest email");
+}
+
+#[test]
+fn test_select_column_filtering_with_star() {
+    let schema = build_test_schema("CREATE TABLE t (id, name, email);");
+    let completions = get_completions_with_text("SELECT *, name, ", &schema);
+
+    // All columns already selected via *
+    assert!(!completions.iter().any(|c| c.label == "id"), "Should NOT suggest id (* already selects all)");
+    assert!(!completions.iter().any(|c| c.label == "name"), "Should NOT suggest name (* already selects all)");
+    assert!(!completions.iter().any(|c| c.label == "email"), "Should NOT suggest email (* already selects all)");
+}
+
+#[test]
+fn test_select_column_filtering_with_from() {
+    // The exact scenario from the issue: SELECT *, value, <cursor> FROM generate_series(1, 10)
+    let mut schema = build_test_schema("");
+    schema.add_table("generate_series", vec!["value".to_string()], true);
+    let completions = get_completions_with_text(
+        "SELECT *, value, ",
+        &schema,
+    );
+
+    assert!(!completions.iter().any(|c| c.label == "value"), "Should NOT suggest value (already used)");
+}

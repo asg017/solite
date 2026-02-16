@@ -1771,6 +1771,155 @@ pub fn extract_used_insert_columns(source: &str, cursor_offset: usize) -> HashSe
     used_columns
 }
 
+/// Extract column names already present in the SELECT clause before the cursor.
+///
+/// For `SELECT *, value, <cursor> FROM generate_series(1, 10)`, returns `{"*", "value"}`.
+/// The special value `"*"` signals that all columns are already selected.
+/// Qualified columns like `t.col` produce `"col"` (the unqualified name).
+/// Aliases after AS are excluded. Function names before `(` are excluded.
+/// Column names are normalized to lowercase for case-insensitive comparison.
+pub fn extract_used_select_columns(source: &str, cursor_offset: usize) -> HashSet<String> {
+    let tokens = lex(source);
+    let mut used = HashSet::new();
+    let mut in_select = false;
+    let mut paren_depth: i32 = 0;
+    let mut after_as = false;
+    // Track the last identifier seen at paren_depth == 0, so we can exclude
+    // it if it turns out to be a function name (followed by `(`).
+    let mut pending_ident: Option<String> = None;
+    // Track if we just saw a dot — the next ident replaces the pending one
+    // (qualified column: we want the column part, not the table part).
+    let mut after_dot = false;
+
+    for token in &tokens {
+        if token.span.start >= cursor_offset {
+            break;
+        }
+
+        // Skip comments
+        if matches!(token.kind, TokenKind::Comment | TokenKind::BlockComment) {
+            continue;
+        }
+
+        // Semicolon resets everything
+        if token.kind == TokenKind::Semicolon {
+            in_select = false;
+            paren_depth = 0;
+            after_as = false;
+            pending_ident = None;
+            after_dot = false;
+            used.clear();
+            continue;
+        }
+
+        if token.kind == TokenKind::Select {
+            in_select = true;
+            paren_depth = 0;
+            after_as = false;
+            pending_ident = None;
+            after_dot = false;
+            used.clear();
+            continue;
+        }
+
+        if !in_select {
+            continue;
+        }
+
+        // FROM (or other clause-ending keywords) at depth 0 ends the SELECT list
+        if paren_depth == 0
+            && matches!(
+                token.kind,
+                TokenKind::From
+                    | TokenKind::Where
+                    | TokenKind::Group
+                    | TokenKind::Having
+                    | TokenKind::Order
+                    | TokenKind::Limit
+                    | TokenKind::Union
+                    | TokenKind::Intersect
+                    | TokenKind::Except
+            )
+        {
+            // Flush any pending ident
+            if let Some(col) = pending_ident.take() {
+                used.insert(col);
+            }
+            in_select = false;
+            continue;
+        }
+
+        match token.kind {
+            TokenKind::LParen => {
+                if paren_depth == 0 {
+                    // The pending ident was a function name — discard it
+                    pending_ident = None;
+                }
+                paren_depth += 1;
+            }
+            TokenKind::RParen => {
+                paren_depth = (paren_depth - 1).max(0);
+            }
+            TokenKind::Comma if paren_depth == 0 => {
+                // Comma separates result columns — flush pending
+                if let Some(col) = pending_ident.take() {
+                    used.insert(col);
+                }
+                after_as = false;
+                after_dot = false;
+            }
+            TokenKind::As if paren_depth == 0 => {
+                // Flush the column before the alias
+                if let Some(col) = pending_ident.take() {
+                    used.insert(col);
+                }
+                after_as = true;
+            }
+            TokenKind::Star if paren_depth == 0 => {
+                used.insert("*".to_string());
+                pending_ident = None;
+            }
+            TokenKind::Dot if paren_depth == 0 => {
+                // In `t.col`, discard the table part, keep only the column
+                pending_ident = None;
+                after_dot = true;
+            }
+            _ if paren_depth == 0 && is_ident_token(&token.kind) => {
+                if after_as {
+                    // This is an alias — skip it
+                    after_as = false;
+                } else {
+                    // This ident might be a bare column, the column part of a
+                    // qualified reference, or a function name (if followed by `(`).
+                    // Check if the next non-whitespace/comment token is `(`.
+                    let name = ident_name(source, token).to_lowercase();
+                    // If after_dot, this replaces whatever was pending
+                    pending_ident = Some(name);
+                    after_dot = false;
+                }
+            }
+            _ if paren_depth == 0 && !is_ident_token(&token.kind) && !after_dot => {
+                // Some other token at top level that isn't part of a qualified name.
+                // If we had a bare alias (ident without AS), the pending_ident is
+                // the alias, not the column. But we can't always tell the difference
+                // between `SELECT col alias, ...` and `SELECT col, ...`.
+                // Since the ident right before the alias was already flushed or replaced,
+                // just let pending_ident be flushed on comma/FROM/end.
+            }
+            _ => {}
+        }
+    }
+
+    // Flush any remaining pending ident (cursor is inside SELECT list)
+    if in_select {
+        if let Some(col) = pending_ident.take() {
+            used.insert(col);
+        }
+    }
+
+    used
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1820,5 +1969,57 @@ mod tests {
         let used = extract_used_insert_columns("INSERT INTO users (id, ", 23);
         assert_eq!(used.len(), 1);
         assert!(used.contains("id"));
+    }
+
+    #[test]
+    fn test_extract_select_columns_basic() {
+        let sql = "SELECT *, value, ";
+        let used = extract_used_select_columns(sql, sql.len());
+        assert!(used.contains("*"));
+        assert!(used.contains("value"));
+        assert_eq!(used.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_select_columns_with_from() {
+        let sql = "SELECT *, value,  FROM generate_series(1, 10);";
+        let used = extract_used_select_columns(sql, 17); // cursor at position after "value, "
+        assert!(used.contains("*"));
+        assert!(used.contains("value"));
+    }
+
+    #[test]
+    fn test_extract_select_columns_with_alias() {
+        let sql = "SELECT id, name AS n, ";
+        let used = extract_used_select_columns(sql, sql.len());
+        assert!(used.contains("id"));
+        assert!(used.contains("name"));
+        // alias "n" should NOT be in the set as a used column
+        assert!(!used.contains("n"));
+    }
+
+    #[test]
+    fn test_extract_select_columns_qualified() {
+        let sql = "SELECT t.id, t.name, ";
+        let used = extract_used_select_columns(sql, sql.len());
+        assert!(used.contains("id"));
+        assert!(used.contains("name"));
+        // "t" (table qualifier) should NOT be in the set
+        assert!(!used.contains("t"));
+    }
+
+    #[test]
+    fn test_extract_select_columns_function_excluded() {
+        let sql = "SELECT count(id), ";
+        let used = extract_used_select_columns(sql, sql.len());
+        // "count" is a function name, not a column reference
+        assert!(!used.contains("count"));
+    }
+
+    #[test]
+    fn test_extract_select_columns_case_insensitive() {
+        let sql = "SELECT Value, ";
+        let used = extract_used_select_columns(sql, sql.len());
+        assert!(used.contains("value")); // lowercase
     }
 }

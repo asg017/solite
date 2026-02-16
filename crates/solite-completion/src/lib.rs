@@ -16,8 +16,8 @@ mod items;
 mod schema;
 
 pub use context::{
-    detect_context, detect_context_from_tokens, extract_used_insert_columns, CompletionContext,
-    CteRef, TableRef,
+    detect_context, detect_context_from_tokens, extract_used_insert_columns,
+    extract_used_select_columns, CompletionContext, CteRef, TableRef,
 };
 pub use engine::get_completions;
 pub use items::{CompletionItem, CompletionKind};

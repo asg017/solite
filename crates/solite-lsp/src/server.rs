@@ -287,6 +287,26 @@ fn build_combined_schema(sources: &[&str]) -> Schema {
     }
 }
 
+/// Discover virtual table schemas by querying a live SQLite connection
+/// with all solite-stdlib extensions loaded.
+fn discover_builtin_vtab_schema() -> Schema {
+    let mut schema = Schema::new();
+    let Ok(conn) = rusqlite::Connection::open_in_memory() else {
+        return schema;
+    };
+    unsafe {
+        solite_stdlib::solite_stdlib_init(
+            conn.handle(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+    }
+    for (name, columns) in solite_schema::introspect::discover_virtual_table_columns(&conn) {
+        schema.add_table(name, columns, true);
+    }
+    schema
+}
+
 pub(crate) struct Backend {
     client: Client,
     documents: RwLock<HashMap<Url, String>>,
@@ -303,6 +323,8 @@ pub(crate) struct Backend {
     open_schemas: RwLock<HashMap<Url, Schema>>,
     /// Last edit position per document (byte offset) for contextual inlay hints
     last_edit_offset: RwLock<HashMap<Url, usize>>,
+    /// Static schema for built-in SQLite virtual tables (generate_series, json_each, etc.)
+    builtin_schema: Schema,
 }
 
 impl Backend {
@@ -317,7 +339,18 @@ impl Backend {
             lint_results: RwLock::new(HashMap::new()),
             open_schemas: RwLock::new(HashMap::new()),
             last_edit_offset: RwLock::new(HashMap::new()),
+            builtin_schema: discover_builtin_vtab_schema(),
         }
+    }
+
+    /// Merge built-in virtual table schema with an optional user/document schema.
+    /// Builtins serve as the base layer; user tables override builtins.
+    fn schema_with_builtins(&self, schema: Option<Schema>) -> Option<Schema> {
+        let mut combined = self.builtin_schema.clone();
+        if let Some(s) = schema {
+            combined.merge(s);
+        }
+        Some(combined)
     }
 
     async fn on_change(&self, uri: Url, text: String) {
@@ -481,13 +514,14 @@ impl Backend {
                     .insert(uri.clone(), schema);
             }
 
-            // Get external schema for this file
-            let external_schema: Option<Schema> = self
-                .open_schemas
-                .read()
-                .expect("open_schemas lock poisoned")
-                .get(&uri)
-                .cloned();
+            // Get external schema for this file, merged with built-in vtabs
+            let external_schema: Option<Schema> = self.schema_with_builtins(
+                self.open_schemas
+                    .read()
+                    .expect("open_schemas lock poisoned")
+                    .get(&uri)
+                    .cloned(),
+            );
 
             // Compute diagnostics using the pre-parsed document (respects dot commands)
             let (mut diagnostics, lint_results) =
@@ -517,7 +551,7 @@ impl Backend {
         // Get the appropriate external schema based on document type
         let notebook_path = get_notebook_path(uri);
 
-        let external_schema: Option<Schema> = if let Some(ref nb_path) = notebook_path {
+        let external_schema: Option<Schema> = self.schema_with_builtins(if let Some(ref nb_path) = notebook_path {
             // For notebook cells, combine DDL schema with .open schema
             let ddl_schema = self.notebook_schemas
                 .read()
@@ -547,7 +581,7 @@ impl Backend {
                 .expect("open_schemas lock poisoned")
                 .get(uri)
                 .cloned()
-        };
+        });
 
         // Parse document with dot commands to filter out .open lines
         let doc = Document::parse(text, true);
@@ -1546,8 +1580,8 @@ impl LanguageServer for Backend {
         // Get the appropriate schema - notebook schema for cells, or combined schema for regular files
         let notebook_path = get_notebook_path(&uri);
 
-        // Build the combined schema for completion
-        let combined_schema: Option<Schema> = if let Some(ref nb_path) = notebook_path {
+        // Build the combined schema for completion (with built-in vtabs as base)
+        let combined_schema: Option<Schema> = self.schema_with_builtins(if let Some(ref nb_path) = notebook_path {
             // For notebook cells, combine DDL schema with .open schema
             let ddl_schema = self.notebook_schemas
                 .read()
@@ -1587,7 +1621,7 @@ impl LanguageServer for Backend {
                 (None, Some(os)) => Some(os),
                 (None, None) => None,
             }
-        };
+        });
 
         let schema: Option<&Schema> = combined_schema.as_ref();
 
@@ -1696,9 +1730,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        // Get combined schema for this document (doc schema + open schema)
+        // Get combined schema for this document (doc schema + open schema + builtins)
         let notebook_path = get_notebook_path(&uri);
-        let schema: Option<Schema> = if let Some(ref nb_path) = notebook_path {
+        let schema: Option<Schema> = self.schema_with_builtins(if let Some(ref nb_path) = notebook_path {
             // For notebook cells, combine DDL schema with .open schema
             let ddl_schema = self.notebook_schemas
                 .read()
@@ -1735,7 +1769,7 @@ impl LanguageServer for Backend {
                 (None, Some(os)) => Some(os),
                 (None, None) => None,
             }
-        };
+        });
 
         // Parse the document (use Document::parse to handle dot commands like .open)
         let doc = Document::parse(&text, true);
@@ -1840,9 +1874,9 @@ impl LanguageServer for Backend {
         let text = text.clone();
         drop(documents);
 
-        // Get combined schema for this document (doc schema + open schema)
+        // Get combined schema for this document (doc schema + open schema + builtins)
         let notebook_path = get_notebook_path(&uri);
-        let schema: Option<Schema> = if let Some(ref nb_path) = notebook_path {
+        let schema: Option<Schema> = self.schema_with_builtins(if let Some(ref nb_path) = notebook_path {
             // For notebook cells, combine DDL schema with .open schema
             let ddl_schema = self.notebook_schemas
                 .read()
@@ -1879,7 +1913,7 @@ impl LanguageServer for Backend {
                 (None, Some(os)) => Some(os),
                 (None, None) => None,
             }
-        };
+        });
 
         // Parse the document
         let Ok(program) = parse_program(&text) else {

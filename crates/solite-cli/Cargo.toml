@@ -40,6 +40,7 @@ console = "0.15.10"
 pathdiff = "0.2.3"
 regex = "1.11.1"
 indicatif.workspace = true
+libsqlite3-sys.workspace = true
 
 # solite docs
 markdown = "1.0.0-alpha.23"

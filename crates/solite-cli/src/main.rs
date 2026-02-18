@@ -57,6 +57,7 @@ fn main() {
         cli::Commands::Diff(args) => commands::diff::diff(args.args),
         cli::Commands::Rsync(args) => commands::rsync::rsync(args.args),
         cli::Commands::Schema(args) => commands::schema::schema(args.database),
+        cli::Commands::Backup(args) => commands::backup::backup(args),
     };
     match result {
         Ok(_) => exit(0),

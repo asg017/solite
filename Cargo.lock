@@ -3702,6 +3702,7 @@ dependencies = [
  "jiff",
  "jupyter-protocol",
  "lazy_static",
+ "libsqlite3-sys",
  "markdown",
  "mdast_util_to_markdown",
  "nbformat",

@@ -15,3 +15,4 @@ pub mod sqlite3;
 pub mod diff;
 pub mod rsync;
 pub mod schema;
+pub mod backup;

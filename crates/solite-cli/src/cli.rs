@@ -277,6 +277,19 @@ pub struct SchemaArgs {
     pub database: PathBuf,
 }
 
+#[derive(Args, Debug)]
+pub struct BackupArgs {
+    /// Source database path
+    pub database: PathBuf,
+
+    /// Destination backup file path
+    pub destination: PathBuf,
+
+    /// Which attached database to back up
+    #[arg(long, default_value = "main")]
+    pub db: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -332,6 +345,9 @@ pub enum Commands {
 
     /// Print the schema of a database
     Schema(SchemaArgs),
+
+    /// Back up a SQLite database to a file
+    Backup(BackupArgs),
 }
 
 const HELP_TEMPLATE: &str = "\
@@ -350,6 +366,7 @@ Scripting and Query Execution:
   schema           Print the schema of a database
 
 Tooling:
+  backup           Back up a SQLite database to a file
   jupyter          Manage the Solite Jupyter kernel
   tui              Tui for exploring a database
   test             Run SQL-based inline tests in a single file

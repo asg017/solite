@@ -290,6 +290,26 @@ pub struct BackupArgs {
     pub db: String,
 }
 
+#[derive(Args, Debug)]
+pub struct VacuumArgs {
+    /// Database path to vacuum
+    pub database: PathBuf,
+
+    /// Write vacuumed database to a new file instead of in-place
+    #[arg(long, alias = "output", short = 'o')]
+    pub into: Option<PathBuf>,
+
+    /// Positional alias for --into
+    #[arg(hide = true)]
+    pub destination: Option<PathBuf>,
+}
+
+impl VacuumArgs {
+    pub fn into_path(&self) -> Option<&PathBuf> {
+        self.into.as_ref().or(self.destination.as_ref())
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -348,6 +368,9 @@ pub enum Commands {
 
     /// Back up a SQLite database to a file
     Backup(BackupArgs),
+
+    /// Rebuild a database file, repacking it into minimal disk space
+    Vacuum(VacuumArgs),
 }
 
 const HELP_TEMPLATE: &str = "\
@@ -367,6 +390,7 @@ Scripting and Query Execution:
 
 Tooling:
   backup           Back up a SQLite database to a file
+  vacuum           Rebuild a database, repacking into minimal disk space
   jupyter          Manage the Solite Jupyter kernel
   tui              Tui for exploring a database
   test             Run SQL-based inline tests in a single file

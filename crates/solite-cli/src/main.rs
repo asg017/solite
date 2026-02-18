@@ -58,6 +58,7 @@ fn main() {
         cli::Commands::Rsync(args) => commands::rsync::rsync(args.args),
         cli::Commands::Schema(args) => commands::schema::schema(args.database),
         cli::Commands::Backup(args) => commands::backup::backup(args),
+        cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),
     };
     match result {
         Ok(_) => exit(0),

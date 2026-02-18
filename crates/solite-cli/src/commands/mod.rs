@@ -16,3 +16,4 @@ pub mod diff;
 pub mod rsync;
 pub mod schema;
 pub mod backup;
+pub mod vacuum;

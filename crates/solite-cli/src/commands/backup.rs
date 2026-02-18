@@ -1,6 +1,8 @@
 use std::ffi::CString;
 use std::ptr;
+use std::time::Instant;
 
+use console::style;
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
 use libsqlite3_sys::*;
 use solite_core::sqlite::Connection;
@@ -78,6 +80,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
     let src_display = args.database.display();
     let dest_display = args.destination.display();
 
+    let start = Instant::now();
     let pb = ProgressBar::new(0);
     if let Ok(style) = ProgressStyle::with_template(
         &format!("{src_display} -> {dest_display}\n[{{bar:60}}] {{msg}} ({{elapsed}} / ETA {{eta}})")
@@ -137,6 +140,15 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
 
     unsafe { sqlite3_close(dest_db) };
 
-    println!("Backup completed successfully to {dest_display}");
+    let elapsed = start.elapsed();
+    let size = std::fs::metadata(&args.destination).map(|m| m.len()).unwrap_or(0);
+
+    println!(
+        "{} Backed up to {} ({}, {:.2?})",
+        style("\u{2714}").green(),
+        dest_display,
+        HumanBytes(size),
+        elapsed,
+    );
     Ok(())
 }

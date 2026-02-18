@@ -254,6 +254,17 @@ fn main() {
         .warnings(false)
         .compile("sqldiff");
 
+    // Compile sqlite3_rsync.c with main() renamed so we can call it from Rust
+    println!("cargo:rerun-if-changed={}", vendor_dir.join("sqlite3_rsync.c").display());
+    cc::Build::new()
+        .file(vendor_dir.join("sqlite3_rsync.c"))
+        .include(&amalgammation_src_dir)
+        .static_flag(true)
+        .opt_level(c_opt_level)
+        .define("main", Some("sqlite3_rsync_main"))
+        .warnings(false)
+        .compile("sqlite3_rsync");
+
     // Link libedit (macOS system editline) or readline for the sqlite3 shell
     if cfg!(target_os = "macos") {
         println!("cargo:rustc-link-lib=edit");

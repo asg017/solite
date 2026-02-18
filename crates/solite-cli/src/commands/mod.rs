@@ -13,4 +13,5 @@ pub mod lint;
 pub mod lsp;
 pub mod sqlite3;
 pub mod diff;
+pub mod rsync;
 pub mod schema;

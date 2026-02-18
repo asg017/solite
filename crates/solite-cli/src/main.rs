@@ -55,6 +55,7 @@ fn main() {
         cli::Commands::Lsp(args) => commands::lsp::lsp(args),
         cli::Commands::Sqlite3(args) => commands::sqlite3::sqlite3(args.args),
         cli::Commands::Diff(args) => commands::diff::diff(args.args),
+        cli::Commands::Rsync(args) => commands::rsync::rsync(args.args),
         cli::Commands::Schema(args) => commands::schema::schema(args.database),
     };
     match result {

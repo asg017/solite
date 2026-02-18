@@ -265,6 +265,14 @@ pub struct DiffArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct RsyncArgs {
+    /// Arguments passed directly to sqlite3_rsync
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
 pub struct SchemaArgs {
     pub database: PathBuf,
 }
@@ -319,6 +327,9 @@ pub enum Commands {
     /// Output SQL to transform one database into another
     Diff(DiffArgs),
 
+    /// Efficiently replicate a SQLite database to a remote machine
+    Rsync(RsyncArgs),
+
     /// Print the schema of a database
     Schema(SchemaArgs),
 }
@@ -354,6 +365,7 @@ SQL:
 Compatibility:
   sqlite3          Run the sqlite3 shell directly
   diff             Output SQL to transform one database into another
+  rsync            Efficiently replicate a SQLite database to a remote machine
 ";
 
 #[derive(Parser)]

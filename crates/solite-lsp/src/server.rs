@@ -287,7 +287,7 @@ fn build_combined_schema(sources: &[&str]) -> Schema {
     }
 }
 
-/// Discover virtual table schemas by querying a live SQLite connection
+/// Discover virtual table schemas and function names by querying a live SQLite connection
 /// with all solite-stdlib extensions loaded.
 fn discover_builtin_vtab_schema() -> Schema {
     let mut schema = Schema::new();
@@ -304,6 +304,34 @@ fn discover_builtin_vtab_schema() -> Schema {
     for (name, columns) in solite_schema::introspect::discover_virtual_table_columns(&conn) {
         schema.add_table(name, columns, true);
     }
+
+    // Discover available scalar functions and their argument counts
+    let mut functions = Vec::new();
+    let mut function_nargs: std::collections::HashMap<String, Vec<i32>> = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT name, narg FROM pragma_function_list ORDER BY name") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+        }) {
+            for row in rows.flatten() {
+                let (name, narg) = row;
+                let key = name.to_lowercase();
+                let entry = function_nargs.entry(key).or_default();
+                if !entry.contains(&narg) {
+                    entry.push(narg);
+                }
+                if !functions.contains(&name) {
+                    functions.push(name);
+                }
+            }
+        }
+    }
+    // Sort narg values for consistent display
+    for nargs in function_nargs.values_mut() {
+        nargs.sort();
+    }
+    schema.set_functions(functions);
+    schema.set_function_nargs(function_nargs);
+
     schema
 }
 
@@ -1625,11 +1653,22 @@ impl LanguageServer for Backend {
 
         let schema: Option<&Schema> = combined_schema.as_ref();
 
+        // Extract the prefix (partial word being typed at cursor)
+        let prefix = {
+            let before = &text_clone[..offset];
+            let start = before
+                .rfind(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ')')
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            &text_clone[start..offset]
+        };
+
         // Use consolidated completion logic from completions.rs
         let options = ExtendedCompletionOptions {
             document_text: Some(&text_clone),
             cursor_offset: Some(offset),
             include_documentation: true,
+            prefix: if prefix.is_empty() { None } else { Some(prefix) },
         };
         let items = get_completions_extended(&ctx, schema, &options);
 

@@ -221,8 +221,8 @@ pub enum CompletionContext {
         table_name: String,
     },
 
-    /// Cursor is after an expression in WHERE clause - suggest AND, OR, ORDER BY, etc.
-    AfterWhereExpr {
+    /// Cursor is after an expression - suggest operators like AND, OR, ->, ->>, etc.
+    AfterExpr {
         /// Tables/aliases in scope
         tables: Vec<TableRef>,
         /// CTEs in scope for this query
@@ -277,6 +277,8 @@ enum ContextState {
     AfterSelect,
     /// In the SELECT column list (before FROM)
     InSelectColumns,
+    /// In SELECT column list, after an expression (identifier, literal, etc.)
+    InSelectExpr,
     /// After FROM keyword
     AfterFrom,
     /// After a table name in FROM clause
@@ -1128,11 +1130,33 @@ pub fn detect_context_from_tokens(
             (ContextState::AfterSelect, TokenKind::Distinct | TokenKind::All) => {
                 ContextState::AfterSelect
             }
+            (ContextState::AfterSelect, kind) if is_ident_token(kind) => ContextState::InSelectExpr,
+            (ContextState::AfterSelect, TokenKind::Integer | TokenKind::Float | TokenKind::String | TokenKind::Null | TokenKind::True | TokenKind::False) => {
+                ContextState::InSelectExpr
+            }
             (ContextState::AfterSelect, _) if !matches!(token.kind, TokenKind::From) => {
                 ContextState::InSelectColumns
             }
             (ContextState::InSelectColumns, TokenKind::From) => ContextState::AfterFrom,
+            (ContextState::InSelectColumns, kind) if is_ident_token(kind) => ContextState::InSelectExpr,
+            (ContextState::InSelectColumns, TokenKind::Integer | TokenKind::Float | TokenKind::String | TokenKind::Null | TokenKind::True | TokenKind::False) => {
+                ContextState::InSelectExpr
+            }
             (ContextState::InSelectColumns, _) => ContextState::InSelectColumns,
+
+            // In SELECT after an expression
+            (ContextState::InSelectExpr, TokenKind::From) => ContextState::AfterFrom,
+            (ContextState::InSelectExpr, TokenKind::Comma) => ContextState::InSelectColumns,
+            (ContextState::InSelectExpr, TokenKind::As) => ContextState::InSelectColumns,
+            // Operators → back to InSelectColumns (expecting next operand)
+            (ContextState::InSelectExpr, TokenKind::Eq | TokenKind::Ne | TokenKind::BangEq | TokenKind::Lt | TokenKind::Le | TokenKind::Gt | TokenKind::Ge | TokenKind::Arrow | TokenKind::ArrowArrow) => {
+                ContextState::InSelectColumns
+            }
+            (ContextState::InSelectExpr, TokenKind::Like | TokenKind::Between | TokenKind::In | TokenKind::Is) => {
+                ContextState::InSelectColumns
+            }
+            (ContextState::InSelectExpr, kind) if is_ident_token(kind) => ContextState::InSelectExpr,
+            (ContextState::InSelectExpr, _) => ContextState::InSelectExpr,
             (ContextState::AfterSelect, TokenKind::From) => ContextState::AfterFrom,
 
             // FROM clause
@@ -1246,8 +1270,8 @@ pub fn detect_context_from_tokens(
             (ContextState::AfterWhere, _) => ContextState::AfterWhere,
             // In WHERE after an expression - AND/OR go back to AfterWhere
             (ContextState::InWhereExpr, TokenKind::And | TokenKind::Or) => ContextState::AfterWhere,
-            // Comparison operators - stay in expression mode, next will be value
-            (ContextState::InWhereExpr, TokenKind::Eq | TokenKind::Ne | TokenKind::BangEq | TokenKind::Lt | TokenKind::Le | TokenKind::Gt | TokenKind::Ge) => {
+            // Comparison and JSON operators - stay in expression mode, next will be value
+            (ContextState::InWhereExpr, TokenKind::Eq | TokenKind::Ne | TokenKind::BangEq | TokenKind::Lt | TokenKind::Le | TokenKind::Gt | TokenKind::Ge | TokenKind::Arrow | TokenKind::ArrowArrow) => {
                 ContextState::AfterWhere
             }
             // LIKE, BETWEEN, IN, IS operators
@@ -1453,8 +1477,34 @@ pub fn detect_context_from_tokens(
         };
     }
 
+    // If the cursor is right at the end of an identifier token and the state
+    // is "after expression", the user is likely mid-typing a column/function
+    // name rather than having finished an expression. Revert to the
+    // "expecting expression" state so we suggest columns/functions instead
+    // of operators.
+    let state = {
+        let last_token = tokens
+            .iter()
+            .filter(|t| !matches!(t.kind, TokenKind::Comment | TokenKind::BlockComment))
+            .filter(|t| t.span.start < cursor_offset)
+            .last();
+        if let Some(last) = last_token {
+            if last.span.end == cursor_offset && is_ident_token(&last.kind) {
+                match state {
+                    ContextState::InSelectExpr => ContextState::InSelectColumns,
+                    ContextState::InWhereExpr => ContextState::AfterWhere,
+                    _ => state,
+                }
+            } else {
+                state
+            }
+        } else {
+            state
+        }
+    };
+
     // For SELECT columns context, if no tables are in scope yet, look ahead for FROM clause
-    let final_tables = if matches!(state, ContextState::AfterSelect | ContextState::InSelectColumns) && tables_in_scope.is_empty() {
+    let final_tables = if matches!(state, ContextState::AfterSelect | ContextState::InSelectColumns | ContextState::InSelectExpr) && tables_in_scope.is_empty() {
         look_ahead_for_from_tables(tokens, source, cursor_offset)
     } else {
         tables_in_scope
@@ -1552,7 +1602,7 @@ fn state_to_context(
             tables: tables_in_scope,
             ctes: ctes_in_scope,
         },
-        ContextState::InWhereExpr => CompletionContext::AfterWhereExpr {
+        ContextState::InWhereExpr | ContextState::InSelectExpr => CompletionContext::AfterExpr {
             tables: tables_in_scope,
             ctes: ctes_in_scope,
         },

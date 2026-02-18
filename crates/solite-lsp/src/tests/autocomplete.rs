@@ -52,7 +52,7 @@ fn test_smart_autocomplete_unique_column_inserts_from() {
 
     // Get completions for SELECT without FROM (empty tables list)
     let ctx = CompletionContext::SelectColumns { tables: vec![], ctes: vec![] };
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     // Find the released_year completion
     let released_year = items
@@ -82,7 +82,7 @@ fn test_smart_autocomplete_ambiguous_column_no_from() {
 
     // Get completions for SELECT without FROM
     let ctx = CompletionContext::SelectColumns { tables: vec![], ctes: vec![] };
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     // Find the name completion
     let name_item = items
@@ -128,7 +128,7 @@ fn test_smart_autocomplete_all_unique_columns() {
     let schema = build_schema(&parse_program(SMART_AUTOCOMPLETE_SCHEMA_SQL).unwrap());
 
     let ctx = CompletionContext::SelectColumns { tables: vec![], ctes: vec![] };
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     // Helper to check a unique column completion
     let check_unique = |col: &str, table: &str| {
@@ -181,7 +181,7 @@ fn test_autocomplete_with_from_clause_only_suggests_table_columns() {
     }];
 
     let ctx = CompletionContext::SelectColumns { tables, ctes: vec![] };
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     // Should have exactly 3 columns: movie_id, actor_id, rowid
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
@@ -295,7 +295,7 @@ fn run_autocomplete_test(sql: &str, expectations: &[(usize, &[&str])]) {
         let ctx = detect_context(&processed_sql, *offset);
 
         // Get completions
-        let items = get_completions_for_context(&ctx, Some(&schema));
+        let items = get_completions_for_context(&ctx, Some(&schema), None);
         let actual_labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
         // Check expected labels are present
@@ -525,7 +525,7 @@ fn test_autocomplete_create_table_context() {
 
     assert_eq!(ctx, CompletionContext::AfterCreateTable);
 
-    let completions = get_completions_for_context(&ctx, None);
+    let completions = get_completions_for_context(&ctx, None, None);
     let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
 
     assert!(
@@ -543,7 +543,7 @@ fn test_autocomplete_insert_context() {
 
     assert_eq!(ctx, CompletionContext::AfterInsert);
 
-    let completions = get_completions_for_context(&ctx, None);
+    let completions = get_completions_for_context(&ctx, None, None);
     let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
 
     assert!(labels.contains(&"into"), "Should suggest 'into', got: {:?}", labels);
@@ -571,7 +571,7 @@ fn test_autocomplete_replace_context() {
 
     assert_eq!(ctx, CompletionContext::AfterReplace);
 
-    let completions = get_completions_for_context(&ctx, None);
+    let completions = get_completions_for_context(&ctx, None, None);
     let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
 
     assert!(labels.contains(&"into"), "Should suggest 'into', got: {:?}", labels);
@@ -717,7 +717,7 @@ fn test_autocomplete_where_clause_after_and() {
 #[test]
 fn test_context_where_after_expr_suggests_operators() {
     // Direct context test for after expression in WHERE clause
-    // This verifies the AfterWhereExpr context is detected and returns correct completions
+    // This verifies the AfterExpr context is detected and returns correct completions
     use super::{build_test_schema, get_completions_for_context};
     use crate::context::detect_context;
 
@@ -725,7 +725,7 @@ fn test_context_where_after_expr_suggests_operators() {
 
     // After an identifier in WHERE, context should suggest operators
     let ctx = detect_context("SELECT * FROM t WHERE name ", 27);
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     assert!(labels.contains(&"and"), "Should suggest 'and', got {:?}", labels);

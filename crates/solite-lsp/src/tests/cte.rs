@@ -95,7 +95,7 @@ fn test_cte_autocomplete_table_suggestions() {
     let schema = build_test_schema("CREATE TABLE users (id INTEGER, name TEXT);");
     let ctx = detect_context("WITH foo AS (SELECT 1 AS x) SELECT * FROM ", 42);
 
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(labels.contains(&"foo"), "CTE 'foo' should be suggested");
@@ -115,7 +115,7 @@ fn test_cte_autocomplete_column_suggestions() {
         }],
     };
 
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(labels.contains(&"x"), "CTE column 'x' should be suggested");
@@ -136,7 +136,7 @@ fn test_cte_autocomplete_qualified_column() {
         }],
     };
 
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
 
     let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(labels.contains(&"col_a"), "CTE column 'col_a' should be suggested");
@@ -310,7 +310,7 @@ select * from final;"#;
 
     // Build schema from DDL only
     let schema = build_test_schema(ddl);
-    let items = get_completions_for_context(&ctx, Some(&schema));
+    let items = get_completions_for_context(&ctx, Some(&schema), None);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     // Should have columns from both movies (via movies_20s) and actors (via genz_actors)

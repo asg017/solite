@@ -118,6 +118,45 @@ impl SchemaSource for LiveSchemaSource<'_> {
         }
         names
     }
+
+    fn function_names(&self) -> Vec<String> {
+        let stmt = match self.runtime.connection.prepare(
+            "SELECT DISTINCT name FROM pragma_function_list ORDER BY name",
+        ) {
+            Ok((_, Some(stmt))) => stmt,
+            _ => return vec![],
+        };
+
+        let mut names = vec![];
+        while let Ok(Some(row)) = stmt.next() {
+            if let Some(first) = row.first() {
+                names.push(first.as_str().to_string());
+            }
+        }
+        names
+    }
+
+    fn function_nargs(&self, name: &str) -> Option<Vec<i32>> {
+        let sql = "SELECT DISTINCT narg FROM pragma_function_list WHERE lower(name) = lower(?) ORDER BY narg";
+        let stmt = match self.runtime.connection.prepare(sql) {
+            Ok((_, Some(stmt))) => stmt,
+            _ => return None,
+        };
+        stmt.bind_text(1, name);
+
+        let mut nargs = vec![];
+        while let Ok(Some(row)) = stmt.next() {
+            if let Some(val) = row.first() {
+                nargs.push(val.as_int64() as i32);
+            }
+        }
+
+        if nargs.is_empty() {
+            None
+        } else {
+            Some(nargs)
+        }
+    }
 }
 
 /// Convert a CompletionItem to a rustyline Pair for display.
@@ -202,14 +241,18 @@ impl ReplCompleter {
         // Detect the completion context
         let context = detect_context(line, pos);
 
+        // Find the start position for replacement
+        let start = find_completion_start(line, pos);
+
+        // Extract the prefix (partial word being typed)
+        let prefix = &line[start..pos];
+        let prefix_opt = if prefix.is_empty() { None } else { Some(prefix) };
+
         // Get completions from the shared engine
-        let items = get_completions(&context, Some(&schema));
+        let items = get_completions(&context, Some(&schema), prefix_opt);
 
         // Convert to rustyline Pairs
         let pairs: Vec<Pair> = items.into_iter().map(to_pair).collect();
-
-        // Find the start position for replacement
-        let start = find_completion_start(line, pos);
 
         Ok((start, pairs))
     }

@@ -33,6 +33,17 @@ pub trait SchemaSource {
 
     /// Get all view names in the schema.
     fn view_names(&self) -> Vec<String>;
+
+    /// Get all scalar function names available in the database.
+    fn function_names(&self) -> Vec<String> {
+        vec![]
+    }
+
+    /// Get valid argument counts for a function (case-insensitive).
+    /// Returns None if unknown. A value of -1 means variadic.
+    fn function_nargs(&self, _name: &str) -> Option<Vec<i32>> {
+        None
+    }
 }
 
 // Implementation for solite_analyzer::Schema when the analyzer feature is enabled
@@ -63,5 +74,13 @@ impl SchemaSource for solite_analyzer::Schema {
         solite_analyzer::Schema::view_names(self)
             .map(|s| s.to_string())
             .collect()
+    }
+
+    fn function_names(&self) -> Vec<String> {
+        self.function_names_list().to_vec()
+    }
+
+    fn function_nargs(&self, name: &str) -> Option<Vec<i32>> {
+        solite_analyzer::Schema::function_nargs(self, name).map(|s| s.to_vec())
     }
 }

@@ -128,7 +128,10 @@ pub fn run_test(test: &MdTest) -> Result<TestResult, MdTestError> {
     }
 
     // Build schema from DDL statements
-    let schema = extract_schema_from_ddl(&combined_sql);
+    let mut schema = extract_schema_from_ddl(&combined_sql);
+    let (functions, function_nargs) = discover_function_metadata();
+    schema.set_functions(functions);
+    schema.set_function_nargs(function_nargs);
 
     // Check marker assertions
     for assertion in &test.assertions {
@@ -178,7 +181,7 @@ pub fn run_test(test: &MdTest) -> Result<TestResult, MdTestError> {
 
     // Check inline diagnostics
     for file in &test.files {
-        check_inline_diagnostics(file, &mut failures);
+        check_inline_diagnostics(file, &schema, &mut failures);
     }
 
     // Check inline inlay hints
@@ -191,6 +194,45 @@ pub fn run_test(test: &MdTest) -> Result<TestResult, MdTestError> {
         source_file: test.source_file.clone(),
         source_line: test.source_line,
     })
+}
+
+/// Discover function names and argument counts from a live SQLite connection with stdlib loaded.
+fn discover_function_metadata() -> (Vec<String>, HashMap<String, Vec<i32>>) {
+    let Ok(conn) = rusqlite::Connection::open_in_memory() else {
+        return (vec![], HashMap::new());
+    };
+    unsafe {
+        solite_stdlib::solite_stdlib_init(
+            conn.handle(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+    }
+    let mut functions = Vec::new();
+    let mut function_nargs: HashMap<String, Vec<i32>> = HashMap::new();
+    let Ok(mut stmt) = conn.prepare("SELECT name, narg FROM pragma_function_list ORDER BY name")
+    else {
+        return (vec![], HashMap::new());
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+    }) else {
+        return (vec![], HashMap::new());
+    };
+    for (name, narg) in rows.flatten() {
+        let key = name.to_lowercase();
+        let entry = function_nargs.entry(key).or_default();
+        if !entry.contains(&narg) {
+            entry.push(narg);
+        }
+        if !functions.contains(&name) {
+            functions.push(name);
+        }
+    }
+    for nargs in function_nargs.values_mut() {
+        nargs.sort();
+    }
+    (functions, function_nargs)
 }
 
 /// Extract schema from DDL statements (CREATE TABLE, etc.)
@@ -258,8 +300,17 @@ fn check_autocomplete(
     // Use the real LSP context detection
     let ctx = detect_context(sql, marker.clean_offset);
 
+    // Extract the prefix (partial word being typed at cursor)
+    let before = &sql[..marker.clean_offset];
+    let prefix_start = before
+        .rfind(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ')')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let prefix = &sql[prefix_start..marker.clean_offset];
+    let prefix_opt = if prefix.is_empty() { None } else { Some(prefix) };
+
     // Use the shared completion function from solite_lsp
-    let completions = get_completions_for_context(&ctx, Some(schema));
+    let completions = get_completions_for_context(&ctx, Some(schema), prefix_opt);
     // Preserve order for display, use set for membership checks
     let completion_labels: Vec<String> = completions.into_iter().map(|c| c.label).collect();
     let completion_set: HashSet<String> = completion_labels.iter().cloned().collect();
@@ -363,8 +414,8 @@ fn check_hover(
     }
 }
 
-fn check_inline_diagnostics(file: &TestFile, failures: &mut Vec<TestFailure>) {
-    use solite_analyzer::analyze;
+fn check_inline_diagnostics(file: &TestFile, schema: &Schema, failures: &mut Vec<TestFailure>) {
+    use solite_analyzer::analyze_with_schema;
 
     let program = match parse_program(&file.clean_content) {
         Ok(p) => p,
@@ -384,7 +435,7 @@ fn check_inline_diagnostics(file: &TestFile, failures: &mut Vec<TestFailure>) {
         }
     };
 
-    let diagnostics = analyze(&program);
+    let diagnostics = analyze_with_schema(&program, Some(schema));
     let mut matched_diagnostics: HashSet<usize> = HashSet::new();
 
     for inline in &file.inline_diagnostics {
@@ -538,7 +589,7 @@ mod tests {
 
         // Get completions - should be empty
         let schema = Schema::default();
-        let completions = get_completions_for_context(&ctx, Some(&schema));
+        let completions = get_completions_for_context(&ctx, Some(&schema), None);
         assert!(completions.is_empty(),
             "Should have no completions inside CREATE TABLE column definitions");
     }

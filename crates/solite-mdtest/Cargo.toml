@@ -11,6 +11,8 @@ solite-analyzer = { path = "../solite-analyzer" }
 solite-ast = { path = "../solite-ast" }
 solite-schema = { path = "../solite-schema" }
 solite-lsp = { path = "../solite-lsp" }
+solite-stdlib = { path = "../solite-stdlib" }
+rusqlite = { workspace = true }
 
 # Markdown parsing
 pulldown-cmark = "0.12"

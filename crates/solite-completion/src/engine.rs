@@ -28,10 +28,15 @@ pub fn quote_identifier_if_needed(name: &str) -> Option<String> {
 /// This is the main entry point for the completion engine. It takes a context
 /// (detected by `detect_context`) and an optional schema source, and returns
 /// a list of completion items appropriate for that context.
+///
+/// `prefix` is the partial word typed at the cursor. Functions are only
+/// suggested when at least one character has been typed.
 pub fn get_completions(
     ctx: &CompletionContext,
     schema: Option<&dyn SchemaSource>,
+    prefix: Option<&str>,
 ) -> Vec<CompletionItem> {
+    let include_functions = prefix.is_some_and(|p| !p.is_empty());
     match ctx {
         // Statement start - suggest SQL keywords filtered by prefix
         CompletionContext::StatementStart { ref prefix } => {
@@ -146,7 +151,11 @@ pub fn get_completions(
         | CompletionContext::HavingClause { ref tables, ref ctes }
         | CompletionContext::OrderByClause { ref tables, ref ctes } => {
             if let Some(schema) = schema {
-                suggest_columns_from_tables(schema, tables, ctes)
+                let mut items = suggest_columns_from_tables(schema, tables, ctes);
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -155,7 +164,11 @@ pub fn get_completions(
         // Expression context (no CTE support)
         CompletionContext::Expression { ref tables } => {
             if let Some(schema) = schema {
-                suggest_columns_from_tables(schema, tables, &[])
+                let mut items = suggest_columns_from_tables(schema, tables, &[]);
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -170,7 +183,11 @@ pub fn get_completions(
             if let Some(schema) = schema {
                 let mut all_tables = left_tables.clone();
                 all_tables.push(right_table.clone());
-                suggest_columns_from_tables(schema, &all_tables, ctes)
+                let mut items = suggest_columns_from_tables(schema, &all_tables, ctes);
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -369,8 +386,8 @@ pub fn get_completions(
             vec![CompletionItem::new("table", CompletionKind::Keyword)]
         }
 
-        // After an expression in WHERE clause - suggest operators and clause keywords
-        CompletionContext::AfterWhereExpr { .. } => {
+        // After an expression - suggest operators and clause keywords
+        CompletionContext::AfterExpr { .. } => {
             vec![
                 // Logical operators
                 CompletionItem::new("and", CompletionKind::Keyword),
@@ -382,6 +399,9 @@ pub fn get_completions(
                 CompletionItem::new("<=", CompletionKind::Operator),
                 CompletionItem::new(">", CompletionKind::Operator),
                 CompletionItem::new(">=", CompletionKind::Operator),
+                // JSON extract operators
+                CompletionItem::new("->", CompletionKind::Operator),
+                CompletionItem::new("->>", CompletionKind::Operator),
                 // SQL operators
                 CompletionItem::new("like", CompletionKind::Keyword),
                 CompletionItem::new("in", CompletionKind::Keyword),
@@ -540,6 +560,32 @@ fn suggest_all_columns(schema: &dyn SchemaSource) -> Vec<CompletionItem> {
 }
 
 // ============================================================================
+// Function Suggestion Helpers
+// ============================================================================
+
+/// Suggest scalar functions from the schema source.
+fn suggest_functions(schema: &dyn SchemaSource) -> Vec<CompletionItem> {
+    schema
+        .function_names()
+        .into_iter()
+        .filter(|name| name != "->" && name != "->>")
+        .map(|name| {
+            let is_zero_arg = schema
+                .function_nargs(&name)
+                .map(|nargs| nargs.len() == 1 && nargs[0] == 0)
+                .unwrap_or(false);
+            let insert = if is_zero_arg {
+                format!("{}()", name)
+            } else {
+                format!("{}(", name)
+            };
+            CompletionItem::new(&name, CompletionKind::Function)
+                .with_insert_text(insert)
+        })
+        .collect()
+}
+
+// ============================================================================
 // Keyword Completion Helpers
 // ============================================================================
 
@@ -644,7 +690,7 @@ mod tests {
     #[test]
     fn test_statement_start_completions() {
         let ctx = CompletionContext::StatementStart { prefix: Some("sel".to_string()) };
-        let items = get_completions(&ctx, None);
+        let items = get_completions(&ctx, None, None);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].label, "select");
     }
@@ -657,7 +703,7 @@ mod tests {
             ],
         };
         let ctx = CompletionContext::AfterFrom { ctes: vec![] };
-        let items = get_completions(&ctx, Some(&schema));
+        let items = get_completions(&ctx, Some(&schema), None);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].label, "users");
         assert_eq!(items[0].kind, CompletionKind::Table);
@@ -674,7 +720,7 @@ mod tests {
             tables: vec![TableRef::new("users".to_string(), None)],
             ctes: vec![],
         };
-        let items = get_completions(&ctx, Some(&schema));
+        let items = get_completions(&ctx, Some(&schema), None);
         assert_eq!(items.len(), 2);
         assert!(items.iter().any(|i| i.label == "id"));
         assert!(items.iter().any(|i| i.label == "name"));

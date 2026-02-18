@@ -23,6 +23,9 @@ pub struct CompletionOptions<'a> {
     pub cursor_offset: Option<usize>,
     /// Include rich documentation on keywords
     pub include_documentation: bool,
+    /// Partial word typed at cursor. Functions are only suggested when
+    /// at least one character has been typed.
+    pub prefix: Option<&'a str>,
 }
 
 /// Quote an identifier if it needs quoting (contains special chars or is a keyword)
@@ -48,8 +51,9 @@ pub fn quote_identifier_if_needed(name: &str) -> Option<String> {
 pub fn get_completions_for_context(
     ctx: &CompletionContext,
     schema: Option<&Schema>,
+    prefix: Option<&str>,
 ) -> Vec<CompletionItem> {
-    get_completions_extended(ctx, schema, &CompletionOptions::default())
+    get_completions_extended(ctx, schema, &CompletionOptions { prefix, ..Default::default() })
 }
 
 /// Generate completion items with extended options
@@ -63,6 +67,8 @@ pub fn get_completions_extended(
     schema: Option<&Schema>,
     options: &CompletionOptions,
 ) -> Vec<CompletionItem> {
+    let include_functions = options.prefix.is_some_and(|p| !p.is_empty());
+
     match ctx {
         // Statement start - suggest SQL keywords filtered by prefix
         CompletionContext::StatementStart { ref prefix } => {
@@ -203,7 +209,7 @@ pub fn get_completions_extended(
                         HashSet::new()
                     };
                 let has_star = used_columns.contains("*");
-                suggest_columns_from_tables(schema, tables, ctes)
+                let mut items: Vec<CompletionItem> = suggest_columns_from_tables(schema, tables, ctes)
                     .into_iter()
                     .filter(|item| {
                         if has_star {
@@ -211,7 +217,11 @@ pub fn get_completions_extended(
                         }
                         !used_columns.contains(&item.label.to_lowercase())
                     })
-                    .collect()
+                    .collect();
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -223,7 +233,11 @@ pub fn get_completions_extended(
         | CompletionContext::HavingClause { ref tables, ref ctes }
         | CompletionContext::OrderByClause { ref tables, ref ctes } => {
             if let Some(schema) = schema {
-                suggest_columns_from_tables(schema, tables, ctes)
+                let mut items = suggest_columns_from_tables(schema, tables, ctes);
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -232,7 +246,11 @@ pub fn get_completions_extended(
         // Expression context (no CTE support)
         CompletionContext::Expression { ref tables } => {
             if let Some(schema) = schema {
-                suggest_columns_from_tables(schema, tables, &[])
+                let mut items = suggest_columns_from_tables(schema, tables, &[]);
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -247,7 +265,11 @@ pub fn get_completions_extended(
             if let Some(schema) = schema {
                 let mut all_tables = left_tables.clone();
                 all_tables.push(right_table.clone());
-                suggest_columns_from_tables(schema, &all_tables, ctes)
+                let mut items = suggest_columns_from_tables(schema, &all_tables, ctes);
+                if include_functions {
+                    items.extend(suggest_functions(schema));
+                }
+                items
             } else {
                 vec![]
             }
@@ -468,8 +490,8 @@ pub fn get_completions_extended(
         // After ALTER - suggest TABLE
         CompletionContext::AfterAlter => after_alter_keywords(options.include_documentation),
 
-        // After an expression in WHERE clause - suggest operators and clause keywords
-        CompletionContext::AfterWhereExpr { .. } => {
+        // After an expression - suggest operators and clause keywords
+        CompletionContext::AfterExpr { .. } => {
             vec![
                 // Logical operators
                 CompletionItem {
@@ -510,6 +532,17 @@ pub fn get_completions_extended(
                 },
                 CompletionItem {
                     label: ">=".to_string(),
+                    kind: Some(CompletionItemKind::OPERATOR),
+                    ..Default::default()
+                },
+                // JSON extract operators
+                CompletionItem {
+                    label: "->".to_string(),
+                    kind: Some(CompletionItemKind::OPERATOR),
+                    ..Default::default()
+                },
+                CompletionItem {
+                    label: "->>".to_string(),
                     kind: Some(CompletionItemKind::OPERATOR),
                     ..Default::default()
                 },
@@ -721,6 +754,36 @@ fn suggest_columns_with_from_insertion(schema: &Schema) -> Vec<CompletionItem> {
     }
 
     items
+}
+
+// ============================================================================
+// Function Suggestion Helpers
+// ============================================================================
+
+/// Suggest scalar functions from the schema.
+fn suggest_functions(schema: &Schema) -> Vec<CompletionItem> {
+    schema
+        .function_names_list()
+        .iter()
+        .filter(|name| name.as_str() != "->" && name.as_str() != "->>")
+        .map(|name| {
+            let is_zero_arg = schema
+                .function_nargs(name)
+                .map(|nargs| nargs.len() == 1 && nargs[0] == 0)
+                .unwrap_or(false);
+            let insert = if is_zero_arg {
+                format!("{}()", name)
+            } else {
+                format!("{}(", name)
+            };
+            CompletionItem {
+                label: name.clone(),
+                insert_text: Some(insert),
+                kind: Some(CompletionItemKind::FUNCTION),
+                ..Default::default()
+            }
+        })
+        .collect()
 }
 
 // ============================================================================

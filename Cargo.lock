@@ -3837,12 +3837,14 @@ dependencies = [
  "once_cell",
  "pulldown-cmark",
  "regex",
+ "rusqlite",
  "solite-analyzer",
  "solite-ast",
  "solite-lexer",
  "solite-lsp",
  "solite-parser",
  "solite-schema",
+ "solite-stdlib",
  "thiserror 2.0.12",
 ]
 

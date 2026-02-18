@@ -110,6 +110,11 @@ pub struct Schema {
     views: HashMap<String, ViewInfo>,
     /// Trigger registry: lowercase trigger name -> TriggerInfo
     triggers: HashMap<String, TriggerInfo>,
+    /// Scalar function names available in the database
+    functions: Vec<String>,
+    /// Function argument counts: lowercase name -> sorted list of valid narg values.
+    /// narg = -1 means variadic (accepts any number of arguments).
+    function_nargs: HashMap<String, Vec<i32>>,
 }
 
 impl Schema {
@@ -235,6 +240,21 @@ impl Schema {
         for (name, trigger) in other.triggers {
             self.triggers.insert(name, trigger);
         }
+
+        // Merge functions
+        if !other.functions.is_empty() {
+            let existing: HashSet<String> = self.functions.iter().cloned().collect();
+            for f in other.functions {
+                if !existing.contains(&f) {
+                    self.functions.push(f);
+                }
+            }
+        }
+
+        // Merge function_nargs
+        for (name, nargs) in other.function_nargs {
+            self.function_nargs.entry(name).or_insert(nargs);
+        }
     }
 
     /// Returns an iterator over all table names (original case)
@@ -339,6 +359,32 @@ impl Schema {
     pub fn has_trigger(&self, trigger_name: &str) -> bool {
         let key = trigger_name.to_lowercase();
         self.triggers.contains_key(&key)
+    }
+
+    // ========================================
+    // Function methods
+    // ========================================
+
+    /// Set the list of available scalar function names
+    pub fn set_functions(&mut self, functions: Vec<String>) {
+        self.functions = functions;
+    }
+
+    /// Set function argument count metadata.
+    /// Each entry maps a lowercase function name to its valid narg values.
+    pub fn set_function_nargs(&mut self, nargs: HashMap<String, Vec<i32>>) {
+        self.function_nargs = nargs;
+    }
+
+    /// Returns the list of function names
+    pub fn function_names_list(&self) -> &[String] {
+        &self.functions
+    }
+
+    /// Returns the valid narg values for a function (case-insensitive).
+    /// Returns None if the function is not known.
+    pub fn function_nargs(&self, name: &str) -> Option<&[i32]> {
+        self.function_nargs.get(&name.to_lowercase()).map(|v| v.as_slice())
     }
 }
 
@@ -607,6 +653,9 @@ struct ExprContext<'a> {
     /// All columns from all available tables (lowercase) for unqualified column lookup
     /// Maps column name -> vec of (table_alias, table_info)
     all_columns: HashMap<String, Vec<(String, &'a TableInfo)>>,
+    /// Function argument counts: lowercase name -> valid narg values.
+    /// narg = -1 means variadic. None if not available.
+    function_nargs: Option<&'a HashMap<String, Vec<i32>>>,
 }
 
 impl<'a> ExprContext<'a> {
@@ -758,7 +807,7 @@ fn analyze_select(
     };
 
     // Build expression context from FROM clause
-    let expr_ctx = if let Some(ref from_clause) = select.from {
+    let mut expr_ctx = if let Some(ref from_clause) = select.from {
         // First, check for unknown tables (including CTEs)
         check_unknown_tables_in_from(from_clause, &cte_tables, local_tables, external_schema, diagnostics);
         // Then build the context
@@ -766,6 +815,9 @@ fn analyze_select(
     } else {
         ExprContext::new()
     };
+    if let Some(schema) = external_schema {
+        expr_ctx.function_nargs = Some(&schema.function_nargs);
+    }
 
     // Check each result column
     for col in &select.columns {
@@ -808,12 +860,15 @@ fn analyze_select(
 
     // Check compound SELECT statements (CTEs are also visible to compound parts)
     for (_, core) in &select.compounds {
-        let compound_ctx = if let Some(ref from_clause) = core.from {
+        let mut compound_ctx = if let Some(ref from_clause) = core.from {
             check_unknown_tables_in_from(from_clause, &cte_tables, local_tables, external_schema, diagnostics);
             build_expr_context_from_from(from_clause, &cte_tables, local_tables, external_schema)
         } else {
             ExprContext::new()
         };
+        if let Some(schema) = external_schema {
+            compound_ctx.function_nargs = Some(&schema.function_nargs);
+        }
 
         for col in &core.columns {
             if let ResultColumn::Expr { expr, .. } = col {
@@ -1204,6 +1259,18 @@ where
 }
 
 /// Check an expression for semantic errors, including column validation
+/// Format a list of valid narg values for an error message.
+fn format_nargs(nargs: &[i32]) -> String {
+    match nargs.len() {
+        0 => "0".to_string(),
+        1 => nargs[0].to_string(),
+        _ => {
+            let strs: Vec<String> = nargs.iter().map(|n| n.to_string()).collect();
+            format!("{} or {}", strs[..strs.len() - 1].join(", "), strs.last().unwrap())
+        }
+    }
+}
+
 fn check_expr_with_context(expr: &Expr, ctx: &ExprContext, diagnostics: &mut Vec<Diagnostic>) {
     // Note: Lint-style checks (empty blobs, double-quoted strings) are now handled
     // by the lint system in rules/. This function only does semantic analysis.
@@ -1323,7 +1390,32 @@ fn check_expr_with_context(expr: &Expr, ctx: &ExprContext, diagnostics: &mut Vec
         Expr::Cast { expr, .. } => {
             check_expr_with_context(expr, ctx, diagnostics);
         }
-        Expr::FunctionCall { args, filter, .. } => {
+        Expr::FunctionCall { name, args, filter, span, .. } => {
+            // Check argument count against known function signatures
+            if let Some(function_nargs) = ctx.function_nargs {
+                let fn_lower = name.to_lowercase();
+                if let Some(valid_nargs) = function_nargs.get(&fn_lower) {
+                    // Negative narg means variadic, skip check
+                    if !valid_nargs.iter().any(|&n| n < 0) {
+                        // count(*) parses as args=[Star] but the narg=0 signature
+                        let effective_nargs = if args.len() == 1 && matches!(args[0], Expr::Star(_)) {
+                            0
+                        } else {
+                            args.len() as i32
+                        };
+                        if !valid_nargs.contains(&effective_nargs) {
+                            let expected = format_nargs(valid_nargs);
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "{}() expects {} arguments, but {} were provided",
+                                    name, expected, effective_nargs
+                                ),
+                                span.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
             for arg in args {
                 check_expr_with_context(arg, ctx, diagnostics);
             }

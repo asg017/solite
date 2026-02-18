@@ -206,3 +206,65 @@ create table t(
 - `<ac1>`: primary key, not null, unique, default, collate, references, check, generated always as, as
 - `<ac2>`: primary key, not null, unique, default, collate, references, check, generated always as, as
 - `<ac3>`: primary key, not null, unique, default, collate, references, check, generated always as, as
+
+## Function Completion
+
+### Functions in SELECT expression
+
+Scalar functions should be suggested in SELECT column expressions after typing
+at least one character.
+
+```sql
+select s<ac1> from generate_series(1, 10);
+```
+
+- `<ac1>`: substr, sqlite_version, sum, count, avg, min, max, length, typeof, abs, upper, lower, hex, quote, replace, trim, round, json, coalesce, iif, nullif, printf, unicode, zeroblob, likelihood, likely, unlikely
+
+### Functions alongside columns
+
+Functions should appear alongside columns when tables are in scope,
+after typing at least one character.
+
+```sql
+create table items(id integer, name text);
+
+select i<ac1> from items;
+```
+
+- `<ac1>`: id, name, rowid, substr, abs, length, upper, lower, typeof
+
+### No functions without prefix
+
+Without typing at least one character, only columns should be suggested.
+
+```sql
+create table products(id integer, name text, price real);
+
+select <ac1> from products;
+```
+
+- `<ac1>`: id, name, price, rowid
+
+### Functions in WHERE clause
+
+Functions should be suggested in WHERE expressions after typing at least
+one character.
+
+```sql
+create table products(id integer, name text, price real);
+
+select * from products where l<ac1>;
+```
+
+- `<ac1>`: id, name, price, rowid, length, upper, lower, abs, typeof, coalesce
+
+### JSON extract operators as operators
+
+The `->` and `->>` operators should appear as operator suggestions after an expression,
+not as function suggestions. This works in any expression context, not just WHERE.
+
+```sql
+select '{}' <ac1>;
+```
+
+- `<ac1>`: ->, ->>

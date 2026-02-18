@@ -181,7 +181,7 @@ fn test_qualified_completion_with_alias() {
     let sql = "SELECT * FROM users AS u WHERE u.";
     let ctx = detect_context(sql, sql.len()); // Position after "u."
 
-    let completions = get_completions_for_context(&ctx, Some(&schema));
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
     assert!(completions.iter().any(|c| c.label == "id"), "Should suggest id");
     assert!(completions.iter().any(|c| c.label == "name"), "Should suggest name");
     assert!(completions.iter().any(|c| c.label == "email"), "Should suggest email");
@@ -199,7 +199,7 @@ fn test_ambiguous_columns_qualified() {
     let sql = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id WHERE ";
     let ctx = detect_context(sql, sql.len()); // Position after "WHERE "
 
-    let completions = get_completions_for_context(&ctx, Some(&schema));
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
 
     // 'id' is ambiguous - should suggest qualified versions
     assert!(completions.iter().any(|c| c.label == "u.id"), "Should suggest u.id");
@@ -219,7 +219,7 @@ fn test_implicit_alias_completion() {
     let sql = "SELECT * FROM users WHERE users.";
     let ctx = detect_context(sql, sql.len()); // Position after "users."
 
-    let completions = get_completions_for_context(&ctx, Some(&schema));
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
     assert!(completions.iter().any(|c| c.label == "id"), "Should suggest id");
     assert!(completions.iter().any(|c| c.label == "name"), "Should suggest name");
     assert!(completions.iter().any(|c| c.label == "email"), "Should suggest email");
@@ -234,7 +234,7 @@ fn test_qualified_completion_in_where_clause() {
     let sql = "SELECT * FROM users u JOIN orders o ON u.id = o.id WHERE u.";
     let ctx = detect_context(sql, sql.len()); // Position at end after "u."
 
-    let completions = get_completions_for_context(&ctx, Some(&schema));
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
     assert!(completions.iter().any(|c| c.label == "id"), "Should suggest id");
     assert!(completions.iter().any(|c| c.label == "name"), "Should suggest name");
     assert!(completions.iter().any(|c| c.label == "rowid"), "Should suggest rowid");
@@ -248,7 +248,7 @@ fn test_qualified_completion_case_insensitive() {
     let sql = "SELECT * FROM Users AS u WHERE U.";
     let ctx = detect_context(sql, sql.len()); // Position after "U."
 
-    let completions = get_completions_for_context(&ctx, Some(&schema));
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
     // Should find columns from Users table (U matches u case-insensitively)
     assert!(completions.iter().any(|c| c.label == "ID"), "Should suggest ID");
     assert!(completions.iter().any(|c| c.label == "Name"), "Should suggest Name");
@@ -452,6 +452,7 @@ fn test_statement_start_keywords() {
         document_text: None,
         cursor_offset: None,
         include_documentation: true,
+        prefix: None,
     };
     let keywords = get_completions_extended(&ctx, None, &options);
     let labels: Vec<&str> = keywords.iter().map(|k| k.label.as_str()).collect();
@@ -506,6 +507,7 @@ fn test_after_create_keywords() {
         document_text: None,
         cursor_offset: None,
         include_documentation: true,
+        prefix: None,
     };
     let keywords = get_completions_extended(&ctx, None, &options);
     let labels: Vec<&str> = keywords.iter().map(|k| k.label.as_str()).collect();
@@ -538,6 +540,7 @@ fn test_after_drop_keywords() {
         document_text: None,
         cursor_offset: None,
         include_documentation: true,
+        prefix: None,
     };
     let keywords = get_completions_extended(&ctx, None, &options);
     let labels: Vec<&str> = keywords.iter().map(|k| k.label.as_str()).collect();
@@ -565,6 +568,7 @@ fn test_after_alter_keywords() {
         document_text: None,
         cursor_offset: None,
         include_documentation: true,
+        prefix: None,
     };
     let keywords = get_completions_extended(&ctx, None, &options);
     let labels: Vec<&str> = keywords.iter().map(|k| k.label.as_str()).collect();
@@ -581,6 +585,7 @@ fn test_alter_table_action_keywords_complete() {
         document_text: None,
         cursor_offset: None,
         include_documentation: true,
+        prefix: None,
     };
     let keywords = get_completions_extended(&ctx, None, &options);
     let labels: Vec<&str> = keywords.iter().map(|k| k.label.as_str()).collect();
@@ -611,6 +616,7 @@ fn test_keyword_completions_have_documentation() {
         document_text: None,
         cursor_offset: None,
         include_documentation: true,
+        prefix: None,
     };
 
     let contexts = [
@@ -767,7 +773,7 @@ fn test_rowid_qualified_column() {
     let sql = "SELECT * FROM users WHERE users.";
     let ctx = detect_context(sql, sql.len());
 
-    let completions = get_completions_for_context(&ctx, Some(&schema));
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
     assert!(completions.iter().any(|c| c.label == "id"), "Should suggest id");
     assert!(completions.iter().any(|c| c.label == "name"), "Should suggest name");
     assert!(completions.iter().any(|c| c.label == "rowid"), "Should suggest rowid for qualified column");

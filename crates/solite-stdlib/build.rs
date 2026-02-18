@@ -238,6 +238,22 @@ fn main() {
         .warnings(false)
         .compile("sqlite3_shell");
 
+    // Compile sqldiff.c with main() renamed so we can call it from Rust
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let vendor_dir = manifest_dir.join("../../vendor");
+    println!("cargo:rerun-if-changed={}", vendor_dir.join("sqldiff.c").display());
+    println!("cargo:rerun-if-changed={}", vendor_dir.join("sqlite3_stdio.c").display());
+    cc::Build::new()
+        .file(vendor_dir.join("sqldiff.c"))
+        .file(vendor_dir.join("sqlite3_stdio.c"))
+        .include(&amalgammation_src_dir)
+        .include(&vendor_dir)
+        .static_flag(true)
+        .opt_level(c_opt_level)
+        .define("main", Some("sqldiff_main"))
+        .warnings(false)
+        .compile("sqldiff");
+
     // Link libedit (macOS system editline) or readline for the sqlite3 shell
     if cfg!(target_os = "macos") {
         println!("cargo:rustc-link-lib=edit");

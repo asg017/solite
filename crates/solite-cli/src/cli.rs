@@ -257,6 +257,14 @@ pub struct Sqlite3Args {
 }
 
 #[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct DiffArgs {
+    /// Arguments passed directly to sqldiff
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
 pub struct SchemaArgs {
     pub database: PathBuf,
 }
@@ -308,6 +316,9 @@ pub enum Commands {
     /// Run the sqlite3 shell directly
     Sqlite3(Sqlite3Args),
 
+    /// Output SQL to transform one database into another
+    Diff(DiffArgs),
+
     /// Print the schema of a database
     Schema(SchemaArgs),
 }
@@ -342,6 +353,7 @@ SQL:
 
 Compatibility:
   sqlite3          Run the sqlite3 shell directly
+  diff             Output SQL to transform one database into another
 ";
 
 #[derive(Parser)]

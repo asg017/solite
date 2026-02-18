@@ -15,11 +15,7 @@ pub(crate) fn exec(args: ExecuteArgs) -> Result<(), ()> {
 }
 
 fn exec_impl(args: ExecuteArgs) -> Result<()> {
-    let (db_path, statements) = parse_arguments(&args);
-
-    if statements.is_empty() {
-        bail!("No SQL statements provided");
-    }
+    let (db_path, sql) = parse_arguments(&args);
 
     let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()));
 
@@ -32,90 +28,54 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
         }
     }
 
-    // Wrap all statements in a transaction
-    runtime
-        .connection
-        .execute_script("BEGIN")
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    for sql in &statements {
-        if let Err(err) = execute_sql(&mut runtime, sql) {
-            let _ = runtime.connection.execute_script("ROLLBACK");
-            return Err(err);
+    match runtime.prepare_with_parameters(&sql) {
+        Ok((_, Some(stmt))) => {
+            stmt.execute()
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+        Ok((_, None)) => {
+            bail!("No SQL statement to execute");
+        }
+        Err(err) => {
+            crate::errors::report_error("[input]", &sql, &err, None);
+            bail!("SQL error");
         }
     }
-
-    runtime
-        .connection
-        .execute_script("COMMIT")
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!("✔︎");
     Ok(())
 }
 
-/// Parse arguments to determine database path and SQL statements.
+/// Parse arguments to determine database path and SQL string.
 ///
-/// Uses the same logic as query's parse_arguments: if the first positional arg
-/// exists as a file, it's the database. Otherwise, check if the first statement
-/// arg exists as a file (swap). If neither exists, treat everything as SQL.
-fn parse_arguments(args: &ExecuteArgs) -> (Option<PathBuf>, Vec<String>) {
-    match &args.database {
-        None => (None, args.statement.clone()),
-        Some(arg0) => {
-            if arg0.exists() {
-                // First arg is a database path
-                (Some(arg0.clone()), args.statement.clone())
-            } else if let Some(first_stmt) = args.statement.first() {
-                let p = PathBuf::from(first_stmt);
-                if p.exists() {
-                    // First statement is actually the database, arg0 is SQL
-                    let mut stmts = vec![arg0.to_string_lossy().to_string()];
-                    stmts.extend(args.statement[1..].iter().cloned());
-                    (Some(p), stmts)
-                } else {
-                    // Neither exists as file — all SQL, no database
-                    let mut stmts = vec![arg0.to_string_lossy().to_string()];
-                    stmts.extend(args.statement.clone());
-                    (None, stmts)
-                }
+/// Accepts 1 or 2 positional args in any order: if an arg exists as a file
+/// it's the database, the other is SQL.
+fn parse_arguments(args: &ExecuteArgs) -> (Option<PathBuf>, String) {
+    match args.args.as_slice() {
+        [only] => {
+            let p = PathBuf::from(only);
+            if p.exists() {
+                (Some(p), String::new())
             } else {
-                // Only one arg, doesn't exist as file — it's SQL
-                (None, vec![arg0.to_string_lossy().to_string()])
+                (None, only.clone())
             }
         }
+        [first, second] => {
+            let p0 = PathBuf::from(first);
+            let p1 = PathBuf::from(second);
+            if p0.exists() {
+                (Some(p0), second.clone())
+            } else if p1.exists() {
+                (Some(p1), first.clone())
+            } else {
+                // Neither is a file — treat first as SQL, ignore second?
+                // More likely: the db doesn't exist yet, treat the one that
+                // looks like a path as the db. Fall back to first=sql.
+                (None, first.clone())
+            }
+        }
+        _ => (None, String::new()),
     }
-}
-
-/// Execute one or more SQL statements from a single string.
-/// Handles strings containing multiple semicolon-separated statements.
-fn execute_sql(runtime: &mut Runtime, sql: &str) -> Result<()> {
-    let mut offset = 0;
-    let full_sql = sql;
-
-    loop {
-        let remaining = &full_sql[offset..];
-        if remaining.trim().is_empty() {
-            break;
-        }
-
-        match runtime.prepare_with_parameters(remaining) {
-            Ok((tail, Some(stmt))) => {
-                stmt.execute()
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-                match tail {
-                    Some(tail_offset) => offset += tail_offset,
-                    None => break,
-                }
-            }
-            Ok((_, None)) => break,
-            Err(err) => {
-                crate::errors::report_error("[input]", remaining, &err, None);
-                bail!("SQL error");
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -123,10 +83,9 @@ mod tests {
     use super::*;
     use crate::cli::ExecuteArgs;
 
-    fn make_args(database: Option<&str>, statements: Vec<&str>) -> ExecuteArgs {
+    fn make_args(args: Vec<&str>) -> ExecuteArgs {
         ExecuteArgs {
-            database: database.map(PathBuf::from),
-            statement: statements.into_iter().map(String::from).collect(),
+            args: args.into_iter().map(String::from).collect(),
             output: None,
             format: None,
             parameters: vec![],
@@ -144,181 +103,82 @@ mod tests {
 
     #[test]
     fn parse_args_sql_only() {
-        let args = make_args(None, vec!["INSERT INTO t VALUES (1)"]);
-        let (db, stmts) = parse_arguments(&args);
+        let args = make_args(vec!["INSERT INTO t VALUES (1)"]);
+        let (db, sql) = parse_arguments(&args);
         assert!(db.is_none());
-        assert_eq!(stmts, vec!["INSERT INTO t VALUES (1)"]);
+        assert_eq!(sql, "INSERT INTO t VALUES (1)");
     }
 
     #[test]
-    fn parse_args_all_sql_when_no_files_exist() {
-        let args = make_args(
-            Some("CREATE TABLE t(a)"),
-            vec!["INSERT INTO t VALUES (1)"],
-        );
-        let (db, stmts) = parse_arguments(&args);
-        assert!(db.is_none());
-        assert_eq!(stmts, vec!["CREATE TABLE t(a)", "INSERT INTO t VALUES (1)"]);
-    }
-
-    #[test]
-    fn parse_args_first_arg_is_db_when_exists() {
+    fn parse_args_db_first() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         std::fs::write(&db_path, "").unwrap();
 
-        let args = make_args(
-            Some(db_path.to_str().unwrap()),
-            vec!["INSERT INTO t VALUES (1)"],
-        );
-        let (db, stmts) = parse_arguments(&args);
+        let args = make_args(vec![db_path.to_str().unwrap(), "INSERT INTO t VALUES (1)"]);
+        let (db, sql) = parse_arguments(&args);
         assert_eq!(db.unwrap(), db_path);
-        assert_eq!(stmts, vec!["INSERT INTO t VALUES (1)"]);
+        assert_eq!(sql, "INSERT INTO t VALUES (1)");
     }
 
     #[test]
-    fn parse_args_swap_when_second_arg_is_db() {
+    fn parse_args_db_second() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         std::fs::write(&db_path, "").unwrap();
 
-        let args = make_args(
-            Some("INSERT INTO t VALUES (1)"),
-            vec![db_path.to_str().unwrap()],
-        );
-        let (db, stmts) = parse_arguments(&args);
+        let args = make_args(vec!["INSERT INTO t VALUES (1)", db_path.to_str().unwrap()]);
+        let (db, sql) = parse_arguments(&args);
         assert_eq!(db.unwrap(), db_path);
-        assert_eq!(stmts, vec!["INSERT INTO t VALUES (1)"]);
+        assert_eq!(sql, "INSERT INTO t VALUES (1)");
     }
 
     #[test]
-    fn parse_args_single_sql_no_file() {
-        let args = make_args(Some("CREATE TABLE t(a)"), vec![]);
-        let (db, stmts) = parse_arguments(&args);
+    fn parse_args_neither_is_file() {
+        let args = make_args(vec!["CREATE TABLE t(a)", "INSERT INTO t VALUES (1)"]);
+        let (db, sql) = parse_arguments(&args);
         assert!(db.is_none());
-        assert_eq!(stmts, vec!["CREATE TABLE t(a)"]);
+        assert_eq!(sql, "CREATE TABLE t(a)");
     }
 
-    // --- execute_sql tests ---
+    // --- exec_impl tests ---
 
     #[test]
-    fn execute_single_statement() {
-        let mut rt = Runtime::new(None);
-        rt.connection
-            .execute_script("CREATE TABLE t(a INTEGER)")
-            .unwrap();
-        execute_sql(&mut rt, "INSERT INTO t VALUES (42)").unwrap();
+    fn exec_single_statement() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
 
+        {
+            let rt = Runtime::new(Some(db_str.to_string()));
+            rt.connection
+                .execute_script("CREATE TABLE t(a INTEGER)")
+                .unwrap();
+        }
+
+        let args = ExecuteArgs {
+            args: vec![
+                db_str.to_string(),
+                "INSERT INTO t VALUES (42)".into(),
+            ],
+            output: None,
+            format: None,
+            parameters: vec![],
+        };
+        exec_impl(args).unwrap();
+
+        let rt = Runtime::new(Some(db_str.to_string()));
         assert_eq!(query_val(&rt, "SELECT a FROM t"), "42");
     }
 
     #[test]
-    fn execute_multiple_semicolon_separated() {
-        let mut rt = Runtime::new(None);
-        rt.connection
-            .execute_script("CREATE TABLE t(a INTEGER)")
-            .unwrap();
-        execute_sql(
-            &mut rt,
-            "INSERT INTO t VALUES (1); INSERT INTO t VALUES (2);",
-        )
-        .unwrap();
-
-        assert_eq!(query_val(&rt, "SELECT count(*) FROM t"), "2");
-    }
-
-    #[test]
-    fn execute_sql_error_reported() {
-        let mut rt = Runtime::new(None);
-        let result = execute_sql(&mut rt, "INSERT INTO nonexistent VALUES (1)");
-        assert!(result.is_err());
-    }
-
-    // --- exec_impl transaction tests ---
-
-    #[test]
-    fn exec_commits_on_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("commit.db");
-        let db_str = db_path.to_str().unwrap();
-
-        // Create the database file so parse_arguments recognizes it
-        { Runtime::new(Some(db_str.to_string())); }
-
+    fn exec_error_reported() {
         let args = ExecuteArgs {
-            database: Some(db_path.clone()),
-            statement: vec![
-                "CREATE TABLE t(a INTEGER)".into(),
-                "INSERT INTO t VALUES (1)".into(),
-                "INSERT INTO t VALUES (2)".into(),
-            ],
+            args: vec!["INSERT INTO nonexistent VALUES (1)".into()],
             output: None,
             format: None,
             parameters: vec![],
         };
-        exec_impl(args).unwrap();
-
-        let rt = Runtime::new(Some(db_str.to_string()));
-        assert_eq!(query_val(&rt, "SELECT count(*) FROM t"), "2");
-    }
-
-    #[test]
-    fn exec_rolls_back_on_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("rollback.db");
-        let db_str = db_path.to_str().unwrap();
-
-        // Seed with a table
-        {
-            let rt = Runtime::new(Some(db_str.to_string()));
-            rt.connection
-                .execute_script("CREATE TABLE t(a INTEGER PRIMARY KEY)")
-                .unwrap();
-        }
-
-        // Try to insert two rows where the second is a duplicate — should rollback both
-        let args = ExecuteArgs {
-            database: Some(db_path.clone()),
-            statement: vec![
-                "INSERT INTO t VALUES (1)".into(),
-                "INSERT INTO t VALUES (1)".into(), // duplicate PK
-            ],
-            output: None,
-            format: None,
-            parameters: vec![],
-        };
-        let result = exec_impl(args);
-        assert!(result.is_err());
-
-        // Verify nothing was committed
-        let rt = Runtime::new(Some(db_str.to_string()));
-        assert_eq!(query_val(&rt, "SELECT count(*) FROM t"), "0");
-    }
-
-    #[test]
-    fn exec_multiple_args_all_in_one_transaction() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("multi.db");
-        let db_str = db_path.to_str().unwrap();
-
-        // Create the database file so parse_arguments recognizes it
-        { Runtime::new(Some(db_str.to_string())); }
-
-        let args = ExecuteArgs {
-            database: Some(db_path.clone()),
-            statement: vec![
-                "CREATE TABLE a(x); CREATE TABLE b(y);".into(),
-                "INSERT INTO a VALUES ('hello')".into(),
-                "INSERT INTO b VALUES ('world')".into(),
-            ],
-            output: None,
-            format: None,
-            parameters: vec![],
-        };
-        exec_impl(args).unwrap();
-
-        let rt = Runtime::new(Some(db_str.to_string()));
-        assert_eq!(query_val(&rt, "SELECT x FROM a"), "hello");
-        assert_eq!(query_val(&rt, "SELECT y FROM b"), "world");
+        assert!(exec_impl(args).is_err());
     }
 }

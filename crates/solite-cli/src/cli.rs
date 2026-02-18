@@ -91,8 +91,8 @@ pub struct QueryArgs {
 
 #[derive(Args, Debug)]
 pub struct ExecuteArgs {
-    pub database: Option<PathBuf>,
-    pub statement: Vec<String>,
+    #[arg(num_args = 1..=2)]
+    pub args: Vec<String>,
 
     #[arg(long, short = 'o')]
     pub output: Option<PathBuf>,

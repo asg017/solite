@@ -17,6 +17,8 @@
     schema           Print the schema of a database
   
   Tooling:
+    backup           Back up a SQLite database to a file
+    vacuum           Rebuild a database, repacking into minimal disk space
     jupyter          Manage the Solite Jupyter kernel
     tui              Tui for exploring a database
     test             Run SQL-based inline tests in a single file
@@ -31,6 +33,8 @@
   
   Compatibility:
     sqlite3          Run the sqlite3 shell directly
+    diff             Output SQL to transform one database into another
+    rsync            Efficiently replicate a SQLite database to a remote machine
   
   '''
 # ---

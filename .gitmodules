@@ -1,5 +1,5 @@
 [submodule "vendor/sqlite"]
 	path = vendor/sqlite
 	url = https://github.com/sqlite/sqlite.git
-	branch = version-3.50.1
+	branch = version-3.51.2
 	shallow = true

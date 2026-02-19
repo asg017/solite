@@ -38,6 +38,16 @@ fn build_amalgamation_if_needed(sqlite_dir: &Path) -> PathBuf {
             panic!("./configure failed in sqlite submodule");
         }
 
+        // sqlite3.h must be built before sqlite3.c due to Makefile dependency ordering
+        let status = Command::new("make")
+            .arg("sqlite3.h")
+            .current_dir(sqlite_dir)
+            .status()
+            .expect("Failed to run make sqlite3.h in sqlite submodule");
+        if !status.success() {
+            panic!("make sqlite3.h failed in sqlite submodule");
+        }
+
         let status = Command::new("make")
             .arg("sqlite3.c")
             .current_dir(sqlite_dir)

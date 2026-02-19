@@ -1,5 +1,5 @@
 ---
-source: solite-core/src/lib.rs
+source: crates/solite-core/src/lib.rs
 expression: modules_of(&runtime.connection)
 snapshot_kind: text
 ---
@@ -15,8 +15,6 @@ snapshot_kind: text
 - fts5vocab
 - generate_series
 - geopoly
-- json_each
-- json_tree
 - pragma_function_list
 - pragma_module_list
 - regex_captures

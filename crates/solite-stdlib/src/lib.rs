@@ -165,7 +165,7 @@ mod tests {
             db.query_row("select sqlite_version();", [], |r| r
                 .get::<usize, String>(0))
                 .unwrap(),
-            "3.51.2"
+            "3.52.0"
         );
 
         let base_functions: Vec<String> = functions_of(db);

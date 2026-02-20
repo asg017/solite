@@ -39,6 +39,7 @@ mod load;
 mod open;
 pub mod param;
 mod print;
+mod run;
 mod schema;
 pub mod sh;
 mod tables;
@@ -59,6 +60,7 @@ pub use crate::dot::{
     open::OpenCommand,
     param::ParameterCommand,
     print::PrintCommand,
+    run::RunCommand,
     schema::SchemaCommand,
     sh::ShellCommand,
     tables::TablesCommand,
@@ -171,6 +173,8 @@ pub enum DotCommand {
     Dotenv(DotenvCommand),
     /// Call a registered procedure.
     Call(CallCommand),
+    /// Run a SQL file inline.
+    Run(RunCommand),
 }
 
 /// Parse a boolean value from string.
@@ -230,6 +234,58 @@ pub fn parse_dot<S: Into<String>>(
         "timer" => Ok(DotCommand::Timer(parse_bool(&args)?)),
         "param" | "parameter" => Ok(DotCommand::Parameter(parse_parameter(args)?)),
         "env" => Ok(DotCommand::Env(parse_env(args)?)),
+        "run" => {
+            let tokens: Vec<&str> = args.split_whitespace().collect();
+            if tokens.is_empty() {
+                return Err(ParseDotError::InvalidArgument(
+                    "usage: .run <file.sql> [procedureName] [--key=value ...]".to_string(),
+                ));
+            }
+            let file = tokens[0].to_string();
+            let mut procedure: Option<String> = None;
+            let mut parameters = std::collections::HashMap::new();
+            let mut i = 1;
+            while i < tokens.len() {
+                let tok = tokens[i];
+                if tok.starts_with("--") {
+                    let key_part = &tok[2..];
+                    if let Some((k, v)) = key_part.split_once('=') {
+                        if k.is_empty() {
+                            return Err(ParseDotError::InvalidArgument(
+                                format!("empty parameter key in '{}'", tok),
+                            ));
+                        }
+                        parameters.insert(k.to_string(), v.to_string());
+                    } else {
+                        if key_part.is_empty() {
+                            return Err(ParseDotError::InvalidArgument(
+                                "empty parameter key".to_string(),
+                            ));
+                        }
+                        i += 1;
+                        if i >= tokens.len() {
+                            return Err(ParseDotError::InvalidArgument(
+                                format!("parameter '--{}' requires a value", key_part),
+                            ));
+                        }
+                        parameters.insert(key_part.to_string(), tokens[i].to_string());
+                    }
+                } else {
+                    if procedure.is_some() {
+                        return Err(ParseDotError::InvalidArgument(
+                            format!("unexpected argument '{}'", tok),
+                        ));
+                    }
+                    procedure = Some(tok.to_string());
+                }
+                i += 1;
+            }
+            Ok(DotCommand::Run(RunCommand {
+                file,
+                procedure,
+                parameters,
+            }))
+        }
         "call" => {
             // Strip trailing -- comment (used as epilogue in test assertions)
             let args_clean = match args.find(" --") {
@@ -290,6 +346,84 @@ mod tests {
         assert!(parse_bool("maybe").is_err());
         assert!(parse_bool("").is_err());
         assert!(parse_bool("yesno").is_err());
+    }
+
+    #[test]
+    fn test_parse_run_file_only() {
+        let mut rt = crate::Runtime::new(None);
+        let cmd = parse_dot("run", "file.sql", "", &mut rt).unwrap();
+        match cmd {
+            DotCommand::Run(run_cmd) => {
+                assert_eq!(run_cmd.file, "file.sql");
+                assert!(run_cmd.procedure.is_none());
+                assert!(run_cmd.parameters.is_empty());
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_run_file_and_procedure() {
+        let mut rt = crate::Runtime::new(None);
+        let cmd = parse_dot("run", "file.sql procName", "", &mut rt).unwrap();
+        match cmd {
+            DotCommand::Run(run_cmd) => {
+                assert_eq!(run_cmd.file, "file.sql");
+                assert_eq!(run_cmd.procedure.as_deref(), Some("procName"));
+                assert!(run_cmd.parameters.is_empty());
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_run_file_and_params() {
+        let mut rt = crate::Runtime::new(None);
+        let cmd = parse_dot("run", "file.sql --name=alex --age 20", "", &mut rt).unwrap();
+        match cmd {
+            DotCommand::Run(run_cmd) => {
+                assert_eq!(run_cmd.file, "file.sql");
+                assert!(run_cmd.procedure.is_none());
+                assert_eq!(run_cmd.parameters.get("name").unwrap(), "alex");
+                assert_eq!(run_cmd.parameters.get("age").unwrap(), "20");
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_run_file_procedure_and_params() {
+        let mut rt = crate::Runtime::new(None);
+        let cmd = parse_dot("run", "file.sql procName --name alex --age=20", "", &mut rt).unwrap();
+        match cmd {
+            DotCommand::Run(run_cmd) => {
+                assert_eq!(run_cmd.file, "file.sql");
+                assert_eq!(run_cmd.procedure.as_deref(), Some("procName"));
+                assert_eq!(run_cmd.parameters.get("name").unwrap(), "alex");
+                assert_eq!(run_cmd.parameters.get("age").unwrap(), "20");
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_run_missing_file() {
+        let mut rt = crate::Runtime::new(None);
+        let result = parse_dot("run", "", "", &mut rt);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_run_param_missing_value() {
+        let mut rt = crate::Runtime::new(None);
+        let result = parse_dot("run", "file.sql --name", "", &mut rt);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ParseDotError::InvalidArgument(msg) => {
+                assert!(msg.contains("requires a value"));
+            }
+            _ => panic!("Expected InvalidArgument error"),
+        }
     }
 
     #[test]

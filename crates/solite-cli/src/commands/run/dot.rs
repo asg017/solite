@@ -2,7 +2,7 @@
 
 use solite_core::dot::sh::ShellResult;
 use solite_core::dot::DotCommand;
-use solite_core::Runtime;
+use solite_core::{Runtime, StepError, StepResult};
 
 use crate::colors;
 
@@ -140,6 +140,84 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
             eprintln!("Warning: .bench command not supported in run mode");
         }
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+        DotCommand::Run(run_cmd) => {
+            if let Some(ref proc_name) = run_cmd.procedure {
+                // Procedure mode: set params, load file, call procedure
+                for (key, value) in &run_cmd.parameters {
+                    if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
+                        eprintln!("Error setting parameter {}: {}", key, e);
+                        return;
+                    }
+                }
+                if let Err(e) = runtime.load_file(&run_cmd.file) {
+                    eprintln!("Error loading file '{}': {}", run_cmd.file, e);
+                    return;
+                }
+                let proc = match runtime.get_procedure(proc_name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        eprintln!("Unknown procedure: '{}'", proc_name);
+                        return;
+                    }
+                };
+                match runtime.prepare_with_parameters(&proc.sql) {
+                    Ok((_, Some(stmt))) => {
+                        super::sql::handle_sql(runtime, &stmt, &run_cmd.file, false, *timer);
+                    }
+                    Ok((_, None)) => {
+                        eprintln!("Procedure '{}' prepared to empty statement", proc_name);
+                    }
+                    Err(e) => {
+                        eprintln!("Error preparing procedure '{}': {:?}", proc_name, e);
+                    }
+                }
+            } else {
+                // File mode: run_file_begin, step loop, run_file_end
+                let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        return;
+                    }
+                };
+                loop {
+                    match runtime.next_stepx() {
+                        None => break,
+                        Some(Ok(mut step)) => match step.result {
+                            StepResult::SqlStatement { ref stmt, .. } => {
+                                super::sql::handle_sql(
+                                    runtime,
+                                    stmt,
+                                    &step.reference.to_string(),
+                                    false,
+                                    *timer,
+                                );
+                            }
+                            StepResult::DotCommand(ref mut cmd) => {
+                                handle_dot_command(runtime, cmd, timer);
+                            }
+                            StepResult::ProcedureDefinition(_) => {}
+                        },
+                        Some(Err(step_error)) => {
+                            match &step_error {
+                                StepError::Prepare {
+                                    error,
+                                    file_name,
+                                    src,
+                                    offset,
+                                } => {
+                                    crate::errors::report_error(file_name, src, error, Some(*offset));
+                                }
+                                StepError::ParseDot(err) => {
+                                    eprintln!("Parse dot error: {}", err);
+                                }
+                            }
+                        }
+                    }
+                }
+                runtime.run_file_end(saved);
+            }
+        }
     }
 }
 

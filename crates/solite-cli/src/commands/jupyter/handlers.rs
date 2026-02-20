@@ -14,10 +14,19 @@ use tokio::sync::mpsc;
 
 use super::kernel::ExecutionMessage;
 use super::protocol::JupyterSender;
-use super::render::render_sql_html;
+use super::render::{render_sql_html, render_statement};
 
 /// Handle a dot command and send appropriate output to the frontend.
-pub async fn handle_dot_command(
+pub fn handle_dot_command<'a>(
+    cmd: DotCommand,
+    runtime: &'a mut Runtime,
+    sender: &'a mpsc::Sender<ExecutionMessage>,
+    parent: &'a JupyterMessage,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+    Box::pin(handle_dot_command_inner(cmd, runtime, sender, parent))
+}
+
+async fn handle_dot_command_inner(
     cmd: DotCommand,
     runtime: &mut Runtime,
     sender: &mpsc::Sender<ExecutionMessage>,
@@ -233,6 +242,116 @@ pub async fn handle_dot_command(
             }
         }
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+        DotCommand::Run(run_cmd) => {
+            if let Some(ref proc_name) = run_cmd.procedure {
+                for (key, value) in &run_cmd.parameters {
+                    if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
+                        sender
+                            .send_plain(format!("Failed to set parameter {}: {}", key, e), parent)
+                            .await?;
+                    }
+                }
+                if let Err(e) = runtime.load_file(&run_cmd.file) {
+                    sender
+                        .send_plain(format!("Failed to load file '{}': {}", run_cmd.file, e), parent)
+                        .await?;
+                    return Ok(());
+                }
+                let proc = match runtime.get_procedure(proc_name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        sender
+                            .send_plain(format!("Unknown procedure: '{}'", proc_name), parent)
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                match runtime.prepare_with_parameters(&proc.sql) {
+                    Ok((_, Some(stmt))) => {
+                        match render_statement(&stmt) {
+                            Ok(tbl) => {
+                                sender
+                                    .send_display(
+                                        DisplayData::new(
+                                            vec![
+                                                MediaType::Plain(stmt.sql()),
+                                                MediaType::Html(tbl.html.unwrap()),
+                                            ]
+                                            .into(),
+                                        ),
+                                        parent,
+                                    )
+                                    .await?;
+                            }
+                            Err(err) => {
+                                sender
+                                    .send_plain(format!("Error: {:?}", err), parent)
+                                    .await?;
+                            }
+                        }
+                    }
+                    Ok((_, None)) => {
+                        sender
+                            .send_plain(format!("Procedure '{}' prepared to empty statement", proc_name), parent)
+                            .await?;
+                    }
+                    Err(e) => {
+                        sender
+                            .send_plain(format!("Error preparing procedure '{}': {:?}", proc_name, e), parent)
+                            .await?;
+                    }
+                }
+            } else {
+                let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        sender.send_plain(format!("Error: {}", e), parent).await?;
+                        return Ok(());
+                    }
+                };
+                loop {
+                    match runtime.next_stepx() {
+                        None => break,
+                        Some(Ok(step)) => match step.result {
+                            solite_core::StepResult::SqlStatement { stmt, .. } => {
+                                match render_statement(&stmt) {
+                                    Ok(tbl) => {
+                                        sender
+                                            .send_display(
+                                                DisplayData::new(
+                                                    vec![
+                                                        MediaType::Plain(stmt.sql()),
+                                                        MediaType::Html(tbl.html.unwrap()),
+                                                    ]
+                                                    .into(),
+                                                ),
+                                                parent,
+                                            )
+                                            .await?;
+                                    }
+                                    Err(err) => {
+                                        sender
+                                            .send_plain(format!("Error: {:?}", err), parent)
+                                            .await?;
+                                    }
+                                }
+                            }
+                            solite_core::StepResult::DotCommand(cmd) => {
+                                handle_dot_command(cmd, runtime, sender, parent).await?;
+                            }
+                            solite_core::StepResult::ProcedureDefinition(_) => {}
+                        },
+                        Some(Err(e)) => {
+                            sender
+                                .send_plain(format!("Error in .run file: {}", e), parent)
+                                .await?;
+                            break;
+                        }
+                    }
+                }
+                runtime.run_file_end(saved);
+            }
+        }
         DotCommand::Bench(mut cmd) => {
             let sender_clone = sender.clone();
             let parent_clone = parent.clone();

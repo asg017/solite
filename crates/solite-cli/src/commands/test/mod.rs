@@ -288,6 +288,62 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
             }
         }
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+        DotCommand::Run(run_cmd) => {
+            if let Some(ref proc_name) = run_cmd.procedure {
+                for (key, value) in &run_cmd.parameters {
+                    if let Err(e) = rt.define_parameter(key.clone(), value.clone()) {
+                        eprintln!("Warning: Failed to set parameter {}: {}", key, e);
+                    }
+                }
+                if let Err(e) = rt.load_file(&run_cmd.file) {
+                    eprintln!("Warning: Failed to load file '{}': {}", run_cmd.file, e);
+                    return;
+                }
+                let proc = match rt.get_procedure(proc_name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        eprintln!("Warning: Unknown procedure: '{}'", proc_name);
+                        return;
+                    }
+                };
+                match rt.prepare_with_parameters(&proc.sql) {
+                    Ok((_, Some(stmt))) => { let _ = stmt.execute(); }
+                    Ok((_, None)) => {
+                        eprintln!("Warning: Procedure '{}' prepared to empty statement", proc_name);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to prepare procedure '{}': {:?}", proc_name, e);
+                    }
+                }
+            } else {
+                let saved = match rt.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Warning: {}", e);
+                        return;
+                    }
+                };
+                loop {
+                    match rt.next_stepx() {
+                        None => break,
+                        Some(Ok(step)) => match step.result {
+                            solite_core::StepResult::SqlStatement { stmt, .. } => {
+                                let _ = stmt.execute();
+                            }
+                            solite_core::StepResult::DotCommand(ref cmd) => {
+                                handle_dot_command(cmd, rt);
+                            }
+                            solite_core::StepResult::ProcedureDefinition(_) => {}
+                        },
+                        Some(Err(e)) => {
+                            eprintln!("Warning: Error in .run file: {}", e);
+                            break;
+                        }
+                    }
+                }
+                rt.run_file_end(saved);
+            }
+        }
         other => {
             eprintln!("Warning: Unhandled dot command in test: {:?}", other);
         }

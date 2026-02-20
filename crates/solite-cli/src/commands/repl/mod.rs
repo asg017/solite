@@ -265,6 +265,85 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             eprintln!("Bench command is not supported in the REPL yet.");
         }
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+        DotCommand::Run(run_cmd) => {
+            if let Some(ref proc_name) = run_cmd.procedure {
+                for (key, value) in &run_cmd.parameters {
+                    if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
+                        eprintln!("✗ failed to set parameter {}: {}", key, e);
+                        return;
+                    }
+                }
+                if let Err(e) = runtime.load_file(&run_cmd.file) {
+                    eprintln!("✗ failed to load file '{}': {}", run_cmd.file, e);
+                    return;
+                }
+                let proc = match runtime.get_procedure(proc_name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        eprintln!("✗ unknown procedure: '{}'", proc_name);
+                        return;
+                    }
+                };
+                match runtime.prepare_with_parameters(&proc.sql) {
+                    Ok((_, Some(stmt))) => {
+                        let config = solite_table::TableConfig::terminal();
+                        if let Err(e) = solite_table::print_statement(&stmt, &config) {
+                            eprintln!("✗ failed to execute procedure: {}", e);
+                        }
+                    }
+                    Ok((_, None)) => {
+                        eprintln!("✗ procedure '{}' prepared to empty statement", proc_name);
+                    }
+                    Err(e) => {
+                        eprintln!("✗ failed to prepare procedure '{}': {:?}", proc_name, e);
+                    }
+                }
+            } else {
+                let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("✗ {}", e);
+                        return;
+                    }
+                };
+                loop {
+                    match runtime.next_stepx() {
+                        None => break,
+                        Some(Ok(step)) => match step.result {
+                            StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
+                            StepResult::ProcedureDefinition(ref proc) => {
+                                println!("Registered procedure: {}", proc.name);
+                            }
+                            StepResult::SqlStatement { stmt, .. } => {
+                                let start = std::time::Instant::now();
+                                let config = solite_table::TableConfig::terminal();
+                                if let Err(e) = solite_table::print_statement(&stmt, &config) {
+                                    eprintln!("✗ failed to print table: {}", e);
+                                }
+                                if *timer {
+                                    println!(
+                                        "{}",
+                                        crate::colors::italic_gray(format_duration(start.elapsed()))
+                                    );
+                                }
+                            }
+                        },
+                        Some(Err(error)) => match error {
+                            StepError::Prepare {
+                                error,
+                                file_name,
+                                src,
+                                offset,
+                            } => {
+                                crate::errors::report_error(&file_name, &src, &error, Some(offset));
+                            }
+                            StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
+                        },
+                    }
+                }
+                runtime.run_file_end(saved);
+            }
+        }
     }
 }
 

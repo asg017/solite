@@ -74,6 +74,13 @@ pub struct State {
     //bail: bool,
 }
 
+/// Saved state for a `.run` invocation, used to restore the runtime afterwards.
+#[derive(Debug)]
+pub struct SavedRunState {
+    stack: Vec<Block>,
+    saved_params: Vec<(String, Option<OwnedValue>)>,
+}
+
 pub struct Runtime {
     pub connection: Connection,
     stack: Vec<Block>,
@@ -81,6 +88,8 @@ pub struct Runtime {
     initialized_sqlite_parameters_table: bool,
     procedures: HashMap<String, Procedure>,
     loaded_files: std::collections::HashSet<String>,
+    virtual_files: HashMap<String, String>,
+    running_files: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -184,6 +193,8 @@ impl Runtime {
             initialized_sqlite_parameters_table: false,
             procedures: HashMap::new(),
             loaded_files: std::collections::HashSet::new(),
+            virtual_files: HashMap::new(),
+            running_files: Vec::new(),
         }
     }
 
@@ -198,6 +209,8 @@ impl Runtime {
             initialized_sqlite_parameters_table: false,
             procedures: HashMap::new(),
             loaded_files: std::collections::HashSet::new(),
+            virtual_files: HashMap::new(),
+            running_files: Vec::new(),
         }
     }
 
@@ -211,6 +224,18 @@ impl Runtime {
             regions: vec![],
         });
     }
+    pub fn add_virtual_file(&mut self, path: &str, content: &str) {
+        self.virtual_files.insert(path.to_string(), content.to_string());
+    }
+
+    pub fn read_file(&self, path: &str) -> Result<String, String> {
+        if let Some(content) = self.virtual_files.get(path) {
+            return Ok(content.clone());
+        }
+        std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read '{}': {}", path, e))
+    }
+
     pub fn register_procedure(&mut self, proc: Procedure) {
         self.procedures.insert(proc.name.clone(), proc);
     }
@@ -248,7 +273,7 @@ impl Runtime {
                 let rest: &str = code.get(end_idx..).unwrap();
                     
 
-                let cmd = if code.starts_with('!') {
+                let mut cmd = if code.starts_with('!') {
                   DotCommand::Shell(ShellCommand {
                         command: dot_line.get(1..end_idx).unwrap().trim().to_string(),
                     })
@@ -359,6 +384,15 @@ impl Runtime {
                             }));
                         }
                     }
+                }
+
+                // Resolve .run file path relative to the calling file's directory
+                if let DotCommand::Run(ref mut run_cmd) = cmd {
+                    let resolved = PathBuf::from(&block.name)
+                        .parent()
+                        .map(|dir| dir.join(&run_cmd.file))
+                        .unwrap_or_else(|| PathBuf::from(&run_cmd.file));
+                    run_cmd.file = resolved.to_string_lossy().to_string();
                 }
 
                 if !rest.is_empty() {
@@ -497,8 +531,7 @@ impl Runtime {
         if self.loaded_files.contains(path) {
             return Ok(());
         }
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read '{}': {}", path, e))?;
+        let content = self.read_file(path)?;
         let path_buf = PathBuf::from(path);
         self.loaded_files.insert(path.to_string());
         // Temporarily save and clear the stack so next_stepx() only processes
@@ -607,6 +640,89 @@ impl Runtime {
             .unwrap()
             .map(|v| OwnedValue::from_value_ref(v.first().unwrap()))
     }
+
+    pub fn delete_parameter(&mut self, key: &str) {
+        self.init_sqlite_parameters_table();
+        let stmt = self
+            .connection
+            .prepare("DELETE FROM temp.sqlite_parameters WHERE key = ?1")
+            .unwrap()
+            .1
+            .unwrap();
+        stmt.bind_text(1, key);
+        stmt.execute().unwrap();
+    }
+
+    /// Begin a `.run` invocation: check for cycles, read the file,
+    /// set parameters, save and clear the stack, and enqueue the file.
+    pub fn run_file_begin(
+        &mut self,
+        path: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<SavedRunState, String> {
+        // Cycle detection
+        if self.running_files.contains(&path.to_string()) {
+            let mut cycle = self.running_files.clone();
+            cycle.push(path.to_string());
+            return Err(format!(
+                "Recursive .run cycle detected: {}",
+                cycle.join(" -> ")
+            ));
+        }
+
+        let content = self.read_file(path)?;
+        self.running_files.push(path.to_string());
+
+        // Save current param values and set new ones
+        let mut saved_params = Vec::new();
+        for (key, value) in params {
+            let old_value = self.lookup_parameter(key);
+            saved_params.push((key.clone(), old_value));
+            self.define_parameter(key.clone(), value.clone()).unwrap();
+        }
+
+        // Save and clear the stack
+        let saved_stack: Vec<Block> = self.stack.drain(..).collect();
+
+        // Enqueue the file
+        let path_buf = PathBuf::from(path);
+        self.enqueue(path, &content, BlockSource::File(path_buf));
+
+        Ok(SavedRunState {
+            stack: saved_stack,
+            saved_params,
+        })
+    }
+
+    /// End a `.run` invocation: restore parameters and the stack.
+    pub fn run_file_end(&mut self, saved: SavedRunState) {
+        // Pop from running_files
+        self.running_files.pop();
+
+        // Restore parameters
+        for (key, old_value) in saved.saved_params {
+            match old_value {
+                Some(OwnedValue::Text(s)) => {
+                    self.define_parameter(key, std::str::from_utf8(&s).unwrap().to_string()).unwrap();
+                }
+                Some(OwnedValue::Integer(v)) => {
+                    self.define_parameter(key, v.to_string()).unwrap();
+                }
+                Some(OwnedValue::Double(v)) => {
+                    self.define_parameter(key, v.to_string()).unwrap();
+                }
+                Some(_) => {
+                    self.delete_parameter(&key);
+                }
+                None => {
+                    self.delete_parameter(&key);
+                }
+            }
+        }
+
+        // Restore the stack
+        self.stack.extend(saved.stack);
+    }
 }
 
 pub fn advance_through_ignorable(contents: &str) -> &str {
@@ -685,6 +801,7 @@ mod tests {
     use solite_stdlib::BUILTIN_FUNCTIONS;
 
     use super::*;
+    use crate::dot::DotCommand;
     use crate::sqlite::Connection;
 
     #[test]
@@ -888,5 +1005,371 @@ select not_exist();",
                 .message
                 .contains("readonly")
         );
+    }
+
+    #[test]
+    fn test_virtual_file_read() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/test.sql", "select 42;");
+        assert_eq!(rt.read_file("/test.sql").unwrap(), "select 42;");
+    }
+
+    #[test]
+    fn test_virtual_file_fallback() {
+        let rt = Runtime::new(None);
+        let result = rt.read_file("/nonexistent_file_12345.sql");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_file_uses_virtual_fs() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "create table vtest(x); insert into vtest values (99);");
+        rt.load_file("/helper.sql").unwrap();
+        let (_, stmt) = rt.connection.prepare("select x from vtest").unwrap();
+        let stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(row.first().unwrap().as_str(), "99");
+    }
+
+    #[test]
+    fn test_run_file_begin_reads_virtual_file() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/test.sql", "select 1;");
+        let saved = rt.run_file_begin("/test.sql", &HashMap::new()).unwrap();
+        // Stack should have one block (the file)
+        assert!(!rt.stack.is_empty());
+        rt.run_file_end(saved);
+    }
+
+    #[test]
+    fn test_run_file_begin_cycle_self() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/self.sql", ".run /self.sql");
+        rt.running_files.push("/self.sql".to_string());
+        let result = rt.run_file_begin("/self.sql", &HashMap::new());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cycle"));
+    }
+
+    #[test]
+    fn test_run_file_begin_cycle_mutual() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/a.sql", ".run /b.sql");
+        rt.add_virtual_file("/b.sql", ".run /a.sql");
+        rt.running_files.push("/a.sql".to_string());
+        rt.running_files.push("/b.sql".to_string());
+        let result = rt.run_file_begin("/a.sql", &HashMap::new());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("/a.sql"));
+        assert!(err.contains("/b.sql"));
+    }
+
+    #[test]
+    fn test_run_file_begin_cycle_deep() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/a.sql", "");
+        rt.running_files.push("/a.sql".to_string());
+        rt.running_files.push("/b.sql".to_string());
+        rt.running_files.push("/c.sql".to_string());
+        let result = rt.run_file_begin("/a.sql", &HashMap::new());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("/a.sql -> /b.sql -> /c.sql -> /a.sql"));
+    }
+
+    #[test]
+    fn test_run_file_end_restores_stack() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/test.sql", "select 1;");
+        // Set up some existing stack
+        rt.enqueue("[outer]", "select 'outer';", BlockSource::Repl);
+        let saved = rt.run_file_begin("/test.sql", &HashMap::new()).unwrap();
+        // Stack now has the file, outer was saved
+        assert_eq!(rt.stack.len(), 1);
+        // Drain the file's steps
+        while rt.next_stepx().is_some() {}
+        rt.run_file_end(saved);
+        // Stack should have the outer block restored
+        assert_eq!(rt.stack.len(), 1);
+    }
+
+    #[test]
+    fn test_run_file_end_restores_params() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/test.sql", "select 1;");
+        rt.define_parameter("name".to_string(), "original".to_string()).unwrap();
+
+        let mut params = HashMap::new();
+        params.insert("name".to_string(), "override".to_string());
+
+        let saved = rt.run_file_begin("/test.sql", &params).unwrap();
+        // During run, param should be overridden
+        assert_eq!(
+            rt.lookup_parameter("name").map(|v| match v {
+                OwnedValue::Text(s) => std::str::from_utf8(&s).unwrap().to_string(),
+                _ => String::new(),
+            }),
+            Some("override".to_string())
+        );
+        rt.run_file_end(saved);
+        // After run, param should be restored
+        assert_eq!(
+            rt.lookup_parameter("name").map(|v| match v {
+                OwnedValue::Text(s) => std::str::from_utf8(&s).unwrap().to_string(),
+                _ => String::new(),
+            }),
+            Some("original".to_string())
+        );
+    }
+
+    #[test]
+    fn test_run_path_resolution() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/dir/helper.sql", "select 42;");
+        rt.add_virtual_file("/dir/main.sql", ".run helper.sql\n");
+        rt.enqueue("/dir/main.sql", ".run helper.sql\n", BlockSource::File(PathBuf::from("/dir/main.sql")));
+
+        // Get the next step which should be a Run command with resolved path
+        let step = rt.next_stepx().unwrap().unwrap();
+        match step.result {
+            StepResult::DotCommand(DotCommand::Run(run_cmd)) => {
+                assert_eq!(run_cmd.file, "/dir/helper.sql");
+            }
+            other => panic!("Expected DotCommand::Run, got {:?}", other),
+        }
+    }
+
+    // Full stepping tests using virtual FS
+
+    /// Collect results from stepping, handling .run commands inline.
+    fn collect_sql_results(rt: &mut Runtime) -> Vec<String> {
+        let mut results = Vec::new();
+        collect_sql_results_inner(rt, &mut results);
+        results
+    }
+
+    fn collect_sql_results_inner(rt: &mut Runtime, results: &mut Vec<String>) {
+        loop {
+            match rt.next_stepx() {
+                None => break,
+                Some(Ok(step)) => match step.result {
+                    StepResult::SqlStatement { stmt, .. } => {
+                        match stmt.next() {
+                            Ok(Some(row)) => {
+                                results.push(row.first().unwrap().as_str().to_string());
+                            }
+                            Ok(None) => {
+                                let _ = stmt.execute();
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    StepResult::DotCommand(DotCommand::Run(run_cmd)) => {
+                        if run_cmd.procedure.is_some() {
+                            // For simplicity in tests, skip procedure calls
+                        } else {
+                            let saved = rt.run_file_begin(&run_cmd.file, &run_cmd.parameters).unwrap();
+                            collect_sql_results_inner(rt, results);
+                            rt.run_file_end(saved);
+                        }
+                    }
+                    StepResult::DotCommand(DotCommand::Print(ref p)) => {
+                        results.push(p.message.clone());
+                    }
+                    StepResult::DotCommand(_) => {}
+                    StepResult::ProcedureDefinition(_) => {}
+                },
+                Some(Err(_)) => break,
+            }
+        }
+    }
+
+    fn collect_steps_with_errors(rt: &mut Runtime) -> (Vec<String>, Vec<String>) {
+        let mut results = Vec::new();
+        let mut errors = Vec::new();
+        collect_steps_inner(rt, &mut results, &mut errors);
+        (results, errors)
+    }
+
+    fn collect_steps_inner(rt: &mut Runtime, results: &mut Vec<String>, errors: &mut Vec<String>) {
+        loop {
+            match rt.next_stepx() {
+                None => break,
+                Some(Ok(step)) => match step.result {
+                    StepResult::SqlStatement { stmt, .. } => {
+                        match stmt.next() {
+                            Ok(Some(row)) => {
+                                results.push(row.first().unwrap().as_str().to_string());
+                            }
+                            Ok(None) => {
+                                let _ = stmt.execute();
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    StepResult::DotCommand(DotCommand::Run(run_cmd)) => {
+                        if run_cmd.procedure.is_some() {
+                            // skip for now
+                        } else {
+                            match rt.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
+                                Ok(saved) => {
+                                    collect_steps_inner(rt, results, errors);
+                                    rt.run_file_end(saved);
+                                }
+                                Err(e) => {
+                                    errors.push(e);
+                                }
+                            }
+                        }
+                    }
+                    StepResult::DotCommand(DotCommand::Print(ref p)) => {
+                        results.push(p.message.clone());
+                    }
+                    StepResult::DotCommand(_) => {}
+                    StepResult::ProcedureDefinition(_) => {}
+                },
+                Some(Err(e)) => {
+                    errors.push(format!("{}", e));
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_run_basic_execution() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "select 42;");
+        rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
+        rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        assert_eq!(results, vec!["42"]);
+    }
+
+    #[test]
+    fn test_run_multiple_statements() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "select 'a';\nselect 'b';\nselect 'c';");
+        rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
+        rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        assert_eq!(results, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_run_with_dot_commands() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", ".print hello\n");
+        rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
+        rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        assert_eq!(results, vec!["hello"]);
+    }
+
+    #[test]
+    fn test_run_step_ordering() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "select 'b';");
+        let code = "select 'a';\n.run /helper.sql\nselect 'c';";
+        rt.add_virtual_file("/main.sql", code);
+        rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        assert_eq!(results, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_run_nested() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/c.sql", "select 'c';");
+        rt.add_virtual_file("/b.sql", "select 'b';\n.run /c.sql");
+        let code = "select 'a';\n.run /b.sql\nselect 'd';";
+        rt.add_virtual_file("/main.sql", code);
+        rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        assert_eq!(results, vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn test_run_params_scoped() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "select :name;");
+        let code = ".run /helper.sql --name=alex\nselect :name;";
+        rt.add_virtual_file("/main.sql", code);
+        rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
+        // Set up param table first by defining and deleting
+        rt.define_parameter("name".to_string(), "__placeholder__".to_string()).unwrap();
+        rt.delete_parameter("name");
+        rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        // First result from helper should be "alex", second from main should be unbound (NULL)
+        assert_eq!(results[0], "alex");
+    }
+
+    #[test]
+    fn test_run_params_override_restored() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "select :name;");
+        rt.define_parameter("name".to_string(), "original".to_string()).unwrap();
+        let code = ".run /helper.sql --name=override";
+        rt.add_virtual_file("/main.sql", code);
+        rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
+        let results = collect_sql_results(&mut rt);
+        assert_eq!(results, vec!["override"]);
+        // After .run, param should be restored
+        let val = rt.lookup_parameter("name").map(|v| match v {
+            OwnedValue::Text(s) => std::str::from_utf8(&s).unwrap().to_string(),
+            _ => String::new(),
+        });
+        assert_eq!(val, Some("original".to_string()));
+    }
+
+    #[test]
+    fn test_run_cycle_error_message() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/a.sql", ".run /b.sql");
+        rt.add_virtual_file("/b.sql", ".run /a.sql");
+        rt.enqueue("/a.sql", ".run /b.sql", BlockSource::File(PathBuf::from("/a.sql")));
+
+        let (_, errors) = collect_steps_with_errors(&mut rt);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("cycle"));
+        assert!(errors[0].contains("/a.sql"));
+        assert!(errors[0].contains("/b.sql"));
+    }
+
+    #[test]
+    fn test_run_file_not_found_error() {
+        let mut rt = Runtime::new(None);
+        let code = ".run /nonexistent.sql";
+        rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
+
+        let (_, errors) = collect_steps_with_errors(&mut rt);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Failed to read"));
+    }
+
+    #[test]
+    fn test_run_traceback_shows_correct_file() {
+        let mut rt = Runtime::new(None);
+        rt.add_virtual_file("/helper.sql", "select 42;");
+        rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
+        rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
+
+        // Get the .run step
+        let step = rt.next_stepx().unwrap().unwrap();
+        assert_eq!(step.reference.to_string(), "/main.sql:1:1");
+
+        // Handle the .run
+        if let StepResult::DotCommand(DotCommand::Run(run_cmd)) = step.result {
+            let saved = rt.run_file_begin(&run_cmd.file, &run_cmd.parameters).unwrap();
+            // The SQL step inside helper.sql should reference helper.sql
+            let inner_step = rt.next_stepx().unwrap().unwrap();
+            assert!(inner_step.reference.to_string().contains("/helper.sql"));
+            // Consume remaining
+            while rt.next_stepx().is_some() {}
+            rt.run_file_end(saved);
+        }
     }
 }

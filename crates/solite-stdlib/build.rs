@@ -169,7 +169,13 @@ fn main() {
     }
     build.compile("usleep");
 
-    // Compile shell.c with main() renamed so we can call it from Rust
+    // Compile shell.c with main() renamed so we can call it from Rust.
+    //
+    // shell.c embeds inline copies of several extensions (shathree, sha1, uint,
+    // decimal, ieee754, series, fileio, completion) that we also compile
+    // separately above. macOS's linker tolerates duplicate symbols, but Linux's
+    // rust-lld (used in GHA) does not. We rename the embedded copies via -D
+    // defines so they don't clash — same trick used for main -> sqlite3_shell_main.
     cc::Build::new()
         .file(amalgamation_dir.join("shell.c"))
         .include(&amalgamation_dir)
@@ -178,6 +184,15 @@ fn main() {
         .define("main", Some("sqlite3_shell_main"))
         .define("HAVE_READLINE", Some("1"))
         .define("HAVE_EDITLINE", Some("1"))
+        .define("sqlite3_shathree_init", Some("_shell_shathree_init"))
+        .define("sqlite3_sha_init", Some("_shell_sha_init"))
+        .define("sqlite3_uint_init", Some("_shell_uint_init"))
+        .define("sqlite3_decimal_init", Some("_shell_decimal_init"))
+        .define("sqlite3_ieee_init", Some("_shell_ieee_init"))
+        .define("sqlite3_series_init", Some("_shell_series_init"))
+        .define("sqlite3_fileio_init", Some("_shell_fileio_init"))
+        .define("sqlite3CompletionVtabInit", Some("_shell_CompletionVtabInit"))
+        .define("sqlite3_completion_init", Some("_shell_completion_init"))
         .warnings(false)
         .compile("sqlite3_shell");
 
@@ -215,9 +230,6 @@ fn main() {
         println!("cargo:rustc-link-lib=edit");
     } else {
         println!("cargo:rustc-link-lib=readline");
-        // shell.c embeds copies of extensions (shathree, sha1, uint, decimal, etc.)
-        // that we also compile separately. Allow duplicate symbols on Linux.
-        println!("cargo:rustc-link-arg=-Wl,--allow-multiple-definition");
     }
 
     // rerun-if-changed for extension source files

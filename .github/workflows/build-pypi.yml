@@ -78,6 +78,7 @@ jobs:
           args: --release --locked --out crates/solite-cli/dist -b bin -m crates/solite-cli/Cargo.toml
           before-script-linux: |
             dpkg --add-architecture armhf
+            sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
             echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy main universe" >> /etc/apt/sources.list
             echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main universe" >> /etc/apt/sources.list
             apt-get update

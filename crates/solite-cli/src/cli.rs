@@ -126,6 +126,8 @@ pub struct CodegenArgs {
     pub file: PathBuf,
     #[arg(long)]
     pub schema: Option<PathBuf>,
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }
 
 

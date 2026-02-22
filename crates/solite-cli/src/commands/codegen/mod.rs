@@ -77,14 +77,25 @@ pub(crate) fn codegen(cmd: CodegenArgs) -> Result<(), ()> {
         }
     };
 
-    match serde_json::to_string_pretty(&report) {
-        Ok(json) => {
-            println!("{}", json);
-            Ok(())
-        }
+    let json = match serde_json::to_string_pretty(&report) {
+        Ok(j) => j,
         Err(e) => {
             eprintln!("Failed to serialize report: {}", e);
-            Err(())
+            return Err(());
+        }
+    };
+
+    match cmd.output {
+        Some(path) => {
+            if let Err(e) = std::fs::write(&path, &json) {
+                eprintln!("Failed to write {}: {}", path.display(), e);
+                return Err(());
+            }
+            Ok(())
+        }
+        None => {
+            println!("{}", json);
+            Ok(())
         }
     }
 }

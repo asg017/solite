@@ -58,5 +58,5 @@ jobs:
       - run: cargo build -p solite-cli --target armv7-unknown-linux-gnueabihf
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
-          OPENSSL_DIR: /usr/lib/arm-linux-gnueabihf
+          OPENSSL_LIB_DIR: /usr/lib/arm-linux-gnueabihf
           OPENSSL_INCLUDE_DIR: /usr/include/arm-linux-gnueabihf

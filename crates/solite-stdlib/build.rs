@@ -215,6 +215,9 @@ fn main() {
         println!("cargo:rustc-link-lib=edit");
     } else {
         println!("cargo:rustc-link-lib=readline");
+        // shell.c embeds copies of extensions (shathree, sha1, uint, decimal, etc.)
+        // that we also compile separately. Allow duplicate symbols on Linux.
+        println!("cargo:rustc-link-arg=-Wl,--allow-multiple-definition");
     }
 
     // rerun-if-changed for extension source files

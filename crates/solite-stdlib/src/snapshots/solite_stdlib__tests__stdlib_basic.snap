@@ -65,6 +65,7 @@ snapshot_kind: text
 - instr
 - json
 - json_array
+- json_array_insert
 - json_array_length
 - json_error_position
 - json_extract
@@ -82,6 +83,7 @@ snapshot_kind: text
 - json_valid
 - jsonb
 - jsonb_array
+- jsonb_array_insert
 - jsonb_extract
 - jsonb_group_array
 - jsonb_group_object

@@ -50,7 +50,7 @@ pub mod provider;
 use solite_ast::Program;
 use solite_parser::{parse_program, ParseError};
 
-pub use dotcmd::{parse_dot_commands, DotCommand, ParseResult, SqlRegion};
+pub use dotcmd::{parse_dot_commands, DotCommand, ParseResult, SchemaHint, SqlRegion};
 pub use json::{JsonColumn, JsonIndex, JsonSchema, JsonSchemaError, JsonTable, JsonTrigger, JsonView};
 pub use provider::{DdlSchemaProvider, JsonSchemaProvider, SchemaError, SchemaProvider};
 
@@ -74,6 +74,8 @@ pub struct Document {
     pub sql_regions: Vec<SqlRegion>,
     /// Parsed SQL program (combined from all SQL regions)
     pub program: Result<Program, Vec<ParseError>>,
+    /// `-- schema: <path>` hints from the file header
+    pub schema_hints: Vec<SchemaHint>,
 }
 
 impl Document {
@@ -102,6 +104,7 @@ impl Document {
                 dot_commands: result.dot_commands,
                 sql_regions: result.sql_regions,
                 program,
+                schema_hints: result.schema_hints,
             }
         } else {
             Document {
@@ -112,6 +115,7 @@ impl Document {
                     end: source.len(),
                 }],
                 program: parse_program(source),
+                schema_hints: vec![],
             }
         }
     }
@@ -126,6 +130,11 @@ impl Document {
     /// Check if this document has any dot commands
     pub fn has_dot_commands(&self) -> bool {
         !self.dot_commands.is_empty()
+    }
+
+    /// Get `-- schema: <path>` hints from the file header
+    pub fn schema_hints(&self) -> &[SchemaHint] {
+        &self.schema_hints
     }
 }
 
@@ -274,5 +283,29 @@ INSERT INTO users VALUES (1);"#;
         assert_eq!(doc.sql_regions.len(), 1);
         assert_eq!(doc.sql_regions[0].start, 0);
         assert_eq!(doc.sql_regions[0].end, source.len());
+    }
+
+    #[test]
+    fn test_document_schema_hints() {
+        let source = "-- schema: schema.sql\n-- schema: tmp.db\nSELECT 1;";
+        let doc = Document::parse(source, true);
+
+        let hints = doc.schema_hints();
+        assert_eq!(hints.len(), 2);
+        assert_eq!(hints[0].path, "schema.sql");
+        assert_eq!(hints[1].path, "tmp.db");
+
+        // SQL should still parse fine
+        let program = doc.program.unwrap();
+        assert_eq!(program.statements.len(), 1);
+    }
+
+    #[test]
+    fn test_document_schema_hints_disabled() {
+        let source = "-- schema: schema.sql\nSELECT 1;";
+        let doc = Document::parse(source, false);
+
+        // When dot commands are disabled, no schema hints are parsed
+        assert!(doc.schema_hints().is_empty());
     }
 }

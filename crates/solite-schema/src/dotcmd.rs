@@ -7,6 +7,16 @@
 
 use solite_ast::Span;
 
+/// A `-- schema: <path>` comment hint parsed from the file header.
+///
+/// These must appear at the top of the file (before any SQL or dot-command lines).
+/// Blank lines and other comment lines are allowed in the header region.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaHint {
+    pub path: String,
+    pub span: Span,
+}
+
 /// A dot command parsed from the source
 #[derive(Debug, Clone, PartialEq)]
 pub enum DotCommand {
@@ -31,6 +41,8 @@ pub struct ParseResult {
     pub sql_regions: Vec<SqlRegion>,
     /// Whether any lines starting with '.' were encountered (recognized or not)
     pub has_dot_lines: bool,
+    /// `-- schema: <path>` hints from the file header
+    pub schema_hints: Vec<SchemaHint>,
 }
 
 /// Pre-process source, extracting dot commands and SQL regions.
@@ -51,13 +63,37 @@ pub struct ParseResult {
 pub fn parse_dot_commands(source: &str) -> ParseResult {
     let mut dot_commands = Vec::new();
     let mut sql_regions = Vec::new();
+    let mut schema_hints = Vec::new();
     let mut current_sql_start: Option<usize> = None;
     let mut byte_offset = 0;
     let mut has_dot_lines = false;
+    let mut in_header = true;
 
     for line in source.lines() {
         let line_start = byte_offset;
         let line_end = byte_offset + line.len();
+
+        // Parse `-- schema: <path>` hints from the file header
+        if in_header {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                // blank lines are allowed in the header
+            } else if let Some(after_prefix) = trimmed.strip_prefix("--") {
+                // It's a comment line — check for schema hint
+                let comment_body = after_prefix.trim_start();
+                if let Some(schema_arg) = comment_body.strip_prefix("schema:") {
+                    let path = parse_path_argument(schema_arg);
+                    if !path.is_empty() {
+                        let span = Span::new(line_start, line_start + line.len());
+                        schema_hints.push(SchemaHint { path, span });
+                    }
+                }
+                // else: regular comment, still in header
+            } else {
+                // Non-blank, non-comment line: header ends
+                in_header = false;
+            }
+        }
 
         if let Some(stripped) = line.strip_prefix('.') {
             // Track that we saw a dot-prefixed line
@@ -124,6 +160,7 @@ pub fn parse_dot_commands(source: &str) -> ParseResult {
         dot_commands,
         sql_regions,
         has_dot_lines,
+        schema_hints,
     }
 }
 
@@ -510,5 +547,73 @@ INSERT INTO users VALUES (1);"#;
         let sql3 = &source[result.sql_regions[2].start..result.sql_regions[2].end];
         assert!(sql3.contains("SELECT * FROM users"));
         assert!(sql3.contains("INSERT INTO users"));
+    }
+
+    #[test]
+    fn test_schema_hint_basic() {
+        let source = "-- schema: schema.sql\nSELECT 1;";
+        let result = parse_dot_commands(source);
+        assert_eq!(result.schema_hints.len(), 1);
+        assert_eq!(result.schema_hints[0].path, "schema.sql");
+        assert_eq!(result.schema_hints[0].span.start, 0);
+        assert_eq!(result.schema_hints[0].span.end, 21);
+    }
+
+    #[test]
+    fn test_schema_hint_multiple() {
+        let source = "-- schema: schema.sql\n-- schema: tmp.db\nSELECT 1;";
+        let result = parse_dot_commands(source);
+        assert_eq!(result.schema_hints.len(), 2);
+        assert_eq!(result.schema_hints[0].path, "schema.sql");
+        assert_eq!(result.schema_hints[1].path, "tmp.db");
+    }
+
+    #[test]
+    fn test_schema_hint_with_other_comments() {
+        let source = "-- schema: schema.sql\n-- this is a comment\n-- schema: other.db\nSELECT 1;";
+        let result = parse_dot_commands(source);
+        assert_eq!(result.schema_hints.len(), 2);
+        assert_eq!(result.schema_hints[0].path, "schema.sql");
+        assert_eq!(result.schema_hints[1].path, "other.db");
+    }
+
+    #[test]
+    fn test_schema_hint_stops_after_sql() {
+        let source = "-- schema: first.sql\nSELECT 1;\n-- schema: second.sql";
+        let result = parse_dot_commands(source);
+        // Only the first hint should be parsed; the second is after SQL
+        assert_eq!(result.schema_hints.len(), 1);
+        assert_eq!(result.schema_hints[0].path, "first.sql");
+    }
+
+    #[test]
+    fn test_schema_hint_stops_after_dot_command() {
+        let source = "-- schema: first.sql\n.open test.db\n-- schema: second.sql";
+        let result = parse_dot_commands(source);
+        assert_eq!(result.schema_hints.len(), 1);
+        assert_eq!(result.schema_hints[0].path, "first.sql");
+    }
+
+    #[test]
+    fn test_schema_hint_blank_lines_allowed() {
+        let source = "\n-- schema: schema.sql\n\nSELECT 1;";
+        let result = parse_dot_commands(source);
+        assert_eq!(result.schema_hints.len(), 1);
+        assert_eq!(result.schema_hints[0].path, "schema.sql");
+    }
+
+    #[test]
+    fn test_schema_hint_quoted_path() {
+        let source = "-- schema: \"path with spaces/schema.sql\"\nSELECT 1;";
+        let result = parse_dot_commands(source);
+        assert_eq!(result.schema_hints.len(), 1);
+        assert_eq!(result.schema_hints[0].path, "path with spaces/schema.sql");
+    }
+
+    #[test]
+    fn test_no_schema_hints() {
+        let source = "SELECT 1;";
+        let result = parse_dot_commands(source);
+        assert!(result.schema_hints.is_empty());
     }
 }

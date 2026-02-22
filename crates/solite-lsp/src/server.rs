@@ -6,7 +6,7 @@ use crate::completions::{
     get_completions_extended, CompletionOptions as ExtendedCompletionOptions,
 };
 use crate::context::detect_context;
-use solite_schema::{Document, DotCommand, FileSchemaProvider, SchemaProvider, SqlRegion};
+use solite_schema::{DdlSchemaProvider, Document, DotCommand, FileSchemaProvider, SchemaHint, SchemaProvider, SqlRegion};
 use solite_analyzer::{
     analyze_with_schema, build_schema, find_statement_at_offset, find_symbol_at_offset,
     format_hover_content, get_definition_span, lint_with_config, Diagnostic, LintConfig,
@@ -287,6 +287,37 @@ fn build_combined_schema(sources: &[&str]) -> Schema {
     }
 }
 
+/// Load schema from a `-- schema: <path>` hint.
+///
+/// If the path ends in `.sql`, the file is read as DDL and parsed.
+/// Otherwise it is opened as a SQLite database and introspected.
+fn load_schema_from_hint(
+    hint: &SchemaHint,
+    base_path: Option<&PathBuf>,
+) -> std::result::Result<Schema, String> {
+    let db_path = if let Some(base) = base_path {
+        let path_buf = PathBuf::from(&hint.path);
+        if path_buf.is_absolute() {
+            path_buf
+        } else {
+            base.join(&hint.path)
+        }
+    } else {
+        PathBuf::from(&hint.path)
+    };
+
+    if hint.path.ends_with(".sql") {
+        let sql = std::fs::read_to_string(&db_path)
+            .map_err(|e| format!("Failed to read schema file: {}", e))?;
+        let provider = DdlSchemaProvider::from_sql(&sql)
+            .map_err(|e| format!("Failed to parse schema SQL: {}", e))?;
+        provider.load().map_err(|e| format!("Failed to load schema: {}", e))
+    } else {
+        let provider = FileSchemaProvider::new(&db_path);
+        provider.load().map_err(|e| format!("Failed to open database: {}", e))
+    }
+}
+
 /// Discover virtual table schemas and function names by querying a live SQLite connection
 /// with all solite-stdlib extensions loaded.
 fn discover_builtin_vtab_schema() -> Schema {
@@ -420,7 +451,7 @@ impl Backend {
                         .expect("notebook_schemas lock poisoned")
                         .insert(notebook_path.clone(), combined_schema);
 
-                    // Process .open commands from all cells to build external schema
+                    // Process .open commands and -- schema: hints from all cells
                     let mut external_schema = Schema::new();
                     for cell_content in cells.values() {
                         let doc = Document::parse(cell_content, true);
@@ -443,6 +474,11 @@ impl Backend {
                                         external_schema.merge(schema);
                                     }
                                 }
+                            }
+                        }
+                        for hint in doc.schema_hints() {
+                            if let Ok(schema) = load_schema_from_hint(hint, base_path.as_ref()) {
+                                external_schema.merge(schema);
                             }
                         }
                     }
@@ -527,7 +563,25 @@ impl Backend {
                 }
             }
 
-            // Store external schema from .open commands
+            // Process -- schema: hints
+            for hint in doc.schema_hints() {
+                match load_schema_from_hint(hint, base_path.as_ref()) {
+                    Ok(schema) => {
+                        external_schema.merge(schema);
+                    }
+                    Err(msg) => {
+                        let range = span_to_range(&text, &hint.span);
+                        open_diagnostics.push(tower_lsp::lsp_types::Diagnostic {
+                            range,
+                            severity: Some(DiagnosticSeverity::WARNING),
+                            message: msg,
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
+            // Store external schema from .open commands and schema hints
             self.open_schemas
                 .write()
                 .expect("open_schemas lock poisoned")
@@ -1423,7 +1477,7 @@ impl LanguageServer for Backend {
                         .expect("notebook_schemas lock poisoned")
                         .insert(notebook_path.clone(), combined_schema);
 
-                    // Rebuild open schema from .open commands
+                    // Rebuild open schema from .open commands and -- schema: hints
                     let base_path = PathBuf::from(&notebook_path)
                         .parent()
                         .map(|p| p.to_path_buf());
@@ -1448,6 +1502,11 @@ impl LanguageServer for Backend {
                                         external_schema.merge(schema);
                                     }
                                 }
+                            }
+                        }
+                        for hint in doc.schema_hints() {
+                            if let Ok(schema) = load_schema_from_hint(hint, base_path.as_ref()) {
+                                external_schema.merge(schema);
                             }
                         }
                     }

@@ -49,7 +49,7 @@ mod tests {
         app.draw_and_snapshot("listing page");
 
         app.send_key(KeyCode::Enter.into());
-        app.draw_and_snapshot("enter -> table view");
+        app.draw_and_snapshot("enter - table view");
 
         app.send_key(KeyCode::Esc.into());
         app.draw_and_snapshot("Back to listing");

@@ -392,7 +392,7 @@ impl Runtime {
                         .parent()
                         .map(|dir| dir.join(&run_cmd.file))
                         .unwrap_or_else(|| PathBuf::from(&run_cmd.file));
-                    run_cmd.file = resolved.to_string_lossy().to_string();
+                    run_cmd.file = resolved.to_string_lossy().replace('\\', "/");
                 }
 
                 if !rest.is_empty() {

@@ -47,7 +47,14 @@ jobs:
       - run: rustup toolchain install stable --profile minimal
       - run: rustup target add armv7-unknown-linux-gnueabihf
       - uses: Swatinem/rust-cache@v2
-      - run: sudo dpkg --add-architecture armhf && sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf libreadline-dev:armhf libedit-dev:armhf
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ noble main universe" | sudo tee /etc/apt/sources.list.d/armhf.list
+          echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main universe" | sudo tee -a /etc/apt/sources.list.d/armhf.list
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf libreadline-dev:armhf libedit-dev:armhf
       - run: cargo build -p solite-cli --target armv7-unknown-linux-gnueabihf
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc

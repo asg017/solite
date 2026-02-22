@@ -1,4 +1,3 @@
-f# Build solite wheels.
 #
 # Assumed to run as a subworkflow of .github/workflows/release.yml; specifically, as a local
 # artifacts job within `cargo-dist`.

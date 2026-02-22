@@ -30,10 +30,15 @@ fn generate_builtins() {
 fn build_amalgamation_if_needed(sqlite_dir: &Path) -> PathBuf {
     let sqlite3_c = sqlite_dir.join("sqlite3.c");
     if !sqlite3_c.exists() {
-        let status = Command::new("./configure")
+        // On Windows, ./configure is a shell script so we invoke it via sh.
+        // make/sh are available via Git for Windows / MSYS2.
+        let configure_cmd = if cfg!(target_os = "windows") { "sh" } else { "./configure" };
+        let configure_args: &[&str] = if cfg!(target_os = "windows") { &["./configure"] } else { &[] };
+        let status = Command::new(configure_cmd)
+            .args(configure_args)
             .current_dir(sqlite_dir)
             .status()
-            .expect("Failed to run ./configure in sqlite submodule");
+            .expect("Failed to run ./configure in sqlite submodule. On Windows, ensure Git for Windows (sh) and make are installed.");
         if !status.success() {
             panic!("./configure failed in sqlite submodule");
         }
@@ -77,11 +82,9 @@ fn build_sqlite_extension(
         build.define("SQLITE_CORE", None);
     }
     if name == "fileio" && cfg!(target_os = "windows") {
-        let windirent_c = sqlite_dir.join("src/test_windirent.c");
-        let windirent_h = sqlite_dir.join("src/test_windirent.h");
-        // Copy test_windirent.h to amalgamation dir so fileio.c can find it
-        std::fs::copy(&windirent_h, amalgamation_dir.join("test_windirent.h")).unwrap();
-        build.file(windirent_c);
+        // windirent.h lives in ext/misc/ alongside fileio.c and is header-only,
+        // so just make sure ext/misc is on the include path.
+        build.include(sqlite_dir.join("ext/misc"));
     }
     build.compile(name);
 }
@@ -108,25 +111,31 @@ fn main() {
         "cargo:rerun-if-changed={}",
         amalgamation_dir.join("sqlite3.c").display()
     );
-    cc::Build::new()
+
+    let mut sqlite_build = cc::Build::new();
+    sqlite_build
         .file(amalgamation_dir.join("sqlite3.c"))
         .include(&amalgamation_dir)
-        .static_flag(true)
         .opt_level(c_opt_level)
-        .flag("-DSQLITE_ENABLE_RTREE")
-        .flag("-DSQLITE_SOUNDEX")
-        .flag("-DSQLITE_ENABLE_GEOPOLY")
-        .flag("-DSQLITE_ENABLE_MATH_FUNCTIONS")
-        .flag("-USQLITE_ENABLE_FTS3")
-        .flag("-DSQLITE_ENABLE_FTS5")
-        .flag("-DSQLITE_ENABLE_DBSTAT_VTAB")
-        .flag("-DSQLITE_ENABLE_STMTVTAB")
-        .flag("-DSQLITE_ENABLE_BYTECODE_VTAB")
-        .flag("-DSQLITE_ENABLE_EXPLAIN_COMMENTS")
-        .flag("-DSQLITE_ENABLE_STMT_SCANSTATUS")
-        .flag("-DSQLITE_ENABLE_COLUMN_METADATA ")
-        .warnings(false)
-        .compile("sqlite");
+        .define("SQLITE_ENABLE_RTREE", None)
+        .define("SQLITE_SOUNDEX", None)
+        .define("SQLITE_ENABLE_GEOPOLY", None)
+        .define("SQLITE_ENABLE_MATH_FUNCTIONS", None)
+        .define("SQLITE_ENABLE_FTS5", None)
+        .define("SQLITE_ENABLE_DBSTAT_VTAB", None)
+        .define("SQLITE_ENABLE_STMTVTAB", None)
+        .define("SQLITE_ENABLE_BYTECODE_VTAB", None)
+        .define("SQLITE_ENABLE_EXPLAIN_COMMENTS", None)
+        .define("SQLITE_ENABLE_STMT_SCANSTATUS", None)
+        .define("SQLITE_ENABLE_COLUMN_METADATA", None)
+        .warnings(false);
+    if !cfg!(target_os = "windows") {
+        sqlite_build.static_flag(true);
+    }
+    // Undefine FTS3 — use flag() since cc::Build has no .undefine() method.
+    // The cc crate translates -U to /U on MSVC automatically.
+    sqlite_build.flag("-USQLITE_ENABLE_FTS3");
+    sqlite_build.compile("sqlite");
 
     // hopefully libsqlite3-sys finds this to fix windows builds?
     env::set_var("SQLITE3_LIB_DIR", env::var("OUT_DIR").unwrap());
@@ -176,14 +185,11 @@ fn main() {
     // separately above. macOS's linker tolerates duplicate symbols, but Linux's
     // rust-lld (used in GHA) does not. We rename the embedded copies via -D
     // defines so they don't clash — same trick used for main -> sqlite3_shell_main.
-    cc::Build::new()
+    let mut shell_build = cc::Build::new();
+    shell_build
         .file(amalgamation_dir.join("shell.c"))
         .include(&amalgamation_dir)
-        .static_flag(true)
         .opt_level(c_opt_level)
-        .define("main", Some("sqlite3_shell_main"))
-        .define("HAVE_READLINE", Some("1"))
-        .define("HAVE_EDITLINE", Some("1"))
         .define("sqlite3_shathree_init", Some("_shell_shathree_init"))
         .define("sqlite3_sha_init", Some("_shell_sha_init"))
         .define("sqlite3_uint_init", Some("_shell_uint_init"))
@@ -193,8 +199,19 @@ fn main() {
         .define("sqlite3_fileio_init", Some("_shell_fileio_init"))
         .define("sqlite3CompletionVtabInit", Some("_shell_CompletionVtabInit"))
         .define("sqlite3_completion_init", Some("_shell_completion_init"))
-        .warnings(false)
-        .compile("sqlite3_shell");
+        .warnings(false);
+    if cfg!(target_os = "windows") {
+        // On Windows, shell.c does `#define main utf8_main` internally,
+        // so we must rename utf8_main instead of main.
+        shell_build.define("utf8_main", Some("sqlite3_shell_main"));
+    } else {
+        shell_build
+            .define("main", Some("sqlite3_shell_main"))
+            .static_flag(true)
+            .define("HAVE_READLINE", Some("1"))
+            .define("HAVE_EDITLINE", Some("1"));
+    }
+    shell_build.compile("sqlite3_shell");
 
     // Compile sqldiff.c with main() renamed so we can call it from Rust
     let sqldiff_c = sqlite_dir.join("tool/sqldiff.c");
@@ -202,33 +219,45 @@ fn main() {
     let sqlite3_stdio_dir = sqlite_dir.join("ext/misc");
     println!("cargo:rerun-if-changed={}", sqldiff_c.display());
     println!("cargo:rerun-if-changed={}", sqlite3_stdio_c.display());
-    cc::Build::new()
+    let mut sqldiff_build = cc::Build::new();
+    sqldiff_build
         .file(&sqldiff_c)
         .file(&sqlite3_stdio_c)
         .include(&amalgamation_dir)
         .include(&sqlite3_stdio_dir)
-        .static_flag(true)
         .opt_level(c_opt_level)
-        .define("main", Some("sqldiff_main"))
-        .warnings(false)
-        .compile("sqldiff");
+        .warnings(false);
+    if cfg!(target_os = "windows") {
+        // On Windows, sqldiff.c does `#define main utf8_main` internally,
+        // so we must rename utf8_main instead of main.
+        sqldiff_build.define("utf8_main", Some("sqldiff_main"));
+    } else {
+        sqldiff_build
+            .define("main", Some("sqldiff_main"))
+            .static_flag(true);
+    }
+    sqldiff_build.compile("sqldiff");
 
     // Compile sqlite3_rsync.c with main() renamed so we can call it from Rust
     let sqlite3_rsync_c = sqlite_dir.join("tool/sqlite3_rsync.c");
     println!("cargo:rerun-if-changed={}", sqlite3_rsync_c.display());
-    cc::Build::new()
+    let mut rsync_build = cc::Build::new();
+    rsync_build
         .file(&sqlite3_rsync_c)
         .include(&amalgamation_dir)
-        .static_flag(true)
         .opt_level(c_opt_level)
         .define("main", Some("sqlite3_rsync_main"))
-        .warnings(false)
-        .compile("sqlite3_rsync");
+        .warnings(false);
+    if !cfg!(target_os = "windows") {
+        rsync_build.static_flag(true);
+    }
+    rsync_build.compile("sqlite3_rsync");
 
-    // Link libedit (macOS system editline) or readline for the sqlite3 shell
+    // Link libedit (macOS system editline) or readline for the sqlite3 shell.
+    // On Windows, the shell works without readline/editline.
     if cfg!(target_os = "macos") {
         println!("cargo:rustc-link-lib=edit");
-    } else {
+    } else if !cfg!(target_os = "windows") {
         println!("cargo:rustc-link-lib=readline");
     }
 

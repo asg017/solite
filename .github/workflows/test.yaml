@@ -9,7 +9,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel, ubuntu-22.04-arm]
+        os: [ubuntu-latest, macos-latest, macos-15-intel, ubuntu-22.04-arm, windows-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -30,6 +30,11 @@ jobs:
       - run: uv run --with ipykernel --with jupyter-core jupyter kernelspec list
         shell: bash
       - run: make test
+        if: runner.os != 'Windows'
         shell: bash
-      #- run: make all; ./dist/debug/sqlite3 < smoke.sql
-      #  working-directory: solite-stdlib/sqlite3
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo test
+          uv run --project tests pytest -vv

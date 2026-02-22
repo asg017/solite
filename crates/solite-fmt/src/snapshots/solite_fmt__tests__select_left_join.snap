@@ -1,0 +1,15 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select a, b from t left join u on t.id = u.id
+
+-- Output:
+select
+  a,
+  b
+from t
+left join u
+  on t.id = u.id;

@@ -1,0 +1,15 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select * from (select current, filter from t)
+
+-- Output:
+select * from (
+  select
+    current,
+    filter
+  from t
+);

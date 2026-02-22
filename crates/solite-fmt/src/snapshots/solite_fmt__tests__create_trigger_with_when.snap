@@ -1,0 +1,17 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create trigger tr_t after delete on t when old.status = 'active' begin insert into deleted values (old.id); end
+
+-- Output:
+create trigger tr_t
+after delete on t
+when old.status = 'active'
+begin
+  insert into deleted
+  values
+    (old.id);
+end;

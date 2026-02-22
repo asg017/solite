@@ -1,0 +1,15 @@
+[package]
+name = "solite-completion"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+analyzer = ["solite-analyzer"]
+
+[dependencies]
+solite-lexer = { path = "../solite-lexer" }
+solite-analyzer = { path = "../solite-analyzer", optional = true }
+
+[dev-dependencies]
+insta = { workspace = true }

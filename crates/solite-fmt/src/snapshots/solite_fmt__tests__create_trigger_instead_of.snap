@@ -1,0 +1,16 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create trigger tr_view instead of insert on user_view begin insert into users (name) values (new.name); end
+
+-- Output:
+create trigger tr_view
+instead of insert on user_view
+begin
+  insert into users(name)
+  values
+    (new.name);
+end;

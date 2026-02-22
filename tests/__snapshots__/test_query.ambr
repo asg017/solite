@@ -34,7 +34,7 @@
 # ---
 # name: test_query_fails[write fails]
   '''
-  only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database.
+  Error: Execution failed: Only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database.
   
   '''
 # ---

@@ -1,21 +1,29 @@
-use std::{collections::HashMap, env, path::{Path, PathBuf}};
+use std::{collections::HashMap, env, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::ExportFormat;
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    pub database: Option<PathBuf>,
-    pub script: Option<PathBuf>,
+    /// Positional args: [database] [script.sql] [procedureName]
+    pub args: Vec<String>,
+
+    /// Execute SQL/dot commands from the given string (instead of a .sql file)
+    #[arg(long, short = 'c')]
+    pub command: Option<String>,
 
     #[arg(long, short = 'p', num_args = 2)]
     pub parameters: Vec<String>,
 
     #[arg(long)]
     pub trace: Option<PathBuf>,
+
+    #[arg(long, alias = "read-only")]
+    pub readonly: bool,
 }
 
 impl RunArgs {
+    #[allow(dead_code)]
     pub fn params(&self) -> HashMap<String, String> {
         self.parameters
             .chunks(2)
@@ -50,9 +58,9 @@ pub enum QueryFormat {
     Clipboard,
 }
 
-impl Into<ExportFormat> for QueryFormat {
-    fn into(self) -> ExportFormat {
-        match self {
+impl From<QueryFormat> for ExportFormat {
+    fn from(value: QueryFormat) -> ExportFormat {
+        match value {
             QueryFormat::Csv => ExportFormat::Csv,
             QueryFormat::Tsv => ExportFormat::Tsv,
             QueryFormat::Json => ExportFormat::Json,
@@ -83,8 +91,8 @@ pub struct QueryArgs {
 
 #[derive(Args, Debug)]
 pub struct ExecuteArgs {
-    pub database: Option<PathBuf>,
-    pub statement: Vec<String>,
+    #[arg(num_args = 1..=2)]
+    pub args: Vec<String>,
 
     #[arg(long, short = 'o')]
     pub output: Option<PathBuf>,
@@ -121,64 +129,24 @@ pub struct CodegenArgs {
 }
 
 
-#[derive(Args, Debug)]
-pub struct RpcNamespace {
-    #[command(subcommand)]
-    pub command: RpcCommand,
-}
-#[derive(Subcommand, Debug)]
-pub enum RpcCommand {
-    ClientDebug(RpcClientDebugArgs),
-    Server(RpcServerArgs),
-}
 
 #[derive(Args, Debug)]
-pub struct RpcClientDebugArgs {
-    #[arg(long)]
-    pub executable: PathBuf,
-}
-#[derive(Args, Debug)]
-pub struct RpcServerArgs {
-}
-#[derive(Args, Debug)]
-pub struct McpNamespace {
-    #[command(subcommand)]
-    pub command: McpCommand,
-}
-#[derive(Subcommand, Debug)]
-pub enum McpCommand {
-    Up(McpUpArgs),
-    Install(McpInstallArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct McpUpArgs {
-}
-#[derive(Args, Debug)]
-pub struct McpInstallArgs {
-}
-
-#[derive(Args, Debug)]
-pub struct SnapNamespace {
-    #[command(subcommand)]
-    pub command: SnapCommand,
-}
-
-#[derive(Args, Debug)]
-pub struct SnapTestArgs {
+pub struct TestArgs {
     pub file: PathBuf,
 
     #[arg(long)]
-    pub trace: Option<PathBuf>,
+    pub database: Option<PathBuf>,
 
     #[arg(long)]
     pub verbose: bool,
-}
 
-#[derive(Subcommand, Debug)]
-pub enum SnapCommand {
-    Test(SnapTestArgs),
-    Review(SnapTestArgs),
+    /// Auto-accept all snapshot changes (new, updated, orphaned)
+    #[arg(long, short = 'u')]
+    pub update: bool,
+
+    /// Interactively review each snapshot change
+    #[arg(long)]
+    pub review: bool,
 }
 
 #[derive(Args, Debug)]
@@ -238,6 +206,110 @@ pub struct TuiArgs {
     pub table: Option<String>,
 }
 
+#[derive(Args, Debug)]
+pub struct FmtArgs {
+    /// SQL files to format (reads from stdin if none provided)
+    pub files: Vec<PathBuf>,
+
+    /// Write formatted output back to files
+    #[arg(short, long)]
+    pub write: bool,
+
+    /// Check if files are formatted (exit 1 if not)
+    #[arg(long)]
+    pub check: bool,
+
+    /// Show diff of formatting changes
+    #[arg(long)]
+    pub diff: bool,
+
+    /// Path to config file
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct LintArgs {
+    /// SQL files to lint (reads from stdin if none provided)
+    pub files: Vec<PathBuf>,
+
+    /// Path to config file
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Apply auto-fixes where available
+    #[arg(long)]
+    pub fix: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LspArgs {
+    /// Path to config file
+    #[arg(long, default_value_t = true)]
+    pub stdio: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct Sqlite3Args {
+    /// Arguments passed directly to the sqlite3 shell
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct DiffArgs {
+    /// Arguments passed directly to sqldiff
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct RsyncArgs {
+    /// Arguments passed directly to sqlite3_rsync
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct SchemaArgs {
+    pub database: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct BackupArgs {
+    /// Source database path
+    pub database: PathBuf,
+
+    /// Destination backup file path
+    pub destination: PathBuf,
+
+    /// Which attached database to back up
+    #[arg(long, default_value = "main")]
+    pub db: String,
+}
+
+#[derive(Args, Debug)]
+pub struct VacuumArgs {
+    /// Database path to vacuum
+    pub database: PathBuf,
+
+    /// Write vacuumed database to a new file instead of in-place
+    #[arg(long, alias = "output", short = 'o')]
+    pub into: Option<PathBuf>,
+
+    /// Positional alias for --into
+    #[arg(hide = true)]
+    pub destination: Option<PathBuf>,
+}
+
+impl VacuumArgs {
+    pub fn into_path(&self) -> Option<&PathBuf> {
+        self.into.as_ref().or(self.destination.as_ref())
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -250,12 +322,12 @@ pub enum Commands {
     #[command(alias = "q")]
     Query(QueryArgs),
 
-    #[command(alias = "exec")]
     /// Execute a write SQL statement on a database
+    #[command(alias = "exec")]
     Execute(ExecuteArgs),
 
-    /// Snapshot testing for extensions and SQL statements
-    Snap(SnapNamespace),
+    /// Run SQL-based inline tests in a single file
+    Test(TestArgs),
 
     /// Manage the Solite Jupyter kernel
     Jupyter(JupyterNamespace),
@@ -266,28 +338,87 @@ pub enum Commands {
     /// Run benchmarks on SQL statements
     Bench(BenchArgs),
 
-    /// MCP
-    Mcp(McpNamespace),
-
-    /// RPC
-    Rpc(RpcNamespace),
-    
     /// Codegen SQL queries into an intermediate representation
     Codegen(CodegenArgs),
-    
+
     /// Tui for exploring a database
     Tui(TuiArgs),
+
+    /// Format SQL files
+    #[command(alias = "fmt")]
+    Format(FmtArgs),
+
+    /// Lint SQL files for potential issues
+    Lint(LintArgs),
+
+    /// Start the Language Server Protocol (LSP) server
+    Lsp(LspArgs),
+
+    /// Run the sqlite3 shell directly
+    Sqlite3(Sqlite3Args),
+
+    /// Output SQL to transform one database into another
+    Diff(DiffArgs),
+
+    /// Efficiently replicate a SQLite database to a remote machine
+    Rsync(RsyncArgs),
+
+    /// Print the schema of a database
+    Schema(SchemaArgs),
+
+    /// Back up a SQLite database to a file
+    Backup(BackupArgs),
+
+    /// Rebuild a database file, repacking it into minimal disk space
+    Vacuum(VacuumArgs),
 }
+
+const HELP_TEMPLATE: &str = "\
+{name} {version}
+{about}
+
+{usage-heading} {usage}
+
+Options:
+{options}
+Scripting and Query Execution:
+  run              Run SQL scripts
+  repl             Start a REPL on a SQLite database
+  query            Run a read-only SQL query and output results to a file
+  execute          Execute a write SQL statement on a database
+  schema           Print the schema of a database
+
+Tooling:
+  backup           Back up a SQLite database to a file
+  vacuum           Rebuild a database, repacking into minimal disk space
+  jupyter          Manage the Solite Jupyter kernel
+  tui              Tui for exploring a database
+  test             Run SQL-based inline tests in a single file
+  bench            Run benchmarks on SQL statements
+  codegen          Codegen SQL queries into an intermediate representation
+  docs             Tooling for documenting SQLite extensions
+
+SQL:
+  format           Format SQL files
+  lint             Lint SQL files for potential issues
+  lsp              Start the Language Server Protocol (LSP) server
+
+Compatibility:
+  sqlite3          Run the sqlite3 shell directly
+  diff             Output SQL to transform one database into another
+  rsync            Efficiently replicate a SQLite database to a remote machine
+";
 
 #[derive(Parser)]
 #[command(
-  name = "solite", 
+  name = "solite",
   author,
-  long_version = env!("CARGO_PKG_VERSION"), 
-  about = "Solite CLI", 
+  long_version = env!("CARGO_PKG_VERSION"),
+  about = "Solite CLI",
   version,
   subcommand_required = false,
   arg_required_else_help = false,
+  help_template = HELP_TEMPLATE,
 )]
 pub struct Cli {
     #[command(subcommand)]

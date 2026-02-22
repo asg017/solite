@@ -14,7 +14,7 @@ mod tests {
         fn new(runtime: &'a mut Runtime, width: u16, height: u16) -> Self {
             let terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let theme = crate::commands::tui::tui_theme::CTP_MOCHA_THEME.clone();
-            let page = Page::Listing(ListingPage::new(&runtime, &theme.clone()));
+            let page = Page::Listing(ListingPage::new(runtime, &theme));
             let app = App { runtime, page, theme };
             Self { terminal, app }
         }

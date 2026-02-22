@@ -1,0 +1,12 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table if not exists t (a integer)
+
+-- Output:
+create table if not exists t(
+  a integer
+);

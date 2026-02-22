@@ -1,0 +1,11 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create temp view v as select a from t
+
+-- Output:
+create temp view v as
+select a from t;

@@ -1,0 +1,85 @@
+---
+source: crates/solite-parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        Select(
+            SelectStmt {
+                with_clause: None,
+                distinct: All,
+                columns: [
+                    Expr {
+                        expr: Ident(
+                            "value",
+                            false,
+                            Span {
+                                start: 7,
+                                end: 12,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 7,
+                            end: 12,
+                        },
+                    },
+                ],
+                from: Some(
+                    FromClause {
+                        tables: [
+                            TableFunction {
+                                name: "generate_series",
+                                args: [
+                                    Integer(
+                                        1,
+                                        Span {
+                                            start: 34,
+                                            end: 35,
+                                        },
+                                    ),
+                                    Integer(
+                                        10,
+                                        Span {
+                                            start: 37,
+                                            end: 39,
+                                        },
+                                    ),
+                                    Integer(
+                                        2,
+                                        Span {
+                                            start: 41,
+                                            end: 42,
+                                        },
+                                    ),
+                                ],
+                                alias: None,
+                                alias_has_as: false,
+                                span: Span {
+                                    start: 18,
+                                    end: 43,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 13,
+                            end: 43,
+                        },
+                    },
+                ),
+                where_clause: None,
+                group_by: None,
+                having: None,
+                compounds: [],
+                order_by: None,
+                limit: None,
+                span: Span {
+                    start: 0,
+                    end: 44,
+                },
+            },
+        ),
+    ],
+}

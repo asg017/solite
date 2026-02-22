@@ -4,8 +4,6 @@
  * 3. Jupyter outputs?
 
  */
-use std::sync::LazyLock;
-
 use color_eyre::owo_colors;
 
 
@@ -17,6 +15,7 @@ pub struct SoliteColor {
 }
 
 impl SoliteColor {
+  #[allow(dead_code)]
   pub fn new(red: u8, green: u8, blue: u8) -> Self {
     Self { red, green, blue }
   }
@@ -32,30 +31,31 @@ impl SoliteColor {
   }
 }
 
-impl Into<ratatui::style::Color> for SoliteColor {
-  fn into(self) -> ratatui::style::Color {
-    ratatui::style::Color::Rgb(self.red, self.green, self.blue)
+impl From<SoliteColor> for ratatui::style::Color {
+  fn from(value: SoliteColor) -> ratatui::style::Color {
+    ratatui::style::Color::Rgb(value.red, value.green, value.blue)
   }
 }
 
-impl Into<termcolor::Color> for SoliteColor {
-  fn into(self) -> termcolor::Color {
-    termcolor::Color::Rgb(self.red, self.green, self.blue)
+impl From<SoliteColor> for termcolor::Color {
+  fn from(value: SoliteColor) -> termcolor::Color {
+    termcolor::Color::Rgb(value.red, value.green, value.blue)
   }
 }
 
-impl Into<owo_colors::Rgb> for SoliteColor {
-  fn into(self) -> owo_colors::Rgb {
-    owo_colors::Rgb(self.red, self.green, self.blue)
+impl From<SoliteColor> for owo_colors::Rgb {
+  fn from(val: SoliteColor) -> Self {
+    owo_colors::Rgb(val.red, val.green, val.blue)
   }
 }
 
-impl Into<crossterm::style::Color> for SoliteColor {
-  fn into(self) -> crossterm::style::Color {
-    crossterm::style::Color::Rgb { r: self.red, g: self.green, b: self.blue }
+impl From<SoliteColor> for crossterm::style::Color {
+  fn from(val: SoliteColor) -> Self {
+    crossterm::style::Color::Rgb { r: val.red, g: val.green, b: val.blue }
   }
 } 
 
+#[allow(dead_code)]
 pub(crate) mod ctp_mocha_colors {
   use super::SoliteColor;
   use std::sync::LazyLock;

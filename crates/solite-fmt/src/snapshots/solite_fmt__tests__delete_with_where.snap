@@ -1,0 +1,11 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- delete from t where id = 5
+
+-- Output:
+delete from t
+where id = 5;

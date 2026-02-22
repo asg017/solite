@@ -1,28 +1,40 @@
 # serializer version: 1
 # name: test_help[--help]
   '''
+  solite 0.0.1-alpha.24
   Solite CLI
   
   Usage: solite [COMMAND]
   
-  Commands:
-    run      Run SQL scripts
-    repl     Start a REPL on a SQLite database
-    query    Run a read-only SQL query and output results to a file
-    execute  Execute a write SQL statement on a database
-    snap     Snapshot testing for extensions and SQL statements
-    jupyter  Manage the Solite Jupyter kernel
-    docs     Tooling for documenting SQLite extensions
-    bench    Run benchmarks on SQL statements
-    mcp      MCP
-    rpc      RPC
-    codegen  Codegen SQL queries into an intermediate representation
-    tui      Tui for exploring a database
-    help     Print this message or the help of the given subcommand(s)
-  
   Options:
     -h, --help     Print help
     -V, --version  Print version
+  Scripting and Query Execution:
+    run              Run SQL scripts
+    repl             Start a REPL on a SQLite database
+    query            Run a read-only SQL query and output results to a file
+    execute          Execute a write SQL statement on a database
+    schema           Print the schema of a database
+  
+  Tooling:
+    backup           Back up a SQLite database to a file
+    vacuum           Rebuild a database, repacking into minimal disk space
+    jupyter          Manage the Solite Jupyter kernel
+    tui              Tui for exploring a database
+    test             Run SQL-based inline tests in a single file
+    bench            Run benchmarks on SQL statements
+    codegen          Codegen SQL queries into an intermediate representation
+    docs             Tooling for documenting SQLite extensions
+  
+  SQL:
+    format           Format SQL files
+    lint             Lint SQL files for potential issues
+    lsp              Start the Language Server Protocol (LSP) server
+  
+  Compatibility:
+    sqlite3          Run the sqlite3 shell directly
+    diff             Output SQL to transform one database into another
+    rsync            Efficiently replicate a SQLite database to a remote machine
   
   '''
 # ---
@@ -84,16 +96,22 @@
   '''
   Run SQL scripts
   
-  Usage: solite run [OPTIONS] [DATABASE] [SCRIPT]
+  Usage: solite run [OPTIONS] [ARGS]...
   
   Arguments:
-    [DATABASE]  
-    [SCRIPT]    
+    [ARGS]...  Positional args: [database] [script.sql] [procedureName]
   
   Options:
-    -p, --parameters <PARAMETERS> <PARAMETERS>  
-        --trace <TRACE>                         
-    -h, --help                                  Print help
+    -c, --command <COMMAND>
+            Execute SQL/dot commands from the given string (instead of a .sql file)
+    -p, --parameters <PARAMETERS> <PARAMETERS>
+            
+        --trace <TRACE>
+            
+        --readonly
+            
+    -h, --help
+            Print help
   
   '''
 # ---

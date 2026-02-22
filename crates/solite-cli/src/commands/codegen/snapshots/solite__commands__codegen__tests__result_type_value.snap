@@ -1,0 +1,18 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table users(id int, name text);\n\n            -- name: countUsers :value\n            select count(*) from users;\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table users(id int, name text);"
+exports:
+  - name: countUsers
+    result_type: Value
+    sql: select count(*) from users;
+    parameters: []
+    columns:
+      - name: count(*)
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~

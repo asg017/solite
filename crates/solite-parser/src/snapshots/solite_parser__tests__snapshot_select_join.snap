@@ -1,0 +1,141 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        Select(
+            SelectStmt {
+                with_clause: None,
+                distinct: All,
+                columns: [
+                    Expr {
+                        expr: Column {
+                            schema: None,
+                            table: Some(
+                                "u",
+                            ),
+                            column: "name",
+                            span: Span {
+                                start: 7,
+                                end: 13,
+                            },
+                        },
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 7,
+                            end: 13,
+                        },
+                    },
+                    Expr {
+                        expr: Column {
+                            schema: None,
+                            table: Some(
+                                "o",
+                            ),
+                            column: "total",
+                            span: Span {
+                                start: 15,
+                                end: 22,
+                            },
+                        },
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 15,
+                            end: 22,
+                        },
+                    },
+                ],
+                from: Some(
+                    FromClause {
+                        tables: [
+                            Join {
+                                left: Table {
+                                    schema: None,
+                                    name: "users",
+                                    alias: Some(
+                                        "u",
+                                    ),
+                                    alias_has_as: false,
+                                    indexed: None,
+                                    span: Span {
+                                        start: 28,
+                                        end: 35,
+                                    },
+                                },
+                                join_type: Inner,
+                                right: Table {
+                                    schema: None,
+                                    name: "orders",
+                                    alias: Some(
+                                        "o",
+                                    ),
+                                    alias_has_as: false,
+                                    indexed: None,
+                                    span: Span {
+                                        start: 41,
+                                        end: 49,
+                                    },
+                                },
+                                constraint: Some(
+                                    On(
+                                        Binary {
+                                            left: Column {
+                                                schema: None,
+                                                table: Some(
+                                                    "u",
+                                                ),
+                                                column: "id",
+                                                span: Span {
+                                                    start: 53,
+                                                    end: 57,
+                                                },
+                                            },
+                                            op: Eq,
+                                            right: Column {
+                                                schema: None,
+                                                table: Some(
+                                                    "o",
+                                                ),
+                                                column: "user_id",
+                                                span: Span {
+                                                    start: 60,
+                                                    end: 69,
+                                                },
+                                            },
+                                            span: Span {
+                                                start: 53,
+                                                end: 69,
+                                            },
+                                        },
+                                    ),
+                                ),
+                                span: Span {
+                                    start: 28,
+                                    end: 69,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 23,
+                            end: 69,
+                        },
+                    },
+                ),
+                where_clause: None,
+                group_by: None,
+                having: None,
+                compounds: [],
+                order_by: None,
+                limit: None,
+                span: Span {
+                    start: 0,
+                    end: 70,
+                },
+            },
+        ),
+    ],
+}

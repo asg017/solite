@@ -1,0 +1,38 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table t(a, b text, c int);\n\n            -- name: getA\n            select a from t;\n\n            -- name: getB\n            select b from t;\n\n            -- name: getC\n            select c from t;\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table t(a, b text, c int);"
+exports:
+  - name: getA
+    result_type: Rows
+    sql: select a from t;
+    parameters: []
+    columns:
+      - name: a
+        origin_database: main
+        origin_table: t
+        origin_column: a
+        decltype: ~
+  - name: getB
+    result_type: Rows
+    sql: select b from t;
+    parameters: []
+    columns:
+      - name: b
+        origin_database: main
+        origin_table: t
+        origin_column: b
+        decltype: TEXT
+  - name: getC
+    result_type: Rows
+    sql: select c from t;
+    parameters: []
+    columns:
+      - name: c
+        origin_database: main
+        origin_table: t
+        origin_column: c
+        decltype: INT

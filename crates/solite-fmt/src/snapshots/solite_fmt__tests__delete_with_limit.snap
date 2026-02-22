@@ -1,0 +1,13 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- delete from t where x > 10 order by x limit 5
+
+-- Output:
+delete from t
+where x > 10
+order by x
+limit 5;

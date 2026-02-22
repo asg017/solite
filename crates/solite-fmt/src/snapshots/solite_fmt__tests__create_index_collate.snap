@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create index idx_name_nocase on t(name collate nocase)
+
+-- Output:
+create index idx_name_nocase on t(name collate nocase);

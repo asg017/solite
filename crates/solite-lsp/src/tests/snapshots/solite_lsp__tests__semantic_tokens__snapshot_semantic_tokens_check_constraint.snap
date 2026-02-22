@@ -1,0 +1,24 @@
+---
+source: crates/solite_lsp/src/main.rs
+expression: "format_semantic_tokens(\"CREATE TABLE t (x INT CHECK(x > 0), y TEXT DEFAULT 'hello');\")"
+snapshot_kind: text
+---
+keyword      CREATE
+keyword      TABLE
+variable     t
+operator     (
+variable     x
+type         INT
+keyword      CHECK
+operator     (
+variable     x
+operator     >
+number       0
+operator     )
+operator     ,
+variable     y
+type         TEXT
+keyword      DEFAULT
+string       'hello'
+operator     )
+operator     ;

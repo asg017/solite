@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- -- first comment
+-- -- second comment
+-- select a from t
+
+-- Output:
+-- first comment
+-- second comment
+select a from t;

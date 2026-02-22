@@ -5,32 +5,24 @@ use crate::commands::repl::completer::ReplCompleter;
 use crate::commands::repl::highlighter::{ReplHighlighter, highlight_sql};
 use crate::commands::run::format_duration;
 use crate::commands::tui::launch_tui;
-use crate::ui::CTP_MOCHA_THEME;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use solite_core::dot::sh::ShellResult;
 use rustyline::hint::HistoryHinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::{
-    Completer, CompletionType, Config, EditMode, Editor, Helper, Hinter, Result, Validator,
-};
+use rustyline::{Completer, CompletionType, Config, EditMode, Editor, Helper, Hinter, Result, Validator};
 
-use cli_table::print_stdout;
 use solite_core::dot::{DotCommand, LoadCommandSource};
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
+use solite_table::TableConfig;
 use std::borrow::Cow::{self, Borrowed, Owned};
 
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
 fn is_all_whitespace(s: &str) -> bool {
-    for c in s.chars() {
-        if !c.is_whitespace() {
-            return false;
-        }
-    }
-    true
+    s.chars().all(char::is_whitespace)
 }
 
 /// Simple matching bracket validator.
@@ -60,8 +52,8 @@ impl Validator for ReplValidator {
             return Ok(ValidationResult::Valid(None));
         }
         if input.trim_start().starts_with(".export") {
-            match input.trim_start().splitn(2, '\n').nth(1) {
-                Some(rest) => {
+            match input.trim_start().split_once('\n') {
+                Some((_, rest)) => {
                     if solite_core::sqlite::complete(rest) {
                         return Ok(ValidationResult::Valid(None));
                     } else {
@@ -106,7 +98,6 @@ struct ReplHelper {
  *   - numbers
  *   - comments
  */
-
 impl Highlighter for ReplHelper {
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
@@ -136,34 +127,58 @@ impl Highlighter for ReplHelper {
 fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) {
     match cmd {
         DotCommand::Tui(_) => {
-            launch_tui(runtime).unwrap();
+            if let Err(e) = launch_tui(runtime) {
+                eprintln!("✗ failed to launch TUI: {}", e);
+            }
         }
-        DotCommand::Dotenv(cmd) => {
-            cmd.execute();
-        }
-        
+        DotCommand::Dotenv(cmd) => match cmd.execute() {
+            Ok(result) => {
+                println!("✓ loaded {} variables from {}", result.loaded.len(), result.path.display());
+            }
+            Err(e) => {
+                eprintln!("✗ failed to load .env: {}", e);
+            }
+        },
         DotCommand::Clear(cmd) => {
             cmd.execute();
         }
-
-        DotCommand::Tables(cmd) => {
-            let tables = cmd.execute(runtime);
-            for table in tables {
-                println!("{table}");
+        DotCommand::Tables(cmd) => match cmd.execute(runtime) {
+            Ok(tables) => {
+                for table in tables {
+                    println!("{table}");
+                }
             }
-        }
-        DotCommand::Schema(cmd) => {
-            let creates = cmd.execute(runtime);
-            for create in creates {
-                println!("{}", highlight_sql(&mut create.clone()));
+            Err(e) => {
+                eprintln!("✗ failed to list tables: {}", e);
             }
-        }
-        DotCommand::Graphviz(cmd) => {
-            let dot = cmd.execute(runtime);
-            println!("{}", dot);
-        }
+        },
+        DotCommand::Schema(cmd) => match cmd.execute(runtime) {
+            Ok(creates) => {
+                for create in creates {
+                    println!("{}", highlight_sql(&create));
+                }
+            }
+            Err(e) => {
+                eprintln!("✗ failed to get schema: {}", e);
+            }
+        },
+        DotCommand::Graphviz(cmd) => match cmd.execute(runtime) {
+            Ok(dot) => {
+                println!("{}", dot);
+            }
+            Err(e) => {
+                eprintln!("✗ failed to generate graphviz: {}", e);
+            }
+        },
         DotCommand::Print(print_cmd) => print_cmd.execute(),
-        DotCommand::Open(open_cmd) => open_cmd.execute(runtime),
+        DotCommand::Open(open_cmd) => match open_cmd.execute(runtime) {
+            Ok(()) => {
+                println!("✓ opened database");
+            }
+            Err(e) => {
+                eprintln!("✗ failed to open database: {}", e);
+            }
+        },
         DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
             Ok(source) => match source {
                 LoadCommandSource::Path(path) => {
@@ -180,37 +195,60 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Timer(enabled) => *timer = enabled,
         DotCommand::Parameter(param_cmd) => match param_cmd {
             solite_core::dot::ParameterCommand::Set { key, value } => {
-                runtime.define_parameter(key.clone(), value).unwrap();
-                println!("✓ set '{key}' parameter");
+                match runtime.define_parameter(key.clone(), value) {
+                    Ok(()) => println!("✓ set '{key}' parameter"),
+                    Err(e) => eprintln!("✗ failed to set parameter '{key}': {}", e),
+                }
             }
-            solite_core::dot::ParameterCommand::Unset(_) => todo!(),
-            solite_core::dot::ParameterCommand::List => todo!(),
-            solite_core::dot::ParameterCommand::Clear => todo!(),
+            solite_core::dot::ParameterCommand::Unset(key) => {
+                eprintln!("Unset parameter not yet implemented: {}", key);
+            }
+            solite_core::dot::ParameterCommand::List => {
+                eprintln!("List parameters not yet implemented");
+            }
+            solite_core::dot::ParameterCommand::Clear => {
+                eprintln!("Clear parameters not yet implemented");
+            }
         },
-        DotCommand::Shell(shell_cmd) => {
-            match shell_cmd.execute() {
-              ShellResult::Background(child) => {
+        DotCommand::Env(env_cmd) => {
+            let action = env_cmd.execute();
+            match action {
+                solite_core::dot::EnvAction::Set { name, value: _ } => {
+                    println!("✓ set environment variable '{name}'");
+                }
+                solite_core::dot::EnvAction::Unset { name } => {
+                    println!("✓ unset environment variable '{name}'");
+                }
+            }
+        }
+        DotCommand::Shell(shell_cmd) => match shell_cmd.execute() {
+            Ok(ShellResult::Background(child)) => {
                 println!("✓ started background process with PID {}", child.id());
-              }
-              ShellResult::Stream(rx) => {
+            }
+            Ok(ShellResult::Stream(rx)) => {
                 while let Ok(msg) = rx.recv() {
                     println!("{}", msg);
                 }
-              }
             }
-        }
+            Err(e) => {
+                eprintln!("✗ shell command failed: {}", e);
+            }
+        },
         DotCommand::Ask(ask_command) => {
-            let rx = ask_command.execute(runtime).unwrap();
-            let stdout = std::io::stdout();
-            let mut handle = stdout.lock();
-
-            while let Ok(msg) = rx.recv() {
-              let msg = msg.unwrap();
-              write!(handle, "{}", msg).unwrap();
+            match ask_command.execute(runtime) {
+                Ok(rx) => {
+                    let stdout = std::io::stdout();
+                    let mut handle = stdout.lock();
+                    while let Ok(msg) = rx.recv() {
+                        if let Ok(text) = msg {
+                            let _ = write!(handle, "{}", text);
+                        }
+                    }
+                    let _ = handle.flush();
+                    println!();
+                }
+                Err(e) => eprintln!("✗ ask command failed: {}", e),
             }
-
-            handle.flush().unwrap();
-            println!();
         }
         DotCommand::Export(mut export_command) => match export_command.execute() {
             Ok(_) => println!("✓ exported to {}", export_command.target.display()),
@@ -220,11 +258,91 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                 e
             ),
         },
-        DotCommand::Vegalite(_vega_lite_command) => {
+        DotCommand::Vegalite(_) => {
             eprintln!("Vega-Lite command is not supported in the REPL yet.");
         }
-        DotCommand::Bench(_bench_command) => {
+        DotCommand::Bench(_) => {
             eprintln!("Bench command is not supported in the REPL yet.");
+        }
+        DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+        DotCommand::Run(run_cmd) => {
+            if let Some(ref proc_name) = run_cmd.procedure {
+                for (key, value) in &run_cmd.parameters {
+                    if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
+                        eprintln!("✗ failed to set parameter {}: {}", key, e);
+                        return;
+                    }
+                }
+                if let Err(e) = runtime.load_file(&run_cmd.file) {
+                    eprintln!("✗ failed to load file '{}': {}", run_cmd.file, e);
+                    return;
+                }
+                let proc = match runtime.get_procedure(proc_name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        eprintln!("✗ unknown procedure: '{}'", proc_name);
+                        return;
+                    }
+                };
+                match runtime.prepare_with_parameters(&proc.sql) {
+                    Ok((_, Some(stmt))) => {
+                        let config = solite_table::TableConfig::terminal();
+                        if let Err(e) = solite_table::print_statement(&stmt, &config) {
+                            eprintln!("✗ failed to execute procedure: {}", e);
+                        }
+                    }
+                    Ok((_, None)) => {
+                        eprintln!("✗ procedure '{}' prepared to empty statement", proc_name);
+                    }
+                    Err(e) => {
+                        eprintln!("✗ failed to prepare procedure '{}': {:?}", proc_name, e);
+                    }
+                }
+            } else {
+                let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("✗ {}", e);
+                        return;
+                    }
+                };
+                loop {
+                    match runtime.next_stepx() {
+                        None => break,
+                        Some(Ok(step)) => match step.result {
+                            StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
+                            StepResult::ProcedureDefinition(ref proc) => {
+                                println!("Registered procedure: {}", proc.name);
+                            }
+                            StepResult::SqlStatement { stmt, .. } => {
+                                let start = std::time::Instant::now();
+                                let config = solite_table::TableConfig::terminal();
+                                if let Err(e) = solite_table::print_statement(&stmt, &config) {
+                                    eprintln!("✗ failed to print table: {}", e);
+                                }
+                                if *timer {
+                                    println!(
+                                        "{}",
+                                        crate::colors::italic_gray(format_duration(start.elapsed()))
+                                    );
+                                }
+                            }
+                        },
+                        Some(Err(error)) => match error {
+                            StepError::Prepare {
+                                error,
+                                file_name,
+                                src,
+                                offset,
+                            } => {
+                                crate::errors::report_error(&file_name, &src, &error, Some(offset));
+                            }
+                            StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
+                        },
+                    }
+                }
+                runtime.run_file_end(saved);
+            }
         }
     }
 }
@@ -237,19 +355,16 @@ fn repl_editor_command() -> anyhow::Result<String> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
     let mut tmpfile = std::env::temp_dir();
     tmpfile.push("solite_repl.sql");
-    std::fs::write(&tmpfile, "").unwrap();
-    let status = std::process::Command::new(editor)
+    std::fs::write(&tmpfile, "")?;
+    let status = std::process::Command::new(&editor)
         .arg(&tmpfile)
-        .status()
-        .unwrap();
+        .status()?;
+    let code = std::fs::read_to_string(&tmpfile);
+    let _ = std::fs::remove_file(&tmpfile);
     if status.success() {
-        let code = std::fs::read_to_string(&tmpfile).unwrap();
-        let _ = std::fs::remove_file(&tmpfile);
-        Ok(code)
+        Ok(code?)
     } else {
-        let _ = std::fs::remove_file(&tmpfile);
-        eprintln!("Editor exited with non-zero status");
-        Err(anyhow::anyhow!("Editor exited with non-zero status"))
+        Err(anyhow::anyhow!("Editor '{}' exited with non-zero status", editor))
     }
 }
 
@@ -258,12 +373,15 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
     let mut code = code.to_owned();
     if REPL_SPECIAL_COMMANDS.contains(&code.trim()) {
         match code.trim() {
-            "\\e" => {
-                code = repl_editor_command().unwrap();
-            }
+            "\\e" => match repl_editor_command() {
+                Ok(editor_code) => code = editor_code,
+                Err(e) => {
+                    eprintln!("✗ editor command failed: {}", e);
+                    return;
+                }
+            },
             _ => unreachable!(),
         }
-        return;
     }
     runtime.enqueue("[repl]", &code, BlockSource::Repl);
 
@@ -271,12 +389,17 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
         match runtime.next_stepx() {
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
+                StepResult::ProcedureDefinition(ref proc) => {
+                    println!("Registered procedure: {}", proc.name);
+                }
                 StepResult::SqlStatement { stmt, .. } => {
                     let start = std::time::Instant::now();
-
-                    // TODO error handle
-                    if let Ok(Some(table)) = crate::ui::table_from_statement(&stmt, Some(&CTP_MOCHA_THEME)) {
-                        print_stdout(table).unwrap();
+                    let config = TableConfig::terminal();
+                    match solite_table::print_statement(&stmt, &config) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("✗ failed to print table: {}", e);
+                        }
                     }
                     if *timer {
                         println!(
@@ -296,7 +419,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                 } => {
                     crate::errors::report_error(&file_name, &src, &error, Some(offset));
                 }
-                StepError::ParseDot(error) => eprintln!("todo parse dot error {error:?}"),
+                StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
             },
         }
     }
@@ -317,7 +440,6 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     let rc_runtime = Rc::new(RefCell::new(runtime));
 
     let mut timer = true;
-    // `()` can be used when no completer is required
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .edit_mode(EditMode::Emacs)
@@ -327,10 +449,10 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
         completer: ReplCompleter::new(Rc::clone(&rc_runtime)),
         highlighter: ReplHighlighter::new(),
         hinter: HistoryHinter {},
-        colored_prompt: "".to_owned(),
+        colored_prompt: String::new(),
         validator: ReplValidator::new(),
     };
-    let x = Rc::clone(&rc_runtime);
+    let runtime_ref = Rc::clone(&rc_runtime);
     rl.set_helper(Some(helper));
 
     let connection_info = match &args.database {
@@ -339,7 +461,7 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     };
 
     let prelude = format!(
-        "Solite {} (SQLite {})
+        "Solite {} (SQLite {}-prerelease)
 Enter \".help\" for usage hints.
 {}",
         env!("CARGO_PKG_VERSION"),
@@ -348,20 +470,23 @@ Enter \".help\" for usage hints.
     );
     println!("{prelude}");
 
-    let solite_history_path =
-        std::path::Path::new(std::env::var("HOME").unwrap().as_str()).join(".solite_history");
+    let solite_history_path = std::env::var("HOME")
+        .map(|home| std::path::PathBuf::from(home).join(".solite_history"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(".solite_history"));
 
     let _ = std::fs::File::create_new(&solite_history_path);
+    let _ = rl.load_history(&solite_history_path);
 
     loop {
-        let prompt = if x.borrow().connection.in_transaction() {
+        let prompt = if runtime_ref.borrow().connection.in_transaction() {
             PROMPT_TRANSACTION
         } else {
             PROMPT
         };
-        rl.helper_mut().unwrap().colored_prompt = crate::colors::cyan(prompt).to_string();
+        if let Some(helper) = rl.helper_mut() {
+            helper.colored_prompt = crate::colors::cyan(prompt).to_string();
+        }
 
-        rl.load_history(&solite_history_path).unwrap();
         let readline = rl.readline(prompt);
         match readline {
             Ok(line) => {
@@ -371,15 +496,15 @@ Enter \".help\" for usage hints.
                     .or_else(|| line.as_str().strip_prefix(PROMPT_TRANSACTION))
                     .unwrap_or(&line);
                 {
-                    let mut q: RefMut<'_, Runtime> = RefCell::borrow_mut(&x); //x.borrow_mut();
-                    execute(&mut q, &mut timer, line);
+                    let mut rt = runtime_ref.borrow_mut();
+                    execute(&mut rt, &mut timer, line);
                 }
-                rl.add_history_entry(line).unwrap();
-                rl.append_history(&solite_history_path).unwrap();
+                let _ = rl.add_history_entry(line);
+                let _ = rl.append_history(&solite_history_path);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("^C");
-                x.borrow().connection.interrupt();
+                runtime_ref.borrow().connection.interrupt();
                 break;
             }
             Err(ReadlineError::Eof) => {
@@ -387,7 +512,7 @@ Enter \".help\" for usage hints.
                 break;
             }
             Err(err) => {
-                println!("Error: {:?}", err);
+                eprintln!("Error: {:?}", err);
                 break;
             }
         }

@@ -1,0 +1,27 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(\"-- name: xxx\\nselect 1, 2, 3;\")"
+snapshot_kind: text
+---
+setup: []
+exports:
+  - name: xxx
+    result_type: Rows
+    sql: "select 1, 2, 3;"
+    parameters: []
+    columns:
+      - name: "1"
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~
+      - name: "2"
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~
+      - name: "3"
+        origin_database: ~
+        origin_table: ~
+        origin_column: ~
+        decltype: ~

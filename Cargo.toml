@@ -6,7 +6,16 @@ members = [
     "crates/solite-core",
     "crates/solite-stdlib",
     "crates/solite-lexer",
-    "crates/solite-mcp",
+    "crates/solite-ast",
+    "crates/solite-parser",
+    "crates/solite-analyzer",
+    "crates/solite-schema",
+    "crates/solite-fmt",
+    "crates/solite-lsp",
+    "crates/solite-fmt-wasm",
+    "crates/solite-mdtest",
+    "crates/solite-completion",
+    "crates/solite-table",
 ]
 
 [workspace.dependencies]

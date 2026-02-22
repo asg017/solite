@@ -14,7 +14,12 @@ clap = {version = "4.4.2", features=["derive", "string"]}
 solite-core = {path="../solite-core"}
 solite-stdlib = {path="../solite-stdlib"}
 solite-lexer = {path="../solite-lexer"}
-solite-mcp = {path="../solite-mcp"}
+solite-fmt = {path="../solite-fmt"}
+solite-analyzer = {path="../solite-analyzer"}
+solite-parser = {path="../solite-parser"}
+solite-lsp = {path="../solite-lsp"}
+solite-completion = {path="../solite-completion"}
+solite-table = {path="../solite-table"}
 rustyline = {version="12.0.0", features = ["derive"]}
 futures = "0.3"
 anyhow.workspace = true
@@ -25,7 +30,6 @@ uuid = {version="1.4", features=["v4"]}
 tempfile = "3.8.0"
 
 termcolor = "1.3.0"
-cli-table = "0.4"
 lazy_static = "1.4.0"
 serde_with = "3.8.1"
 codespan-reporting = "0.11.1"
@@ -36,18 +40,18 @@ console = "0.15.10"
 pathdiff = "0.2.3"
 regex = "1.11.1"
 indicatif.workspace = true
+libsqlite3-sys.workspace = true
 
 # solite docs
 markdown = "1.0.0-alpha.23"
 mdast_util_to_markdown = "0.0.1"
 crossterm = "0.29.0"
 jiff = "0.2.14"
-thiserror = "2.0.12"
 statistical = "1.0.0"
 
-runtimelib = { version = "0.25.0", features = ["tokio-runtime"] }
-jupyter-protocol = "0.6.0"
-nbformat = "0.11.0"
+runtimelib = { version = "1.2.0", features = ["tokio-runtime"] }
+jupyter-protocol = "1.2.0"
+nbformat = "1.0.0"
 html-builder = "0.5.1"
 ratatui = "0.30.0-alpha.5"
 arboard.workspace = true

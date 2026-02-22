@@ -1,0 +1,23 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select generated, always, stored, analyze, explain, reindex, returning, vacuum, pragma, database, attach, detach from t
+
+-- Output:
+select
+  generated,
+  always,
+  stored,
+  analyze,
+  explain,
+  reindex,
+  "returning",
+  vacuum,
+  pragma,
+  database,
+  attach,
+  detach
+from t;

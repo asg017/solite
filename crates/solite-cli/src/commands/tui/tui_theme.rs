@@ -25,7 +25,7 @@ pub(crate) struct TuiTheme {
 
 use crate::themes::ctp_mocha_colors;
 
-pub(crate) const CTP_MOCHA_THEME: LazyLock<TuiTheme> = LazyLock::new(|| TuiTheme {
+pub(crate) static CTP_MOCHA_THEME: LazyLock<TuiTheme> = LazyLock::new(|| TuiTheme {
   base: ctp_mocha_colors::BASE.clone(),
   keycap: ctp_mocha_colors::GREEN.clone(),
 
@@ -45,6 +45,7 @@ pub(crate) const CTP_MOCHA_THEME: LazyLock<TuiTheme> = LazyLock::new(|| TuiTheme
 
 });
 
+#[allow(dead_code)]
 pub(crate) static BUILTIN_THEMES: LazyLock<Vec<(&'static str, TuiTheme)>> = LazyLock::new(|| vec![
   (
     "ctp-mocha",

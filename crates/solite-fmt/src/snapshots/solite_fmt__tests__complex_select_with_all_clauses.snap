@@ -1,0 +1,26 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- with cte as (select x from y) select distinct a, b, count(*) as cnt from t inner join u on t.id = u.id where a > 1 and b < 10 group by a, b having count(*) > 5 order by cnt desc limit 100 offset 10
+
+-- Output:
+with
+  cte as (
+    select x from y
+  )
+select distinct
+  a,
+  b,
+  count(*) as cnt
+from t
+inner join u
+  on t.id = u.id
+where a > 1
+  and b < 10
+group by a, b
+having count(*) > 5
+order by cnt desc
+limit 100 offset 10;

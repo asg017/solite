@@ -1,0 +1,14 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- with action as (select 1 as id) select * from action
+
+-- Output:
+with
+  action as (
+    select 1 as id
+  )
+select * from action;

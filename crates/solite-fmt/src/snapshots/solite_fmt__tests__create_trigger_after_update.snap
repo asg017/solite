@@ -1,0 +1,17 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create trigger tr_t after update on t for each row begin update audit set modified = datetime('now'); end
+
+-- Output:
+create trigger tr_t
+after update on t
+for each row
+begin
+  update audit
+  set
+    modified = datetime('now');
+end;

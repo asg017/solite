@@ -1,0 +1,10 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- savepoint sp1
+
+-- Output:
+savepoint sp1;

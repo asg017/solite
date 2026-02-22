@@ -1,0 +1,16 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create trigger if not exists tr_audit after insert on users begin insert into audit_log values (new.id, 'created'); end
+
+-- Output:
+create trigger if not exists tr_audit
+after insert on users
+begin
+  insert into audit_log
+  values
+    (new.id, 'created');
+end;

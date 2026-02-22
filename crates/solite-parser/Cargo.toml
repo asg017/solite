@@ -1,0 +1,13 @@
+[package]
+name = "solite-parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solite-lexer = { path = "../solite-lexer" }
+solite-ast = { path = "../solite-ast" }
+thiserror = "1.0"
+ropey = "1.6"
+
+[dev-dependencies]
+insta = { workspace = true }

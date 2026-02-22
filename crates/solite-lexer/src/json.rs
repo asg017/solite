@@ -57,103 +57,104 @@ impl<'a> Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     fn read_next_kind(&mut self) -> Kind {
-        while let Some(c) = self.chars.next() {
-            match c {
-                '{' => return Kind::LBrace,
-                '}' => return Kind::RBrace,
-                '[' => return Kind::LBracket,
-                ']' => return Kind::RBracket,
-                ':' => return Kind::Colon,
-                ',' => return Kind::Comma,
-                '"' => {
-                    // Parse string
-                    loop {
-                        match self.next() {
-                            Some('\\') => {
-                                // Skip escaped character
-                                self.next();
-                            }
-                            Some('"') => break,
-                            Some(_) => continue,
-                            None => break,
+        let Some(c) = self.chars.next() else {
+            return Kind::Eof;
+        };
+
+        match c {
+            '{' => Kind::LBrace,
+            '}' => Kind::RBrace,
+            '[' => Kind::LBracket,
+            ']' => Kind::RBracket,
+            ':' => Kind::Colon,
+            ',' => Kind::Comma,
+            '"' => {
+                // Parse string
+                loop {
+                    match self.next() {
+                        Some('\\') => {
+                            // Skip escaped character
+                            self.next();
                         }
+                        Some('"') => break,
+                        Some(_) => continue,
+                        None => break,
                     }
-                    return Kind::String;
                 }
-                '-' | '0'..='9' => {
-                    // Parse number
-                    // Can be: integer, decimal, or exponential notation
-                    while let Some(ch) = self.peek() {
-                        match ch {
-                            '0'..='9' | '.' | 'e' | 'E' | '+' | '-' => {
-                                self.next();
-                            }
-                            _ => break,
+                Kind::String
+            }
+            '-' | '0'..='9' => {
+                // Parse number
+                // Can be: integer, decimal, or exponential notation
+                while let Some(ch) = self.peek() {
+                    match ch {
+                        '0'..='9' | '.' | 'e' | 'E' | '+' | '-' => {
+                            self.next();
                         }
+                        _ => break,
                     }
-                    return Kind::Number;
                 }
-                't' => {
-                    // Check for 'true'
-                    if self.peek() == Some('r') {
+                Kind::Number
+            }
+            't' => {
+                // Check for 'true'
+                if self.peek() == Some('r') {
+                    self.next();
+                    if self.peek() == Some('u') {
                         self.next();
-                        if self.peek() == Some('u') {
+                        if self.peek() == Some('e') {
+                            self.next();
+                            return Kind::True;
+                        }
+                    }
+                }
+                Kind::Unknown
+            }
+            'f' => {
+                // Check for 'false'
+                if self.peek() == Some('a') {
+                    self.next();
+                    if self.peek() == Some('l') {
+                        self.next();
+                        if self.peek() == Some('s') {
                             self.next();
                             if self.peek() == Some('e') {
                                 self.next();
-                                return Kind::True;
+                                return Kind::False;
                             }
                         }
                     }
-                    return Kind::Unknown;
                 }
-                'f' => {
-                    // Check for 'false'
-                    if self.peek() == Some('a') {
-                        self.next();
-                        if self.peek() == Some('l') {
-                            self.next();
-                            if self.peek() == Some('s') {
-                                self.next();
-                                if self.peek() == Some('e') {
-                                    self.next();
-                                    return Kind::False;
-                                }
-                            }
-                        }
-                    }
-                    return Kind::Unknown;
-                }
-                'n' => {
-                    // Check for 'null'
-                    if self.peek() == Some('u') {
-                        self.next();
-                        if self.peek() == Some('l') {
-                            self.next();
-                            if self.peek() == Some('l') {
-                                self.next();
-                                return Kind::Null;
-                            }
-                        }
-                    }
-                    return Kind::Unknown;
-                }
-                ' ' | '\n' | '\t' | '\r' => {
-                    // Consume all consecutive whitespace
-                    while let Some(ch) = self.peek() {
-                        match ch {
-                            ' ' | '\n' | '\t' | '\r' => {
-                                self.next();
-                            }
-                            _ => break,
-                        }
-                    }
-                    return Kind::Whitespace;
-                }
-                _ => return Kind::Unknown,
+                Kind::Unknown
             }
+            'n' => {
+                // Check for 'null'
+                if self.peek() == Some('u') {
+                    self.next();
+                    if self.peek() == Some('l') {
+                        self.next();
+                        if self.peek() == Some('l') {
+                            self.next();
+                            return Kind::Null;
+                        }
+                    }
+                }
+                Kind::Unknown
+            }
+            ' ' | '\n' | '\t' | '\r' => {
+                // Consume all consecutive whitespace
+                while let Some(ch) = self.peek() {
+                    match ch {
+                        ' ' | '\n' | '\t' | '\r' => {
+                            self.next();
+                        }
+                        _ => break,
+                    }
+                }
+                Kind::Whitespace
+            }
+            _ => Kind::Unknown,
         }
-        Kind::Eof
     }
 
     fn read_next_token(&mut self, string_context: Option<StringContext>) -> Token<'a> {
@@ -257,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_json_lexer() {
-        let tests = vec![
+        let tests = [
             r#"{"name": "John", "age": 30}"#,
             r#"[1, 2, 3, 4, 5]"#,
             r#"{"active": true, "inactive": false, "data": null}"#,
@@ -273,7 +274,7 @@ mod tests {
             let tokens = tokenize(test);
             let v: Vec<String> = tokens
                 .iter()
-                .map(|t| (&test[t.start..t.end]).to_string())
+                .map(|t| test[t.start..t.end].to_string())
                 .collect();
             let result: Vec<(&String, &Token)> = v.iter().zip(&tokens).collect();
             insta::assert_debug_snapshot!(format!("json_test_{i}"), result);

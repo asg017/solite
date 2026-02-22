@@ -4,6 +4,7 @@ name = "solite-lexer"
 edition = "2021"
 
 [dependencies]
+logos = "0.14"
 serde = {version="1", features=["derive"]}
 
 [dev-dependencies]

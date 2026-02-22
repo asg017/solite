@@ -1,0 +1,139 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        CreateTable(
+            CreateTableStmt {
+                temporary: false,
+                if_not_exists: false,
+                schema: None,
+                table_name: "Game Settings",
+                columns: [
+                    ColumnDef {
+                        name: "user ID",
+                        type_name: Some(
+                            "INTEGER",
+                        ),
+                        constraints: [
+                            PrimaryKey {
+                                order: None,
+                                conflict: None,
+                                autoincrement: false,
+                                span: Span {
+                                    start: 65,
+                                    end: 76,
+                                },
+                            },
+                        ],
+                        doc: None,
+                        span: Span {
+                            start: 47,
+                            end: 76,
+                        },
+                    },
+                    ColumnDef {
+                        name: "Auto save",
+                        type_name: Some(
+                            "BOOLEAN",
+                        ),
+                        constraints: [],
+                        doc: None,
+                        span: Span {
+                            start: 94,
+                            end: 113,
+                        },
+                    },
+                ],
+                table_constraints: [],
+                table_options: [],
+                as_select: None,
+                doc: None,
+                span: Span {
+                    start: 0,
+                    end: 128,
+                },
+            },
+        ),
+        Select(
+            SelectStmt {
+                with_clause: None,
+                distinct: All,
+                columns: [
+                    Expr {
+                        expr: Ident(
+                            "user ID",
+                            true,
+                            Span {
+                                start: 148,
+                                end: 157,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 148,
+                            end: 157,
+                        },
+                    },
+                ],
+                from: Some(
+                    FromClause {
+                        tables: [
+                            Table {
+                                schema: None,
+                                name: "Game Settings",
+                                alias: None,
+                                alias_has_as: false,
+                                indexed: None,
+                                span: Span {
+                                    start: 163,
+                                    end: 178,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 158,
+                            end: 178,
+                        },
+                    },
+                ),
+                where_clause: Some(
+                    Binary {
+                        left: Ident(
+                            "Auto save",
+                            true,
+                            Span {
+                                start: 185,
+                                end: 196,
+                            },
+                        ),
+                        op: Eq,
+                        right: Integer(
+                            1,
+                            Span {
+                                start: 199,
+                                end: 203,
+                            },
+                        ),
+                        span: Span {
+                            start: 185,
+                            end: 203,
+                        },
+                    },
+                ),
+                group_by: None,
+                having: None,
+                compounds: [],
+                order_by: None,
+                limit: None,
+                span: Span {
+                    start: 141,
+                    end: 204,
+                },
+            },
+        ),
+    ],
+}

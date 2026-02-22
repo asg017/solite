@@ -3,7 +3,7 @@ source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 snapshot_kind: text
 ---
-"t2 2 rows                          Solite TUI                          q to quit"
+"t2 (2+ rows)                         Solite                       ? help  q quit"
 "c1              c2              c3               c4              c5             "
 "              1               2                3               4               5"
 "a               b               c                d               e              "
@@ -20,6 +20,6 @@ snapshot_kind: text
 "                                                                                "
 "                                                                                "
 "                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
+"                                 Row 1 of 2+ ⠋                                  "
+"────────────────────────────────────────────────────────────────────────────────"
+"   h/j/k/l navigate  Enter view row  [ sort asc  ] desc  │    y/c copy  q back  "

@@ -1,0 +1,19 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- with recursive cnt(x) as (select 1 union all select x+1 from cnt where x < 10) select x from cnt
+
+-- Output:
+with recursive
+  cnt(x) as (
+    select 1
+    union all
+    select
+      x + 1
+    from cnt
+    where x < 10
+  )
+select x from cnt;

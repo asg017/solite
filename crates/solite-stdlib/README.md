@@ -39,6 +39,44 @@ These functions, virtual table modules, and collations are provided by two diffe
 - sqlar
 - zipfile
 
+## Bumping the SQLite version
+
+SQLite source code lives in a git submodule at `vendor/sqlite`. To bump
+to a new version:
+
+1. **Update the submodule** to the desired version tag:
+   ```bash
+   cd vendor/sqlite
+   git fetch --depth 1 origin tag version-X.Y.Z
+   git checkout version-X.Y.Z
+   cd ../..
+   ```
+
+2. **Update `.gitmodules`** — change the `branch` field to match:
+   ```ini
+   branch = version-X.Y.Z
+   ```
+
+3. **Rebuild the amalgamation** — the old `sqlite3.c` must be cleaned
+   and regenerated (requires `tclsh`, included on macOS by default;
+   `apt install tcl` on Linux):
+   ```bash
+   cd vendor/sqlite
+   make clean
+   rm -f sqlite3.c sqlite3.h shell.c sqlite3ext.h
+   make sqlite3.h
+   make sqlite3.c
+   cd ../..
+   ```
+
+4. **Verify the build**:
+   ```bash
+   cargo build -p solite-stdlib
+   ```
+
+5. **Commit** the submodule pointer, `.gitmodules`, and any `build.rs`
+   changes together.
+
 TODO
 
 - sqlite-fastrand

@@ -1,0 +1,17 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- with cte1 as (select a from t), cte2 as (select b from u) select * from cte1, cte2
+
+-- Output:
+with
+  cte1 as (
+    select a from t
+  ),
+  cte2 as (
+    select b from u
+  )
+select * from cte1, cte2;

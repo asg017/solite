@@ -1,0 +1,10 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- alter table t rename to t2
+
+-- Output:
+alter table t rename to t2;

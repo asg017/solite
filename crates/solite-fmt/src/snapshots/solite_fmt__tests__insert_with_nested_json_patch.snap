@@ -1,0 +1,34 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- INSERT INTO _history_json_items (timestamp, operation, pk_id, updated_values, [group]) VALUES (strftime('%Y-%m-%d %H:%M:%f', 'now'), 'update', NEW.id, json_patch(json_patch(json_patch('{}', CASE WHEN OLD.name IS NOT NEW.name THEN CASE WHEN NEW.name IS NULL THEN json_object('name', json_object('null', 1)) ELSE json_object('name', NEW.name) END ELSE '{}' END), CASE WHEN OLD.price IS NOT NEW.price THEN CASE WHEN NEW.price IS NULL THEN json_object('price', json_object('null', 1)) ELSE json_object('price', NEW.price) END ELSE '{}' END), CASE WHEN OLD.quantity IS NOT NEW.quantity THEN CASE WHEN NEW.quantity IS NULL THEN json_object('quantity', json_object('null', 1)) ELSE json_object('quantity', NEW.quantity) END ELSE '{}' END), (SELECT id FROM _history_json WHERE current = 1))
+
+-- Output:
+insert into _history_json_items(timestamp, operation, pk_id, updated_values, "group")
+values
+  (strftime('%Y-%m-%d %H:%M:%f', 'now'), 'update', NEW.id, json_patch(json_patch(json_patch('{}', case
+    when OLD.name is not NEW.name then case
+      when NEW.name is null then json_object('name', json_object('null', 1))
+      else json_object('name', NEW.name)
+    end
+    else '{}'
+  end), case
+    when OLD.price is not NEW.price then case
+      when NEW.price is null then json_object('price', json_object('null', 1))
+      else json_object('price', NEW.price)
+    end
+    else '{}'
+  end), case
+    when OLD.quantity is not NEW.quantity then case
+      when NEW.quantity is null then json_object('quantity', json_object('null', 1))
+      else json_object('quantity', NEW.quantity)
+    end
+    else '{}'
+  end), (
+    select id
+    from _history_json
+    where current = 1
+  ));

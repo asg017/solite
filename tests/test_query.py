@@ -44,13 +44,13 @@ def test_query_value(solite_cli):
 
     assert (
         solite_cli(["q", "select 1 limit 0", "-f", "value"]).stderr
-        == "No rows returned in query.\n"
+        == "Error: Execution failed: No rows returned in query\n"
     )
     assert (
         solite_cli(
             ["q", "select column1 from (values (1), (2));", "-f", "value"]
         ).stderr
-        == "More than 1 query returned, exepcted a single row. Try a `LIMIT 1`\n"
+        == "Error: Execution failed: More than 1 row returned, expected a single row. Try a `LIMIT 1`\n"
     )
 
 

@@ -1,0 +1,50 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        Insert(
+            InsertStmt {
+                with_clause: None,
+                or_action: None,
+                schema: None,
+                table_name: "users",
+                alias: None,
+                columns: Some(
+                    [
+                        "name",
+                        "email",
+                    ],
+                ),
+                source: Values(
+                    [
+                        [
+                            String(
+                                "Alice",
+                                Span {
+                                    start: 40,
+                                    end: 47,
+                                },
+                            ),
+                            String(
+                                "alice@example.com",
+                                Span {
+                                    start: 49,
+                                    end: 68,
+                                },
+                            ),
+                        ],
+                    ],
+                ),
+                upsert: None,
+                returning: None,
+                span: Span {
+                    start: 0,
+                    end: 70,
+                },
+            },
+        ),
+    ],
+}

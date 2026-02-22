@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- update t set a = u.b from u where t.id = u.id
+
+-- Output:
+update t
+set
+  a = u.b
+from u
+where t.id = u.id;

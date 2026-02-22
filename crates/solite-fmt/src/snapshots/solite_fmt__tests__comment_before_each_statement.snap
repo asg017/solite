@@ -1,0 +1,22 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- -- first query
+-- select a from t;
+-- -- second query
+-- select b from u;
+-- -- third query
+-- select c from v
+
+-- Output:
+-- first query
+select a from t;
+
+-- second query
+select b from u;
+
+-- third query
+select c from v;

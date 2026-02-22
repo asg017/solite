@@ -59,21 +59,22 @@ impl SqlTheme {
       let mut style_spec = termcolor::ColorSpec::new();
       style_spec.set_fg(Some(self.parameter.clone().into()));
       style_spec
-    }).to_string()  
+    }).to_string()
   }
+  #[allow(dead_code)]
   fn style_types(&self, s: &str) -> String {
     sql_highlighter::style(s, &{
       let mut style_spec = termcolor::ColorSpec::new();
       style_spec.set_fg(Some(self.types.clone().into()));
       style_spec
-    }).to_string()  
+    }).to_string()
   }
   fn style_string(&self, s: &str) -> String {
     sql_highlighter::style(s, &{
       let mut style_spec = termcolor::ColorSpec::new();
       style_spec.set_fg(Some(self.string.clone().into()));
       style_spec
-    }).to_string()  
+    }).to_string()
   }
   fn style_function(&self, s: &str) -> String {
     sql_highlighter::style(s, &{
@@ -82,6 +83,7 @@ impl SqlTheme {
       style_spec
     }).to_string()
   }
+  #[allow(dead_code)]
   fn style_builtin(&self, s: &str) -> String {
     sql_highlighter::style(s, &{
       let mut style_spec = termcolor::ColorSpec::new();
@@ -110,18 +112,15 @@ impl SqlTheme {
       style_spec
     }).to_string()
   }
-  
+
 }
 
 pub mod sql_highlighter {
     use core::fmt;
     use std::io::Write;
-    use std::sync::OnceLock;
     use termcolor::Ansi;
     use termcolor::WriteColor;
-    use termcolor::{Color, ColorSpec};
-
-    const KEYWORD_COLOR: Color = Color::Rgb(203, 166, 247);
+    use termcolor::ColorSpec;
 
     pub fn style<S: AsRef<str>>(s: S, colorspec: &ColorSpec) -> impl fmt::Display {
         let mut v = Vec::new();
@@ -131,225 +130,117 @@ pub mod sql_highlighter {
         ansi_writer.reset().unwrap();
         String::from_utf8_lossy(&v).into_owned()
     }
-    /*
-    pub(crate) fn keyword<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static KEYWORD: OnceLock<ColorSpec> = OnceLock::new();
-        let k = KEYWORD.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(KEYWORD_COLOR)); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn dot<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static DOT: OnceLock<ColorSpec> = OnceLock::new();
-        let k = DOT.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(139, 213, 202))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn comment<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static COMMENT: OnceLock<ColorSpec> = OnceLock::new();
-        let k = COMMENT.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(148, 156, 187))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn parameter<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static PARAMETER: OnceLock<ColorSpec> = OnceLock::new();
-        let k = PARAMETER.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(235, 160, 172))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn types<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static TYPES: OnceLock<ColorSpec> = OnceLock::new();
-        let k = TYPES.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(249, 226, 175))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn string<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static STRING: OnceLock<ColorSpec> = OnceLock::new();
-        let k = STRING.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(166, 209, 137))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn function<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static FUNCTION: OnceLock<ColorSpec> = OnceLock::new();
-        let k = FUNCTION.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(138, 173, 244))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn builtin<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static BUILTIN: OnceLock<ColorSpec> = OnceLock::new();
-        let k = BUILTIN.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec
-                .set_fg(Some(Color::Rgb(138, 173, 244)))
-                .set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn paren<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static PAREN: OnceLock<ColorSpec> = OnceLock::new();
-        let k = PAREN.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(243, 139, 168))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn operator<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static OPERATOR: OnceLock<ColorSpec> = OnceLock::new();
-        let k = OPERATOR.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(137, 220, 235))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-    pub(crate) fn number<S: AsRef<str>>(s: S) -> impl fmt::Display {
-        static NUMBER: OnceLock<ColorSpec> = OnceLock::new();
-        let k = NUMBER.get_or_init(|| {
-            let mut style_spec = ColorSpec::new();
-            style_spec.set_fg(Some(Color::Rgb(245, 169, 127))); //.set_bold(true);
-            style_spec
-        });
-        style(s, k)
-    }
-     */
 }
 
-use solite_lexer::{tokenize, Kind, Token};
+use solite_lexer::{lex, Token, TokenKind};
 
 use crate::themes::{SoliteColor, ctp_mocha_colors};
-pub fn highlight_sql(copy: &mut String) -> String {
-    let tokens = tokenize(copy.as_str());
+
+pub fn highlight_sql(sql: &str) -> String {
+    let tokens = lex(sql);
     let mut hl = String::new();
     let mut iter = tokens.iter().peekable();
     let mut prevs: Vec<&Token> = vec![];
+    let mut prev_end = 0usize;
     let theme = CTP_MOCHA_THEME.clone();
+
     while let Some(token) = iter.next() {
+        // Emit any whitespace/characters between tokens as plain text
+        if token.span.start > prev_end {
+            hl.push_str(&sql[prev_end..token.span.start]);
+        }
         let s = match token.kind {
-            Kind::Comment => theme.style_comment(
-                &copy[token.start..token.end]
-            ), //sql_highlighter::comment(&copy[token.start..token.end]).to_string(),
-            Kind::Parameter => {
-                //sql_highlighter::parameter(&copy[token.start..token.end]).to_string()
-                theme.style_parameter(&copy[token.start..token.end])
+            // Comments (line and block)
+            TokenKind::Comment | TokenKind::BlockComment => {
+                theme.style_comment(&sql[token.span.clone()])
             }
-            Kind::Text | Kind::Int | Kind::Float | Kind::Blob | Kind::Bit => {
-                //sql_highlighter::types(&copy[token.start..token.end]).to_string()
-                theme.style_types(&copy[token.start..token.end])
+            // Bind parameters (all 4 variants)
+            TokenKind::BindParam
+            | TokenKind::BindParamColon
+            | TokenKind::BindParamAt
+            | TokenKind::BindParamDollar => theme.style_parameter(&sql[token.span.clone()]),
+            // Numbers (integer, float, hex)
+            TokenKind::Integer | TokenKind::Float | TokenKind::HexInteger => {
+                theme.style_number(&sql[token.span.clone()])
             }
-            Kind::Number => theme.style_number(&copy[token.start..token.end]).to_string(),
-            Kind::Plus | Kind::Minus | Kind::Eof | Kind::Pipe | Kind::Div | Kind::Lt | Kind::Gt => {
-                //sql_highlighter::operator(&copy[token.start..token.end]).to_string()
-                theme.style_operator(&copy[token.start..token.end])
+            // Operators
+            TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Pipe
+            | TokenKind::Slash
+            | TokenKind::Lt
+            | TokenKind::Gt
+            | TokenKind::Le
+            | TokenKind::Ge
+            | TokenKind::Eq
+            | TokenKind::EqEq
+            | TokenKind::Ne
+            | TokenKind::BangEq
+            | TokenKind::Ampersand
+            | TokenKind::Tilde
+            | TokenKind::LShift
+            | TokenKind::RShift
+            | TokenKind::Concat
+            | TokenKind::Percent => theme.style_operator(&sql[token.span.clone()]),
+            // String literals
+            TokenKind::String | TokenKind::Blob => theme.style_string(&sql[token.span.clone()]),
+            // Punctuation (no styling)
+            TokenKind::Star
+            | TokenKind::LBracket
+            | TokenKind::RBracket
+            | TokenKind::Comma
+            | TokenKind::Semicolon
+            | TokenKind::Dot => sql[token.span.clone()].to_string(),
+            // Parentheses
+            TokenKind::LParen | TokenKind::RParen => theme.style_paren(&sql[token.span.clone()]),
+            // JSON operators
+            TokenKind::Arrow | TokenKind::ArrowArrow => {
+                theme.style_operator(&sql[token.span.clone()])
             }
-            Kind::String => //sql_highlighter::string(&copy[token.start..token.end]).to_string(),
-                theme.style_string(&copy[token.start..token.end]),
-            Kind::Asterisk
-            | Kind::LBracket
-            | Kind::RBracket
-            | Kind::Comma
-            | Kind::Semicolon
-            | Kind::Dot
-            | Kind::Unknown => (&copy[token.start..token.end]).to_string(),
-            Kind::LParen | Kind::RParen => {
-                //sql_highlighter::paren(&copy[token.start..token.end]).to_string()
-                theme.style_paren(&copy[token.start..token.end])
-            }
-            Kind::SingleArrowOperator | Kind::DoubleArrowOperator => {
-                //sql_highlighter::builtin(&copy[token.start..token.end]).to_string()
-                // TODO builtin
-                theme.style_operator(&copy[token.start..token.end])
-            }
-            Kind::Identifier => {
-                // if the next token is a '('
-                if matches!(iter.peek().map(|v| v.kind), Some(Kind::LParen))
-                // and the previous token is NOT 'using' or 'table'
-                    && !(matches!(prevs.last().map(|t| t.kind), Some(Kind::Using) | Some(Kind::Table)))
+            // Identifiers (regular and quoted)
+            TokenKind::Ident
+            | TokenKind::QuotedIdent
+            | TokenKind::BracketIdent
+            | TokenKind::BacktickIdent => {
+                // If the next token is a '(' and previous token is NOT 'using' or 'table'
+                if matches!(iter.peek().map(|v| v.kind), Some(TokenKind::LParen))
+                    && !matches!(
+                        prevs.last().map(|t| t.kind),
+                        Some(TokenKind::Using) | Some(TokenKind::Table)
+                    )
                 {
                     if BUILTIN_FUNCTIONS
                         .iter()
-                        .position(|r| *r == (&copy[token.start..token.end]).trim())
-                        .is_some()
+                        .any(|r| *r == sql[token.span.clone()].trim())
                     {
-                        //sql_highlighter::builtin(&copy[token.start..token.end]).to_string()
-                        theme.style_operator(&copy[token.start..token.end])
+                        theme.style_operator(&sql[token.span.clone()])
                     } else {
-                        //sql_highlighter::function(&copy[token.start..token.end]).to_string()
-                        theme.style_function(
-                            &copy[token.start..token.end]
-                        ) 
+                        theme.style_function(&sql[token.span.clone()])
                     }
                 } else {
-                    (&copy[token.start..token.end]).to_string()
+                    sql[token.span.clone()].to_string()
                 }
             }
-            _ => //sql_highlighter::keyword(&copy[token.start..token.end]).to_string(),
-                theme.style_keyword(
-                    &copy[token.start..token.end]
-                )
+            // Everything else is a keyword
+            _ => theme.style_keyword(&sql[token.span.clone()]),
         };
-        hl.push_str(s.as_str());
+        hl.push_str(&s);
+        prev_end = token.span.end;
         prevs.push(token);
     }
-    hl
-
-    /*
-    let keywords = [
-        "select",
-        "from",
-        "where",
-        "group by",
-        "order by",
-        "limit",
-        "offset",
-        "with",
-        "create",
-        "table",
-        "insert",
-        "into",
-        "returning",
-    ];
-    for kw in keywords.iter() {
-        if let Some(s) = copy.find(kw) {
-            //copy.replace_range(s..s + kw.len(), &format!("\x1b[1;34m{}\x1b[0m", kw));
-            copy.replace_range(
-                s..s + kw.len(),
-                sql_highlighter::keyword(kw).to_string().as_str(),
-            );
-        }
+    // Emit any trailing content after the last token
+    if prev_end < sql.len() {
+        hl.push_str(&sql[prev_end..]);
     }
-     */
+    hl
 }
 pub fn highlight_dot(copy: &mut String) {
     let keywords = ["load", "tables", "open", "export"];
     for kw in keywords.iter() {
         if let Some(s) = copy.find(kw) {
-            //copy.replace_range(s..s + kw.len(), &format!("\x1b[1;34m{}\x1b[0m", kw));
             copy.replace_range(
                 s..s + kw.len(),
                 CTP_MOCHA_THEME.style_dot(kw).as_str(),
-                //sql_highlighter::dot(kw).to_string().as_str(),
             );
         }
     }
@@ -366,18 +257,16 @@ impl ReplHighlighter {
 }
 impl Highlighter for ReplHighlighter {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        //println!("highlight pos={}", pos);
         if line.len() <= 1 {
             return Borrowed(line);
         }
-        let mut copy = line.to_owned();
         if line.starts_with('.') {
+            let mut copy = line.to_owned();
             highlight_dot(&mut copy);
+            Owned(copy)
         } else {
-            return Owned(highlight_sql(&mut copy));
+            Owned(highlight_sql(line))
         }
-        return Owned(copy);
-        //Borrowed(line)
     }
 
     fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
@@ -390,9 +279,9 @@ mod tests {
     use insta::assert_binary_snapshot;
 
     use super::*;
-    
+
     fn sql_html(s: &str) -> String {
-        let result = ansi_to_html::convert(&highlight_sql(&mut s.to_string())).unwrap();
+        let result = ansi_to_html::convert(&highlight_sql(s)).unwrap();
         format!("<html><body>{result}</body></html>")
     }
 
@@ -401,7 +290,6 @@ mod tests {
     }
     #[test]
     fn it_works() {
-        //assert_binary_snapshot!(".html", sql_html("select 1, 'asdf', sqlite_version() from t;").into());
         assert_sql_snapshot("select 1, 'asdf', sqlite_version() from t;");
         assert_sql_snapshot(r#"
         -- single line comment
@@ -411,5 +299,28 @@ mod tests {
         insert into t (id, name) values (1, 'Alice'), (2, 'Bob');
         select id, name from t where id = 1;
         "#);
+    }
+
+    /// Strip ANSI escape codes from a string to get the plain text
+    fn strip_ansi(s: &str) -> String {
+        let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        re.replace_all(s, "").to_string()
+    }
+
+    #[test]
+    fn test_whitespace_preservation() {
+        // The highlighted output, when stripped of ANSI codes, should match the input exactly
+        let inputs = [
+            "select 1 + 2;",
+            "select   1   +   2;",
+            "SELECT * FROM users WHERE id = 1;",
+            "select\n  a,\n  b\nfrom t;",
+            "select 1, 2, 3 from t where x > 10",
+        ];
+        for input in inputs {
+            let highlighted = highlight_sql(input);
+            let plain = strip_ansi(&highlighted);
+            assert_eq!(plain, input, "Whitespace not preserved for: {:?}", input);
+        }
     }
 }

@@ -1,0 +1,15 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select 123, 45.67, 1e10, 0x1F from t
+
+-- Output:
+select
+  123,
+  45.67,
+  1 e10,
+  0x1F
+from t;

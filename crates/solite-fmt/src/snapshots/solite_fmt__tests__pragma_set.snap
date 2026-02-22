@@ -1,0 +1,10 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- pragma foreign_keys = 1
+
+-- Output:
+pragma foreign_keys = 1;

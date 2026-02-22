@@ -1,0 +1,16 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select glob, regexp, match, escape, like from t
+
+-- Output:
+select
+  "glob",
+  regexp,
+  match,
+  escape,
+  "like"
+from t;

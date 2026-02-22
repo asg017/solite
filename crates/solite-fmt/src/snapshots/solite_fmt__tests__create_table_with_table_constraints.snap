@@ -1,0 +1,16 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table t (a integer, b integer, c integer, primary key (a, b), unique (c))
+
+-- Output:
+create table t(
+  a integer,
+  b integer,
+  c integer,
+  primary key(a, b),
+  unique(c)
+);

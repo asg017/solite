@@ -1,0 +1,89 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        CreateTable(
+            CreateTableStmt {
+                temporary: false,
+                if_not_exists: false,
+                schema: None,
+                table_name: "users",
+                columns: [
+                    ColumnDef {
+                        name: "id",
+                        type_name: Some(
+                            "INTEGER",
+                        ),
+                        constraints: [
+                            PrimaryKey {
+                                order: None,
+                                conflict: None,
+                                autoincrement: false,
+                                span: Span {
+                                    start: 31,
+                                    end: 42,
+                                },
+                            },
+                        ],
+                        doc: None,
+                        span: Span {
+                            start: 20,
+                            end: 42,
+                        },
+                    },
+                    ColumnDef {
+                        name: "name",
+                        type_name: Some(
+                            "TEXT",
+                        ),
+                        constraints: [
+                            NotNull {
+                                conflict: None,
+                                span: Span {
+                                    start: 54,
+                                    end: 62,
+                                },
+                            },
+                        ],
+                        doc: None,
+                        span: Span {
+                            start: 44,
+                            end: 62,
+                        },
+                    },
+                    ColumnDef {
+                        name: "email",
+                        type_name: Some(
+                            "TEXT",
+                        ),
+                        constraints: [
+                            Unique {
+                                conflict: None,
+                                span: Span {
+                                    start: 75,
+                                    end: 81,
+                                },
+                            },
+                        ],
+                        doc: None,
+                        span: Span {
+                            start: 64,
+                            end: 81,
+                        },
+                    },
+                ],
+                table_constraints: [],
+                table_options: [],
+                as_select: None,
+                doc: None,
+                span: Span {
+                    start: 0,
+                    end: 83,
+                },
+            },
+        ),
+    ],
+}

@@ -1,0 +1,14 @@
+---
+source: crates/solite_fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- select a, count(*) from t group by a
+
+-- Output:
+select
+  a,
+  count(*)
+from t
+group by a;

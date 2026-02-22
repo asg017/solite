@@ -1,0 +1,51 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        CreateTable(
+            CreateTableStmt {
+                temporary: false,
+                if_not_exists: false,
+                schema: None,
+                table_name: "my table",
+                columns: [
+                    ColumnDef {
+                        name: "column one",
+                        type_name: Some(
+                            "TEXT",
+                        ),
+                        constraints: [],
+                        doc: None,
+                        span: Span {
+                            start: 25,
+                            end: 42,
+                        },
+                    },
+                    ColumnDef {
+                        name: "column two",
+                        type_name: Some(
+                            "INT",
+                        ),
+                        constraints: [],
+                        doc: None,
+                        span: Span {
+                            start: 44,
+                            end: 60,
+                        },
+                    },
+                ],
+                table_constraints: [],
+                table_options: [],
+                as_select: None,
+                doc: None,
+                span: Span {
+                    start: 0,
+                    end: 62,
+                },
+            },
+        ),
+    ],
+}

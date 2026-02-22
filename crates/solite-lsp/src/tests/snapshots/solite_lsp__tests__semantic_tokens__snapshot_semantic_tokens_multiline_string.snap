@@ -1,0 +1,10 @@
+---
+source: crates/solite-lsp/src/tests/semantic_tokens.rs
+expression: "format_semantic_tokens(\"SELECT 'hello\\nworld\\n!';\")"
+snapshot_kind: text
+---
+keyword      SELECT
+string       'hello
+string       world
+string       !'
+operator     ;

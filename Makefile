@@ -12,7 +12,8 @@ test-pytest:
 	uv run --project tests pytest -vv
 
 test-snap:
-	SOLITE_SNAPSHOT_DIRECTORY=tests/__solite_snaps__ cargo run -- snap test tests/snaps
+	cargo run -- test --update tests/snaps/snap1.sql
+	cargo run -- test --update tests/snaps/snap2.sql
 
 .PHONY: test test-cargo test-pytest test-snap
 

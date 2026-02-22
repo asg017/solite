@@ -1,0 +1,10 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create index idx_many on t(a, b, c, d, e)
+
+-- Output:
+create index idx_many on t(a, b, c, d, e);

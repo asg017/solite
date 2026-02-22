@@ -5,6 +5,7 @@ snapshot_kind: text
 ---
 Ok:
   preamble: "\n/* inline! */ "
+  epilogue: ~
   result:
     SqlStatement:
       stmt: {}

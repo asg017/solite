@@ -1,0 +1,72 @@
+---
+source: crates/solite_parser/src/lib.rs
+expression: program
+snapshot_kind: text
+---
+Program {
+    statements: [
+        Select(
+            SelectStmt {
+                with_clause: None,
+                distinct: All,
+                columns: [
+                    Expr {
+                        expr: Integer(
+                            1,
+                            Span {
+                                start: 7,
+                                end: 8,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 7,
+                            end: 8,
+                        },
+                    },
+                    Expr {
+                        expr: String(
+                            "hello",
+                            Span {
+                                start: 10,
+                                end: 17,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 10,
+                            end: 17,
+                        },
+                    },
+                    Expr {
+                        expr: Null(
+                            Span {
+                                start: 19,
+                                end: 23,
+                            },
+                        ),
+                        alias: None,
+                        alias_has_as: false,
+                        span: Span {
+                            start: 19,
+                            end: 23,
+                        },
+                    },
+                ],
+                from: None,
+                where_clause: None,
+                group_by: None,
+                having: None,
+                compounds: [],
+                order_by: None,
+                limit: None,
+                span: Span {
+                    start: 0,
+                    end: 24,
+                },
+            },
+        ),
+    ],
+}

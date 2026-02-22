@@ -1,0 +1,16 @@
+[package]
+name = "solite-fmt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solite-ast = { path = "../solite-ast" }
+solite-parser = { path = "../solite-parser" }
+solite-lexer = { path = "../solite-lexer" }
+solite-schema = { path = "../solite-schema" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+similar = "2"
+
+[dev-dependencies]
+insta = { workspace = true }

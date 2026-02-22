@@ -1,0 +1,18 @@
+---
+source: crates/solite_lsp/src/main.rs
+expression: "format_semantic_tokens(\"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\")"
+snapshot_kind: text
+---
+keyword      CREATE
+keyword      TABLE
+variable     users
+operator     (
+variable     id
+type         INTEGER
+keyword      PRIMARY
+keyword      KEY
+operator     ,
+variable     name
+type         TEXT
+operator     )
+operator     ;

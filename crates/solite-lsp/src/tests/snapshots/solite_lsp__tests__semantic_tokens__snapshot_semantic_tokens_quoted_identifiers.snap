@@ -1,0 +1,18 @@
+---
+source: crates/solite_lsp/src/main.rs
+expression: "format_semantic_tokens(\"CREATE TABLE \\\"Game Settings\\\" (\\n  \\\"user ID\\\" INTEGER PRIMARY KEY,\\n  \\\"Auto save\\\" BOOLEAN\\n);\")"
+snapshot_kind: text
+---
+keyword      CREATE
+keyword      TABLE
+variable     "Game Settings"
+operator     (
+variable     "user ID"
+type         INTEGER
+keyword      PRIMARY
+keyword      KEY
+operator     ,
+variable     "Auto save"
+type         BOOLEAN
+operator     )
+operator     ;

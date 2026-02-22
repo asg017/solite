@@ -76,7 +76,14 @@ jobs:
           target: armv7-unknown-linux-gnueabihf
           manylinux: 2_17
           args: --release --locked --out crates/solite-cli/dist -b bin -m crates/solite-cli/Cargo.toml
-          before-script-linux: yum install -y readline-devel openssl-devel
+          before-script-linux: |
+            dpkg --add-architecture armhf
+            echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy main universe" >> /etc/apt/sources.list
+            echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main universe" >> /etc/apt/sources.list
+            apt-get update
+            apt-get install -y libreadline-dev:armhf libssl-dev:armhf
+            export OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf
+            export OPENSSL_INCLUDE_DIR=/usr/include/arm-linux-gnueabihf
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheels_solite-linux-armv7

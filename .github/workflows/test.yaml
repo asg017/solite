@@ -58,3 +58,21 @@ jobs:
       - run: cargo build -p solite-cli --target armv7-unknown-linux-gnueabihf --features vendored-openssl
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+  cross-compile-armv7-maturin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: PyO3/maturin-action@b1bd829e37fef14c63f19162034228a2f3dc1021 # v1
+        with:
+          target: armv7-unknown-linux-gnueabihf
+          manylinux: 2_28
+          args: --release --locked --out crates/solite-cli/dist -b bin -m crates/solite-cli/Cargo.toml --features vendored-openssl
+          before-script-linux: |
+            dpkg --add-architecture armhf
+            sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
+            echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy main universe" >> /etc/apt/sources.list
+            echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main universe" >> /etc/apt/sources.list
+            apt-get update
+            apt-get install -y libreadline-dev:armhf

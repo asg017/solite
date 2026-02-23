@@ -74,7 +74,7 @@ jobs:
       - uses: PyO3/maturin-action@b1bd829e37fef14c63f19162034228a2f3dc1021 # v1
         with:
           target: armv7-unknown-linux-gnueabihf
-          manylinux: 2_17
+          manylinux: 2_28
           args: --release --locked --out crates/solite-cli/dist -b bin -m crates/solite-cli/Cargo.toml --features vendored-openssl
           before-script-linux: |
             dpkg --add-architecture armhf

@@ -83,8 +83,10 @@ jobs:
             echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main universe" >> /etc/apt/sources.list
             apt-get update
             apt-get install -y libreadline-dev:armhf
-            export CFLAGS_armv7_unknown_linux_gnueabihf="-I/usr/include/arm-linux-gnueabihf"
-            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS="-L /usr/lib/arm-linux-gnueabihf"
+            SYSROOT=$(armv7-unknown-linux-gnueabihf-gcc --print-sysroot)
+            cp -r /usr/include/arm-linux-gnueabihf/readline "$SYSROOT/usr/include/"
+            cp /usr/lib/arm-linux-gnueabihf/libreadline* "$SYSROOT/usr/lib/"
+            cp /usr/lib/arm-linux-gnueabihf/libtinfo* "$SYSROOT/usr/lib/"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheels_solite-linux-armv7

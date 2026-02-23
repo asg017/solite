@@ -59,10 +59,7 @@ color-eyre = "0.6.5"
 ansi-width = "0.1.0"
 dotenvy = "0.15.7"
 
-openssl = { version = "0.10", optional = true, features = ["vendored"] }
-
-[features]
-vendored-openssl = ["dep:openssl"]
+#[features]
 #default = ["jupyter"]
 #jupyer = []
 [dev-dependencies]

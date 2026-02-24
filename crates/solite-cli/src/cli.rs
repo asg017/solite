@@ -383,6 +383,7 @@ const HELP_TEMPLATE: &str = "\
 
 Options:
 {options}
+
 Scripting and Query Execution:
   run              Run SQL scripts
   repl             Start a REPL on a SQLite database

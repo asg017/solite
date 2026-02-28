@@ -24,6 +24,7 @@ snapshot_kind: text
 - rtree
 - rtree_i32
 - spellfix1
+- sqlite_dbpage
 - sqlite_stmt
 - str_bytes
 - str_chars

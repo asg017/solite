@@ -43,9 +43,14 @@ fn build_amalgamation_if_needed(sqlite_dir: &Path) -> PathBuf {
             panic!("./configure failed in sqlite submodule");
         }
 
+        // SQLITE_ENABLE_UPDATE_DELETE_LIMIT changes the SQL grammar, so it
+        // must be present when Lemon generates parse.c — i.e. during
+        // amalgamation creation, not just at compile time.
+        let make_opts = "OPTS=-DSQLITE_ENABLE_UPDATE_DELETE_LIMIT";
+
         // sqlite3.h must be built before sqlite3.c due to Makefile dependency ordering
         let status = Command::new("make")
-            .arg("sqlite3.h")
+            .args(["sqlite3.h", make_opts])
             .current_dir(sqlite_dir)
             .status()
             .expect("Failed to run make sqlite3.h in sqlite submodule");
@@ -54,7 +59,7 @@ fn build_amalgamation_if_needed(sqlite_dir: &Path) -> PathBuf {
         }
 
         let status = Command::new("make")
-            .arg("sqlite3.c")
+            .args(["sqlite3.c", make_opts])
             .current_dir(sqlite_dir)
             .status()
             .expect("Failed to run make sqlite3.c in sqlite submodule");
@@ -128,6 +133,7 @@ fn main() {
         .define("SQLITE_ENABLE_EXPLAIN_COMMENTS", None)
         .define("SQLITE_ENABLE_STMT_SCANSTATUS", None)
         .define("SQLITE_ENABLE_COLUMN_METADATA", None)
+        .define("SQLITE_ENABLE_UPDATE_DELETE_LIMIT", None)
         .warnings(false);
     if !cfg!(target_os = "windows") {
         sqlite_build.static_flag(true);

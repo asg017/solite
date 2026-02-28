@@ -155,6 +155,15 @@ fn print_completion_status(stmt: &Statement, reference: &str, elapsed: Duration)
         ResetColor,
         Print("\n")
     );
+
+    for line in status.trigger_effect_lines() {
+        let _ = execute!(
+            stdout(),
+            SetForegroundColor(Color::DarkGrey),
+            Print(format!("  ↳ {}\n", line)),
+            ResetColor,
+        );
+    }
 }
 
 /// Record trace steps to the trace database.

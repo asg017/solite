@@ -7,7 +7,7 @@ use std::ptr::{self};
 use std::str::Utf8Error;
 use std::{ffi::CString, os::raw::c_char};
 
-pub use libsqlite3_sys::sqlite3_stmt;
+pub use libsqlite3_sys::{sqlite3_sql, sqlite3_stmt};
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/json.c#L126
 pub const JSON_SUBTYPE: u32 = 74;
 
@@ -433,7 +433,7 @@ pub struct BytecodeStep {
     pub p4: String,
     pub p5: i64,
     pub comment: String,
-    pub subprog: i64,
+    pub subprog: String,
     pub nexec: i64,
     pub ncycle: i64,
 }
@@ -470,7 +470,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
                     let p4 = row.value_at(5).as_str().to_owned();
                     let p5 = row.value_at(6).as_int64();
                     let comment = row.value_at(7).as_str().to_owned();
-                    let subprog = row.value_at(8).as_int64();
+                    let subprog = row.value_at(8).as_str().to_owned();
                     let nexec = row.value_at(9).as_int64();
                     let ncycle = row.value_at(10).as_int64();
                     steps.push(BytecodeStep {

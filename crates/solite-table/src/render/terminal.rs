@@ -392,12 +392,10 @@ mod tests {
             ColumnInfo::new("age".to_string()),
         ];
 
-        let rows = vec![
-            vec![
-                CellValue::new("Alice".to_string(), ValueType::Text, Alignment::Left),
-                CellValue::new("30".to_string(), ValueType::Integer, Alignment::Right),
-            ],
-        ];
+        let rows = vec![vec![
+            CellValue::new("Alice".to_string(), ValueType::Text, Alignment::Left),
+            CellValue::new("30".to_string(), ValueType::Integer, Alignment::Right),
+        ]];
 
         let layout = TableLayout::all_visible(vec![5, 3]);
         let config = TableConfig::plain();
@@ -410,5 +408,62 @@ mod tests {
         assert!(output.contains("30"));
         assert!(output.contains("┌"));
         assert!(output.contains("└"));
+    }
+
+    fn render_plain(
+        columns: Vec<ColumnInfo>,
+        rows: Vec<Vec<CellValue>>,
+        col_widths: Vec<usize>,
+    ) -> String {
+        let total_rows = rows.len();
+        let layout = TableLayout::all_visible(col_widths);
+        let config = TableConfig::plain();
+        render_terminal(&columns, &rows, &[], &layout, &config, total_rows)
+    }
+
+    #[test]
+    fn test_render_newlines_in_values() {
+        let mut col = ColumnInfo::new("value".to_string());
+        let cell =
+            CellValue::new("line 1\nline 2\nline 3".to_string(), ValueType::Text, Alignment::Left);
+        col.observe_width(cell.width);
+
+        let w = col.display_width();
+        let output = render_plain(vec![col], vec![vec![cell]], vec![w]);
+        insta::assert_snapshot!(output);
+    }
+
+    #[test]
+    fn test_render_newlines_in_header() {
+        let mut col = ColumnInfo::new("col\nwith\nnewlines".to_string());
+        let cell = CellValue::new("data".to_string(), ValueType::Text, Alignment::Left);
+        col.observe_width(cell.width);
+
+        let w = col.display_width();
+        let output = render_plain(vec![col], vec![vec![cell]], vec![w]);
+        insta::assert_snapshot!(output);
+    }
+
+    #[test]
+    fn test_render_tabs_in_values() {
+        let mut col = ColumnInfo::new("value".to_string());
+        let cell = CellValue::new("col1\tcol2".to_string(), ValueType::Text, Alignment::Left);
+        col.observe_width(cell.width);
+
+        let w = col.display_width();
+        let output = render_plain(vec![col], vec![vec![cell]], vec![w]);
+        insta::assert_snapshot!(output);
+    }
+
+    #[test]
+    fn test_render_crlf_in_values() {
+        let mut col = ColumnInfo::new("value".to_string());
+        let cell =
+            CellValue::new("line 1\r\nline 2".to_string(), ValueType::Text, Alignment::Left);
+        col.observe_width(cell.width);
+
+        let w = col.display_width();
+        let output = render_plain(vec![col], vec![vec![cell]], vec![w]);
+        insta::assert_snapshot!(output);
     }
 }

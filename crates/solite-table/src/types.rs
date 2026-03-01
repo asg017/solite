@@ -36,6 +36,8 @@ pub struct CellValue {
 
 impl CellValue {
     pub fn new(display: String, value_type: ValueType, alignment: Alignment) -> Self {
+        // Replace control characters that would break table layout
+        let display = escape_control_chars(&display);
         let width = display_width(&display);
         Self {
             display,
@@ -84,6 +86,7 @@ pub struct ColumnInfo {
 
 impl ColumnInfo {
     pub fn new(name: String) -> Self {
+        let name = escape_control_chars(&name);
         let header_width = display_width(&name);
         Self {
             name,
@@ -132,6 +135,16 @@ impl TableLayout {
     pub fn shown_columns(&self) -> usize {
         self.visible_columns.len()
     }
+}
+
+/// Replace control characters that would break table layout with escape representations.
+fn escape_control_chars(s: &str) -> String {
+    if !s.contains(['\n', '\r', '\t']) {
+        return s.to_string();
+    }
+    s.replace('\r', "\\r")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
 }
 
 /// Calculate display width of a string, handling Unicode properly.

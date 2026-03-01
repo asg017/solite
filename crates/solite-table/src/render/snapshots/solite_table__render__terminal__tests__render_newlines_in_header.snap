@@ -1,0 +1,11 @@
+---
+source: crates/solite-table/src/render/terminal.rs
+expression: output
+snapshot_kind: text
+---
+┌─────────────────────┐
+│ col\nwith\nnewlines │
+├─────────────────────┤
+│ data                │
+└─────────────────────┘
+1 column × 1 row

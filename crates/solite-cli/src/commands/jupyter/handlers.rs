@@ -241,6 +241,37 @@ async fn handle_dot_command_inner(
                 }
             }
         }
+        #[cfg(feature = "ritestream")]
+        DotCommand::Stream(stream_cmd) => {
+            // Extract db_path before spawn_blocking to avoid Send issues
+            let db_name = runtime.connection.db_name();
+            let msg = tokio::task::spawn_blocking(move || {
+                let db_path = match db_name {
+                    Some(ref p) => std::path::Path::new(p),
+                    None => return "Stream error: no database file open (in-memory?)".to_string(),
+                };
+                match &stream_cmd.action {
+                    solite_core::dot::StreamAction::Sync { url } => {
+                        match ritestream_api::sync(url, db_path) {
+                            Ok(Some(r)) => {
+                                format!("Synced (txid={}, {} pages)", r.txid, r.page_count)
+                            }
+                            Ok(None) => "Nothing to sync (database empty or missing)".to_string(),
+                            Err(e) => format!("Stream sync error: {}", e),
+                        }
+                    }
+                    solite_core::dot::StreamAction::Restore { url } => {
+                        match ritestream_api::restore(url, db_path) {
+                            Ok(()) => format!("Restored from {}", url),
+                            Err(e) => format!("Stream restore error: {}", e),
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|e| format!("Stream task error: {}", e));
+            sender.send_plain(msg, parent).await?;
+        }
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {

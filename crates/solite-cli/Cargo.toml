@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = {version = "4.4.2", features=["derive", "string"]}
-solite-core = {path="../solite-core"}
+solite-core = {path="../solite-core", default-features = false}
 solite-stdlib = {path="../solite-stdlib"}
 solite-lexer = {path="../solite-lexer"}
 solite-fmt = {path="../solite-fmt"}
@@ -59,9 +59,14 @@ color-eyre = "0.6.5"
 ansi-width = "0.1.0"
 dotenvy = "0.15.7"
 
-#[features]
-#default = ["jupyter"]
-#jupyer = []
+[features]
+default = ["ritestream"]
+ritestream = ["solite-core/ritestream", "dep:ritestream-api"]
+
+[dependencies.ritestream-api]
+git = "https://github.com/asg017/litestream-rust"
+optional = true
+
 [dev-dependencies]
 insta.workspace = true
 ansi-to-html = "0.2.2"

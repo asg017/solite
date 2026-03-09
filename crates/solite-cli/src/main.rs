@@ -59,6 +59,8 @@ fn main() {
         cli::Commands::Schema(args) => commands::schema::schema(args.database),
         cli::Commands::Backup(args) => commands::backup::backup(args),
         cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),
+        #[cfg(feature = "ritestream")]
+        cli::Commands::Stream(cmd) => commands::stream::stream(cmd),
     };
     match result {
         Ok(_) => exit(0),

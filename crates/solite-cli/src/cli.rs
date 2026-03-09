@@ -312,6 +312,40 @@ impl VacuumArgs {
     }
 }
 
+#[cfg(feature = "ritestream")]
+#[derive(Args, Debug)]
+pub struct StreamNamespace {
+    #[command(subcommand)]
+    pub command: StreamCommand,
+}
+
+#[cfg(feature = "ritestream")]
+#[derive(Subcommand, Debug)]
+pub enum StreamCommand {
+    /// Sync WAL changes to a replica
+    Sync(StreamSyncArgs),
+    /// Restore a database from a replica
+    Restore(StreamRestoreArgs),
+}
+
+#[cfg(feature = "ritestream")]
+#[derive(Args, Debug)]
+pub struct StreamSyncArgs {
+    /// Path to the database file
+    pub database: PathBuf,
+    /// Replica URL (s3://bucket/prefix, file:///path, or bare path)
+    pub url: String,
+}
+
+#[cfg(feature = "ritestream")]
+#[derive(Args, Debug)]
+pub struct StreamRestoreArgs {
+    /// Replica URL (s3://bucket/prefix, file:///path, or bare path)
+    pub url: String,
+    /// Destination database path
+    pub database: PathBuf,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -373,6 +407,10 @@ pub enum Commands {
 
     /// Rebuild a database file, repacking it into minimal disk space
     Vacuum(VacuumArgs),
+
+    /// Streaming replication, like litestream
+    #[cfg(feature = "ritestream")]
+    Stream(StreamNamespace),
 }
 
 const HELP_TEMPLATE: &str = "\
@@ -405,6 +443,9 @@ SQL:
   format           Format SQL files
   lint             Lint SQL files for potential issues
   lsp              Start the Language Server Protocol (LSP) server
+
+Replication:
+  stream           Streaming replication (sync/restore)
 
 Compatibility:
   sqlite3          Run the sqlite3 shell directly

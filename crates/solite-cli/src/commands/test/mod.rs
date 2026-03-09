@@ -344,6 +344,10 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
                 rt.run_file_end(saved);
             }
         }
+        #[cfg(feature = "ritestream")]
+        DotCommand::Stream(_) => {
+            eprintln!("Warning: .stream command not supported in test mode");
+        }
         other => {
             eprintln!("Warning: Unhandled dot command in test: {:?}", other);
         }

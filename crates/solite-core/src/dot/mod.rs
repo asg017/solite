@@ -47,6 +47,9 @@ mod timer;
 mod tui;
 mod vegalite;
 
+#[cfg(feature = "ritestream")]
+pub mod stream;
+
 pub use crate::dot::{
     ask::AskCommand,
     bench::BenchCommand,
@@ -67,6 +70,8 @@ pub use crate::dot::{
     tui::TuiCommand,
     vegalite::VegaLiteCommand,
 };
+#[cfg(feature = "ritestream")]
+pub use stream::{StreamAction, StreamCommand, StreamSyncResult};
 pub use load::LoadCommandSource;
 
 use crate::Runtime;
@@ -175,6 +180,10 @@ pub enum DotCommand {
     Call(CallCommand),
     /// Run a SQL file inline.
     Run(RunCommand),
+
+    /// Stream replication command.
+    #[cfg(feature = "ritestream")]
+    Stream(StreamCommand),
 }
 
 /// Parse a boolean value from string.
@@ -285,6 +294,30 @@ pub fn parse_dot<S: Into<String>>(
                 procedure,
                 parameters,
             }))
+        }
+        #[cfg(feature = "ritestream")]
+        "stream" => {
+            let tokens: Vec<&str> = args.split_whitespace().collect();
+            if tokens.len() != 2 {
+                return Err(ParseDotError::InvalidArgument(
+                    "usage: .stream sync <url> | .stream restore <url>".to_string(),
+                ));
+            }
+            let action = match tokens[0] {
+                "sync" => stream::StreamAction::Sync {
+                    url: tokens[1].to_string(),
+                },
+                "restore" => stream::StreamAction::Restore {
+                    url: tokens[1].to_string(),
+                },
+                other => {
+                    return Err(ParseDotError::InvalidArgument(format!(
+                        "unknown stream action '{}' (expected 'sync' or 'restore')",
+                        other
+                    )));
+                }
+            };
+            Ok(DotCommand::Stream(stream::StreamCommand { action }))
         }
         "call" => {
             // Strip trailing -- comment (used as epilogue in test assertions)

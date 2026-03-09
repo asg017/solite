@@ -17,3 +17,5 @@ pub mod rsync;
 pub mod schema;
 pub mod backup;
 pub mod vacuum;
+#[cfg(feature = "ritestream")]
+pub mod stream;

@@ -3,7 +3,12 @@ name = "solite-core"
 #version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["ritestream"]
+ritestream = ["dep:ritestream-api"]
+
 [dependencies]
+ritestream-api = { git = "https://github.com/asg017/litestream-rust", optional = true }
 ropey = "1.6.0"
 libsqlite3-sys.workspace = true
 indicatif.workspace = true

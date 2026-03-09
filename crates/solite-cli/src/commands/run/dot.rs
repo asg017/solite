@@ -139,6 +139,23 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
         DotCommand::Bench(_) => {
             eprintln!("Warning: .bench command not supported in run mode");
         }
+        #[cfg(feature = "ritestream")]
+        DotCommand::Stream(stream_cmd) => match stream_cmd.execute(runtime) {
+            Ok(Some(result)) => {
+                println!(
+                    "{} synced (txid={}, {} pages)",
+                    colors::green("✓"),
+                    result.txid,
+                    result.page_count
+                );
+            }
+            Ok(None) => {
+                println!("{} stream command completed", colors::green("✓"));
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+            }
+        },
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {

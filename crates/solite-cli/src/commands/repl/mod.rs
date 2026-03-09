@@ -264,6 +264,18 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Bench(_) => {
             eprintln!("Bench command is not supported in the REPL yet.");
         }
+        #[cfg(feature = "ritestream")]
+        DotCommand::Stream(stream_cmd) => match stream_cmd.execute(runtime) {
+            Ok(Some(result)) => {
+                println!("✓ synced (txid={}, {} pages)", result.txid, result.page_count);
+            }
+            Ok(None) => {
+                println!("✓ stream command completed");
+            }
+            Err(e) => {
+                eprintln!("✗ stream command failed: {}", e);
+            }
+        },
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {

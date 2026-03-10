@@ -1004,8 +1004,8 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
                 analyze_select(select, &tables, external_schema, &mut diagnostics);
             }
             Statement::CreateTable(create) => {
-                // Check for empty table (no columns)
-                if create.columns.is_empty() {
+                // Check for empty table (no columns), but not for CREATE TABLE ... AS SELECT
+                if create.columns.is_empty() && create.as_select.is_none() {
                     diagnostics.push(Diagnostic::error(
                         "CREATE TABLE must have at least one column",
                         create.span.clone(),

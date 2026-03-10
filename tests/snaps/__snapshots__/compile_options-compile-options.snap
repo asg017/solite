@@ -77,6 +77,9 @@ select * from pragma_compile_options order by 1;
 	 compile_options: 'ENABLE_RTREE'
 }
 {
+	 compile_options: 'ENABLE_STAT4'
+}
+{
 	 compile_options: 'ENABLE_STMTVTAB'
 }
 {

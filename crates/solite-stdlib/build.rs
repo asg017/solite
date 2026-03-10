@@ -135,6 +135,7 @@ fn main() {
         .define("SQLITE_ENABLE_COLUMN_METADATA", None)
         .define("SQLITE_ENABLE_UPDATE_DELETE_LIMIT", None)
         .define("SQLITE_ENABLE_DBPAGE_VTAB", None)
+        .define("SQLITE_ENABLE_STAT4", None)
         .warnings(false);
     if !cfg!(target_os = "windows") {
         sqlite_build.static_flag(true);

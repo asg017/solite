@@ -14,6 +14,7 @@ test-pytest:
 test-snap:
 	cargo run -- test --update tests/snaps/snap1.sql
 	cargo run -- test --update tests/snaps/snap2.sql
+	cargo run -- test --update tests/snaps/compile_options.sql
 
 .PHONY: test test-cargo test-pytest test-snap
 

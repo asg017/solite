@@ -1,5 +1,5 @@
 ---
-source: solite-stdlib/src/lib.rs
+source: crates/solite-stdlib/src/lib.rs
 expression: solite_only_functions
 snapshot_kind: text
 ---
@@ -24,14 +24,17 @@ snapshot_kind: text
 - ieee754
 - ieee754_exponent
 - ieee754_from_blob
+- ieee754_from_int
 - ieee754_inc
 - ieee754_mantissa
 - ieee754_to_blob
+- ieee754_to_int
 - lsmode
 - path_at
 - path_debug
 - path_version
 - readfile
+- realpath
 - regex
 - regex_capture
 - regex_debug

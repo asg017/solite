@@ -80,9 +80,11 @@ snapshot_kind: text
 - ieee754
 - ieee754_exponent
 - ieee754_from_blob
+- ieee754_from_int
 - ieee754_inc
 - ieee754_mantissa
 - ieee754_to_blob
+- ieee754_to_int
 - if
 - ifnull
 - iif
@@ -156,6 +158,7 @@ snapshot_kind: text
 - randomblob
 - rank
 - readfile
+- realpath
 - regex
 - regex_capture
 - regex_debug

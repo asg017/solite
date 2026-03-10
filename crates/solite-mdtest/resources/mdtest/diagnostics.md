@@ -81,6 +81,32 @@ select printf('%d', 1); -- ok
 select printf('%d %d', 1, 2); -- ok
 ```
 
+## Table-Valued Functions
+
+### Aliased table function reference
+
+Table-valued functions with aliases should not produce "table not found" errors.
+
+```sql
+create table t(a);
+select li.value from t, json_each(t.a) as li; -- ok
+```
+
+### Table function with qualified column and JSON operators
+
+```sql
+create table t(a);
+select
+  li.value ->> 'date' as date
+from t, json_each(t.a -> 'line_items') as li; -- ok
+```
+
+### CREATE TABLE AS SELECT
+
+```sql
+create table t3 as select 1 as value; -- ok
+```
+
 ## Parse Errors
 
 Tests for parse error detection are handled separately since

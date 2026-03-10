@@ -656,11 +656,19 @@ struct ExprContext<'a> {
     /// Function argument counts: lowercase name -> valid narg values.
     /// narg = -1 means variadic. None if not available.
     function_nargs: Option<&'a HashMap<String, Vec<i32>>>,
+    /// Table-valued function aliases whose columns are unknown at analysis time.
+    /// Qualified references to these aliases (e.g. alias.col) are accepted without validation.
+    opaque_aliases: HashSet<String>,
 }
 
 impl<'a> ExprContext<'a> {
     fn new() -> Self {
         Self::default()
+    }
+
+    /// Register a table-valued function alias with unknown columns.
+    fn add_table_function_alias(&mut self, alias: &str, _function_name: &str) {
+        self.opaque_aliases.insert(alias.to_lowercase());
     }
 
     /// Add a table to the context
@@ -685,13 +693,18 @@ impl<'a> ExprContext<'a> {
         }
     }
 
-    /// Check if a column exists in a specific table
+    /// Check if a column exists in a specific table.
+    /// Returns true if the table's columns are unknown (empty set, e.g. virtual tables
+    /// or table-valued functions) since we can't validate columns we don't know about.
     fn column_exists_in_table(&self, table_name: &str, column_name: &str) -> bool {
         let table_key = table_name.to_lowercase();
+        if self.opaque_aliases.contains(&table_key) {
+            return true;
+        }
         let col_key = column_name.to_lowercase();
 
         if let Some((_, info)) = self.available_tables.get(&table_key) {
-            info.columns.contains(&col_key) || (col_key == "rowid" && !info.without_rowid)
+            info.columns.is_empty() || info.columns.contains(&col_key) || (col_key == "rowid" && !info.without_rowid)
         } else {
             false
         }
@@ -699,7 +712,8 @@ impl<'a> ExprContext<'a> {
 
     /// Check if a table exists in the context
     fn has_table(&self, table_name: &str) -> bool {
-        self.available_tables.contains_key(&table_name.to_lowercase())
+        let key = table_name.to_lowercase();
+        self.available_tables.contains_key(&key) || self.opaque_aliases.contains(&key)
     }
 
     /// Get the original table name for error messages
@@ -766,6 +780,11 @@ fn add_table_to_context<'a>(
             if let Some(info) = table_info {
                 let effective_name = alias.as_ref().unwrap_or(name);
                 ctx.add_table(effective_name, name, info);
+            } else if let Some(alias) = alias {
+                // Table functions are runtime entities — register the alias with
+                // an empty column set so qualified references (e.g. alias.col)
+                // don't produce false "table not found" errors.
+                ctx.add_table_function_alias(alias, name);
             }
         }
         TableOrSubquery::Subquery { .. } => {

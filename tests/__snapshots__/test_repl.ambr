@@ -11,7 +11,7 @@
   
     ''',
     'stdout': '''
-      Solite REDACTED (SQLite 3.52.0-prerelease)
+      Solite REDACTED (SQLite 3.52.0)
       Enter ".help" for usage hints.
       Connected to a transient in-memory database.
       ^D
@@ -21,7 +21,7 @@
 # ---
 # name: test_repl
   '''
-  Solite VERSION (SQLite 3.52.0-prerelease)
+  Solite VERSION (SQLite 3.52.0)
   Enter ".help" for usage hints.
   Connected to a transient in-memory database.
   ┌───────┐

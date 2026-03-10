@@ -473,7 +473,7 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     };
 
     let prelude = format!(
-        "Solite {} (SQLite {}-prerelease)
+        "Solite {} (SQLite {})
 Enter \".help\" for usage hints.
 {}",
         env!("CARGO_PKG_VERSION"),

@@ -596,10 +596,23 @@ fn build_table_info_from_cte(cte: &CommonTableExpr) -> TableInfo {
         infer_cte_columns(&cte.select)
     };
 
+    // If any inferred column is a wildcard ("*" or "table.*"), we can't know the
+    // actual columns without resolving the source tables. Treat the CTE as opaque
+    // (empty column set) so that any column reference is accepted, same as virtual tables.
+    let has_wildcard = original_columns.iter().any(|c| c == "*" || c.ends_with(".*"));
+
     let mut columns = HashSet::new();
-    for col in &original_columns {
-        columns.insert(col.to_lowercase());
+    if !has_wildcard {
+        for col in &original_columns {
+            columns.insert(col.to_lowercase());
+        }
     }
+
+    let original_columns = if has_wildcard {
+        Vec::new()
+    } else {
+        original_columns
+    };
 
     TableInfo {
         columns,
@@ -723,10 +736,19 @@ impl<'a> ExprContext<'a> {
             .map(|(orig, _)| orig.as_str())
     }
 
-    /// Check if an unqualified column exists in any available table
+    /// Check if an unqualified column exists in any available table.
+    /// Returns true if any available table has unknown columns (empty set),
+    /// since we can't validate columns we don't know about.
     fn unqualified_column_exists(&self, column_name: &str) -> bool {
         let col_key = column_name.to_lowercase();
-        self.all_columns.contains_key(&col_key)
+        if self.all_columns.contains_key(&col_key) {
+            return true;
+        }
+        // If any table has unknown columns (opaque), accept any column
+        if !self.opaque_aliases.is_empty() {
+            return true;
+        }
+        self.available_tables.values().any(|(_, info)| info.columns.is_empty())
     }
 
     /// Check if context is empty (no tables available)
@@ -3584,5 +3606,37 @@ mod tests {
 
         let diagnostics = analyze(&program);
         assert!(diagnostics.is_empty(), "Column 'id' should be inferred from CTE expression, got: {:?}", diagnostics);
+    }
+
+    #[test]
+    fn test_cte_with_select_star_allows_any_column() {
+        // WITH x AS (SELECT * FROM t) SELECT a, b, c FROM x;
+        // When CTE uses SELECT *, columns can't be inferred statically,
+        // so any column reference should be accepted.
+        let source = "CREATE TABLE t(a, b, c); WITH x AS (SELECT * FROM t) SELECT a, b, c FROM x";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let diagnostics = analyze(&program);
+        assert!(diagnostics.is_empty(), "CTE with SELECT * should accept any column, got: {:?}", diagnostics);
+    }
+
+    #[test]
+    fn test_cte_with_table_star_allows_any_column() {
+        // WITH x AS (SELECT t.* FROM t) SELECT a FROM x;
+        let source = "CREATE TABLE t(a, b); WITH x AS (SELECT t.* FROM t) SELECT a FROM x";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let diagnostics = analyze(&program);
+        assert!(diagnostics.is_empty(), "CTE with table.* should accept any column, got: {:?}", diagnostics);
+    }
+
+    #[test]
+    fn test_cte_with_select_star_qualified_column() {
+        // WITH x AS (SELECT * FROM t) SELECT x.a FROM x;
+        let source = "CREATE TABLE t(a); WITH x AS (SELECT * FROM t) SELECT x.a FROM x";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let diagnostics = analyze(&program);
+        assert!(diagnostics.is_empty(), "CTE with SELECT * should accept qualified column refs, got: {:?}", diagnostics);
     }
 }

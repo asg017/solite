@@ -1378,7 +1378,6 @@ impl LanguageServer for Backend {
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![
                         " ".to_string(),
-                        ",".to_string(),
                         ".".to_string(),
                         "\n".to_string(),
                     ]),

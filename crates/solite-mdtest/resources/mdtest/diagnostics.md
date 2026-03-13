@@ -151,6 +151,26 @@ create table t(a integer, b text);
 select a, b from db1.t; -- ok
 ```
 
+## Built-in Schema Qualifiers
+
+### temp schema
+
+Tables created with CREATE TEMP TABLE can be referenced as `temp.tablename`.
+
+```sql
+create temp table t(a, b, c);
+select * from temp.t; -- ok
+```
+
+### main schema
+
+Tables can be referenced with the `main` schema qualifier.
+
+```sql
+create table t(a, b, c);
+select * from main.t; -- ok
+```
+
 ## Parse Errors
 
 Tests for parse error detection are handled separately since

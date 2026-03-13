@@ -356,7 +356,12 @@ pub fn get_completions(
                     .and_then(|t| t.schema.as_deref());
 
                 let cols = if let Some(s) = table_schema {
-                    schema.columns_for_schema_table_with_rowid(s, table_name)
+                    let s_lower = s.to_lowercase();
+                    if s_lower == "main" || s_lower == "temp" {
+                        schema.columns_for_table_with_rowid(table_name)
+                    } else {
+                        schema.columns_for_schema_table_with_rowid(s, table_name)
+                    }
                 } else {
                     schema.columns_for_table_with_rowid(table_name)
                 };
@@ -512,8 +517,15 @@ fn suggest_columns_from_tables(
                 }
             }
         } else if let Some(ref schema_name) = table_ref.schema {
-            // Schema-qualified table (e.g., from attached database)
-            if let Some(cols) = schema.columns_for_schema_table_with_rowid(schema_name, &table_ref.name) {
+            let s_lower = schema_name.to_lowercase();
+            let cols = if s_lower == "main" || s_lower == "temp" {
+                // Built-in schemas: look up table directly
+                schema.columns_for_table_with_rowid(&table_ref.name)
+            } else {
+                // Attached schema
+                schema.columns_for_schema_table_with_rowid(schema_name, &table_ref.name)
+            };
+            if let Some(cols) = cols {
                 for col in cols {
                     let qualifier = table_ref.qualifier().to_string();
                     column_sources.entry(col).or_default().push(qualifier);

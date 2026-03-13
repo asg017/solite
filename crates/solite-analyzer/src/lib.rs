@@ -861,8 +861,17 @@ fn add_table_to_context<'a>(
 ) {
     match table {
         TableOrSubquery::Table { schema: Some(s), name, alias, .. } => {
-            // Schema-qualified table: look up in attached schemas
-            let table_info = external_schema.and_then(|es| es.resolve_schema_table(s, name));
+            let s_lower = s.to_lowercase();
+            let table_info = if s_lower == "main" || s_lower == "temp" {
+                // Built-in schemas: look up in local/external tables directly
+                let table_key = name.to_lowercase();
+                cte_tables.get(&table_key)
+                    .or_else(|| local_tables.get(&table_key))
+                    .or_else(|| external_schema.and_then(|es| es.get_table(&table_key)))
+            } else {
+                // Attached schema: look up in attached schemas
+                external_schema.and_then(|es| es.resolve_schema_table(s, name))
+            };
             if let Some(info) = table_info {
                 let effective_name = alias.as_ref().unwrap_or(name);
                 ctx.add_table(effective_name, name, info);
@@ -1048,13 +1057,28 @@ fn check_unknown_tables_recursive(
 ) {
     match table {
         TableOrSubquery::Table { schema: Some(s), name, span, .. } => {
-            // Schema-qualified table: look up in attached schemas
-            let resolved = external_schema.and_then(|es| es.resolve_schema_table(s, name));
-            if resolved.is_none() {
-                diagnostics.push(Diagnostic::error(
-                    format!("Unknown table '{}.{}'", s, name),
-                    span.clone(),
-                ));
+            let s_lower = s.to_lowercase();
+            if s_lower == "main" || s_lower == "temp" {
+                // Built-in schemas: look up in local/external tables directly
+                let table_key = name.to_lowercase();
+                let table_info = cte_tables.get(&table_key)
+                    .or_else(|| local_tables.get(&table_key))
+                    .or_else(|| external_schema.and_then(|es| es.get_table(&table_key)));
+                if table_info.is_none() {
+                    diagnostics.push(Diagnostic::error(
+                        format!("Unknown table '{}.{}'", s, name),
+                        span.clone(),
+                    ));
+                }
+            } else {
+                // Attached schema: look up in attached schemas
+                let resolved = external_schema.and_then(|es| es.resolve_schema_table(s, name));
+                if resolved.is_none() {
+                    diagnostics.push(Diagnostic::error(
+                        format!("Unknown table '{}.{}'", s, name),
+                        span.clone(),
+                    ));
+                }
             }
         }
         TableOrSubquery::Table { name, span, .. } => {

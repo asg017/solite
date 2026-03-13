@@ -68,3 +68,22 @@ select users.id<hv1> from users;
 ```
 
 - `<hv1>`: "id"
+
+## Attached Database (ATTACH DATABASE)
+
+### Hover on schema name in FROM
+
+Hovering over an attached database schema name shows the schema info and tables.
+
+`attach:db1`
+
+```sql
+create table users(id integer, name text);
+create table orders(id integer, total real);
+```
+
+```sql
+select * from db1<hv1>.users;
+```
+
+- `<hv1>`: "db1", "attached database", "users", "orders"

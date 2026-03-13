@@ -93,6 +93,14 @@ pub enum ResolvedSymbol {
         /// Column names (explicit if provided, or inferred from SELECT)
         columns: Vec<String>,
     },
+    /// An attached database schema reference (e.g., `db1` in `FROM db1.table`)
+    AttachedSchema {
+        name: String,
+        /// Path or source of the attached database (e.g., file path, ":memory:")
+        path: Option<String>,
+        /// Table names in this attached schema
+        tables: Vec<String>,
+    },
 }
 
 /// Build a StatementScope from a SELECT statement
@@ -364,6 +372,33 @@ pub fn find_symbol_at_offset(
             }
             None
         }
+        Statement::Attach(attach) => {
+            // Hovering over the schema name in ATTACH DATABASE ... AS schema_name
+            // The schema name span covers the AS name
+            let name = &attach.schema_name;
+            let span = &attach.span;
+            // The schema name is at the end of the statement, after "AS "
+            // Check if cursor is within the statement span
+            if offset >= span.start && offset <= span.end {
+                if let Some(ext_schema) = schema {
+                    let path_str = if let Expr::String(ref p, _) = attach.expr {
+                        Some(p.clone())
+                    } else {
+                        ext_schema.get_attached_schema_path(name).map(|s| s.to_string())
+                    };
+                    let tables = ext_schema.table_names_in_schema(name);
+                    return Some((
+                        ResolvedSymbol::AttachedSchema {
+                            name: name.clone(),
+                            path: path_str,
+                            tables,
+                        },
+                        span.clone(),
+                    ));
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -481,8 +516,29 @@ fn find_symbol_in_table_or_subquery(
     schema: Option<&Schema>,
 ) -> Option<(ResolvedSymbol, Span)> {
     match table {
-        TableOrSubquery::Table { name, span, .. } => {
+        TableOrSubquery::Table { schema: schema_name, name, span, .. } => {
             if offset >= span.start && offset <= span.end {
+                // For schema-qualified tables (e.g., db1.table), check if cursor is on the schema part
+                if let Some(ref sn) = schema_name {
+                    // The span starts at the schema name. Schema part ends at schema_name.len()
+                    let schema_end = span.start + sn.len();
+                    if offset < schema_end {
+                        // Cursor is on the schema name
+                        if let Some(ext_schema) = schema {
+                            let path = ext_schema.get_attached_schema_path(sn).map(|s| s.to_string());
+                            let tables = ext_schema.table_names_in_schema(sn);
+                            return Some((
+                                ResolvedSymbol::AttachedSchema {
+                                    name: sn.clone(),
+                                    path,
+                                    tables,
+                                },
+                                Span::new(span.start, schema_end),
+                            ));
+                        }
+                    }
+                }
+
                 // Check if this is a CTE reference first
                 if let Some(cte_info) = scope.ctes.get(&name.to_lowercase()) {
                     // Use explicit columns if provided, otherwise use inferred columns
@@ -835,6 +891,19 @@ pub fn format_hover_content(symbol: &ResolvedSymbol, schema: Option<&Schema>) ->
             }
             content
         }
+        ResolvedSymbol::AttachedSchema { name, path, tables } => {
+            let mut content = format!("**{}** (attached database)", name);
+            if let Some(path) = path {
+                content.push_str(&format!("\n\nPath: `{}`", path));
+            }
+            if !tables.is_empty() {
+                content.push_str("\n\n**Tables:**\n");
+                for table in tables {
+                    content.push_str(&format!("- {}\n", table));
+                }
+            }
+            content
+        }
     }
 }
 
@@ -866,9 +935,10 @@ pub fn get_definition_span(symbol: &ResolvedSymbol) -> Option<Span> {
         ResolvedSymbol::TableAlias { definition_span, .. } => Some(definition_span.clone()),
         ResolvedSymbol::ColumnAlias { definition_span, .. } => Some(definition_span.clone()),
         ResolvedSymbol::Cte { definition_span, .. } => Some(definition_span.clone()),
-        // Tables and columns don't have in-document definitions (they're in schema)
+        // Tables, columns, and attached schemas don't have in-document definitions (they're in schema)
         ResolvedSymbol::Table { .. } => None,
         ResolvedSymbol::Column { .. } => None,
+        ResolvedSymbol::AttachedSchema { .. } => None,
     }
 }
 

@@ -268,3 +268,97 @@ select '{}' <ac1>;
 ```
 
 - `<ac1>`: ->, ->>
+
+
+## Attached Database (ATTACH DATABASE)
+
+### Schema names in FROM
+
+After FROM, suggest attached database names alongside regular tables.
+
+`attach:db1`
+
+```sql
+create table users(id integer, name text);
+```
+
+```sql
+create table local_table(id integer);
+
+select * from <ac1>;
+```
+
+- `<ac1>`: local_table, db1
+
+### Tables in attached schema
+
+After typing a schema qualifier (e.g., `db1.`), suggest tables from that attached database.
+
+`attach:db1`
+
+```sql
+create table users(id integer, name text);
+create table orders(id integer, total real);
+```
+
+```sql
+select * from db1.<ac1>;
+```
+
+- `<ac1>`: users, orders
+
+### Columns from attached table
+
+Columns from an attached database table should be available after FROM.
+
+`attach:mydb`
+
+```sql
+create table products(id integer, name text, price real);
+```
+
+```sql
+select <ac1> from mydb.products;
+```
+
+- `<ac1>`: id, name, price, rowid
+
+### Qualified columns from attached table
+
+Suggest columns when using alias with an attached table.
+
+`attach:db1`
+
+```sql
+create table items(id integer, name text, quantity integer);
+```
+
+```sql
+select p.<ac1> from db1.items as p;
+```
+
+- `<ac1>`: id, name, quantity, rowid
+
+### Multiple attached databases
+
+Multiple databases can be attached with different names.
+
+`attach:sales`
+
+```sql
+create table invoices(id integer, amount real);
+```
+
+`attach:inventory`
+
+```sql
+create table stock(id integer, product text, count integer);
+```
+
+```sql
+select * from sales.<ac1>;
+select * from inventory.<ac2>;
+```
+
+- `<ac1>`: invoices
+- `<ac2>`: stock

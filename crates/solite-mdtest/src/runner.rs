@@ -114,6 +114,11 @@ pub fn run_test(test: &MdTest) -> Result<TestResult, MdTestError> {
     let mut all_markers: Vec<(usize, Marker)> = Vec::new(); // (file_index, marker)
 
     for (i, file) in test.files.iter().enumerate() {
+        // Skip attach:name files from combined SQL — they define external schemas
+        if file.path.as_ref().is_some_and(|p| p.starts_with("attach:")) {
+            continue;
+        }
+
         // Adjust marker offsets for combined SQL
         for marker in &file.markers {
             let mut adjusted_marker = marker.clone();
@@ -132,6 +137,16 @@ pub fn run_test(test: &MdTest) -> Result<TestResult, MdTestError> {
     let (functions, function_nargs) = discover_function_metadata();
     schema.set_functions(functions);
     schema.set_function_nargs(function_nargs);
+
+    // Process attach:name files — build their DDL as attached schemas
+    for file in &test.files {
+        if let Some(ref path) = file.path {
+            if let Some(schema_name) = path.strip_prefix("attach:") {
+                let attached = extract_schema_from_ddl(&file.clean_content);
+                schema.attach_schema(schema_name, attached);
+            }
+        }
+    }
 
     // Check marker assertions
     for assertion in &test.assertions {

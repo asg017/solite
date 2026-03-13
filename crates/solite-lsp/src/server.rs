@@ -12,8 +12,7 @@ use solite_analyzer::{
     format_hover_content, get_definition_span, lint_with_config, Diagnostic, LintConfig,
     LintDiagnostic, LintResult, RuleSeverity, Schema, Severity,
 };
-use solite_ast::Program;
-use solite_ast::Span;
+use solite_ast::{Expr, Program, Span, Statement};
 use solite_lexer::{lex, TokenKind};
 use solite_fmt::{FormatConfig, IndentStyle, format_document};
 use solite_parser::parse_program;
@@ -481,6 +480,25 @@ impl Backend {
                                 external_schema.merge(schema);
                             }
                         }
+                        // Process ATTACH DATABASE statements
+                        if let Ok(ref program) = doc.program {
+                            for stmt in &program.statements {
+                                if let Statement::Attach(attach) = stmt {
+                                    if let Expr::String(ref path, _) = attach.expr {
+                                        let db_path = if let Some(ref base) = base_path {
+                                            let path_buf = PathBuf::from(path);
+                                            if path_buf.is_absolute() { path_buf } else { base.join(path) }
+                                        } else {
+                                            PathBuf::from(path)
+                                        };
+                                        let provider = FileSchemaProvider::new(&db_path);
+                                        if let Ok(attached) = provider.load() {
+                                            external_schema.attach_schema_with_path(&attach.schema_name, attached, path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     self.notebook_open_schemas
                         .write()
@@ -581,7 +599,43 @@ impl Backend {
                 }
             }
 
-            // Store external schema from .open commands and schema hints
+            // Process ATTACH DATABASE statements from the parsed program
+            if let Ok(ref program) = doc.program {
+                for stmt in &program.statements {
+                    if let Statement::Attach(attach) = stmt {
+                        if let Expr::String(ref path, _) = attach.expr {
+                            let db_path = if let Some(ref base) = base_path {
+                                let path_buf = PathBuf::from(path);
+                                if path_buf.is_absolute() {
+                                    path_buf
+                                } else {
+                                    base.join(path)
+                                }
+                            } else {
+                                PathBuf::from(path)
+                            };
+
+                            let provider = FileSchemaProvider::new(&db_path);
+                            match provider.load() {
+                                Ok(attached) => {
+                                    external_schema.attach_schema_with_path(&attach.schema_name, attached, path);
+                                }
+                                Err(e) => {
+                                    let range = span_to_range(&text, &attach.span);
+                                    open_diagnostics.push(tower_lsp::lsp_types::Diagnostic {
+                                        range,
+                                        severity: Some(DiagnosticSeverity::WARNING),
+                                        message: format!("Failed to attach database '{}': {}", path, e),
+                                        ..Default::default()
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Store external schema from .open commands, schema hints, and ATTACH
             self.open_schemas
                 .write()
                 .expect("open_schemas lock poisoned")

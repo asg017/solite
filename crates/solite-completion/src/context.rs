@@ -47,6 +47,8 @@ pub struct TableRef {
     pub name: String,
     /// Optional alias for the table
     pub alias: Option<String>,
+    /// Optional schema name (e.g., attached database name)
+    pub schema: Option<String>,
 }
 
 /// A reference to a CTE (Common Table Expression) in the current query.
@@ -62,7 +64,11 @@ pub struct CteRef {
 
 impl TableRef {
     pub fn new(name: String, alias: Option<String>) -> Self {
-        Self { name, alias }
+        Self { name, alias, schema: None }
+    }
+
+    pub fn with_schema(name: String, schema: String, alias: Option<String>) -> Self {
+        Self { name, alias, schema: Some(schema) }
     }
 
     /// Returns the name to use for column qualification (alias if present, otherwise name).
@@ -283,12 +289,16 @@ enum ContextState {
     AfterFrom,
     /// After a table name in FROM clause
     AfterFromTable,
+    /// After schema prefix and dot in FROM clause (e.g., `FROM db1.`)
+    AfterFromSchemaPrefix,
     /// Expecting an alias after AS or table name
     ExpectAlias,
     /// After JOIN keyword
     AfterJoin,
     /// After a table name in JOIN clause
     AfterJoinTable,
+    /// After schema prefix and dot in JOIN clause (e.g., `JOIN db1.`)
+    AfterJoinSchemaPrefix,
     /// After ON keyword in JOIN
     AfterJoinOn,
     /// After WHERE keyword
@@ -667,9 +677,11 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
         Start,
         AfterFrom,
         AfterFromTable,
+        AfterFromSchemaPrefix,
         ExpectAlias,
         AfterJoin,
         AfterJoinTable,
+        AfterJoinSchemaPrefix,
         AfterJoinOn,
         /// Inside table function args — tracking paren depth, returns to `resume` state
         InTableFunctionArgs { depth: usize, for_join: bool },
@@ -677,6 +689,7 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
     }
 
     let mut state = SimpleState::Start;
+    let mut current_schema_name: Option<String> = None;
 
     for token in tokens {
         if token.span.start >= cursor_offset {
@@ -720,37 +733,72 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
                 current_table_name = Some(token_text());
                 SimpleState::AfterFromTable
             }
+            (SimpleState::AfterFromTable, TokenKind::Dot) => {
+                // Schema-qualified: save table name as schema prefix
+                current_schema_name = current_table_name.take();
+                SimpleState::AfterFromSchemaPrefix
+            }
+            (SimpleState::AfterFromSchemaPrefix, kind) if is_ident_token(kind) => {
+                current_table_name = Some(token_text());
+                SimpleState::AfterFromTable
+            }
             (SimpleState::AfterFromTable, TokenKind::LParen) => {
                 SimpleState::InTableFunctionArgs { depth: 1, for_join: false }
             }
             (SimpleState::AfterFromTable, TokenKind::As) => SimpleState::ExpectAlias,
             (SimpleState::AfterFromTable, kind) if is_ident_token(kind) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, Some(token_text())));
+                    let schema = current_schema_name.take();
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = schema;
+                    tables_in_scope.push(tr);
                 }
                 SimpleState::AfterFromTable
             }
             (SimpleState::ExpectAlias, kind) if is_ident_token(kind) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, Some(token_text())));
+                    let schema = current_schema_name.take();
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = schema;
+                    tables_in_scope.push(tr);
                 }
                 SimpleState::AfterFromTable
             }
             (SimpleState::AfterFromTable, TokenKind::Comma) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let schema = current_schema_name.take();
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = schema;
+                    tables_in_scope.push(tr);
                 }
                 SimpleState::AfterFrom
             }
             (SimpleState::AfterFromTable, TokenKind::Join | TokenKind::Inner | TokenKind::Left | TokenKind::Right | TokenKind::Full | TokenKind::Cross | TokenKind::Natural) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let schema = current_schema_name.take();
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = schema;
+                    tables_in_scope.push(tr);
                 }
                 SimpleState::AfterJoin
             }
             (SimpleState::AfterJoin, TokenKind::Join | TokenKind::Outer) => SimpleState::AfterJoin,
             (SimpleState::AfterJoin, kind) if is_ident_token(kind) => {
                 join_right_table = Some(TableRef::new(token_text(), None));
+                SimpleState::AfterJoinTable
+            }
+            (SimpleState::AfterJoinTable, TokenKind::Dot) => {
+                // Schema-qualified join table
+                if let Some(ref mut t) = join_right_table {
+                    current_schema_name = Some(t.name.clone());
+                }
+                SimpleState::AfterJoinSchemaPrefix
+            }
+            (SimpleState::AfterJoinSchemaPrefix, kind) if is_ident_token(kind) => {
+                if let Some(ref mut t) = join_right_table {
+                    t.name = token_text();
+                    t.schema = current_schema_name.take();
+                }
                 SimpleState::AfterJoinTable
             }
             (SimpleState::AfterJoinTable, TokenKind::LParen) => {
@@ -778,7 +826,10 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
             }
             (SimpleState::AfterFromTable, TokenKind::Where | TokenKind::Group | TokenKind::Order) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let schema = current_schema_name.take();
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = schema;
+                    tables_in_scope.push(tr);
                 }
                 SimpleState::Other
             }
@@ -794,7 +845,9 @@ fn collect_tables_in_scope(tokens: &[Token], source: &str, cursor_offset: usize)
 
     // Add any pending table
     if let Some(name) = current_table_name {
-        tables_in_scope.push(TableRef::new(name, None));
+        let mut tr = TableRef::new(name, None);
+        tr.schema = current_schema_name.take();
+        tables_in_scope.push(tr);
     }
     if let Some(t) = join_right_table {
         tables_in_scope.push(t);
@@ -814,14 +867,17 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
         LookingForFrom,
         AfterFrom,
         AfterFromTable,
+        AfterFromSchemaPrefix,
         ExpectAlias,
         AfterJoin,
         AfterJoinTable,
+        AfterJoinSchemaPrefix,
         InTableFunctionArgs { depth: usize, for_join: bool },
         Done,
     }
 
     let mut state = LookState::LookingForFrom;
+    let mut current_schema_name: Option<String> = None;
 
     // Start from tokens after cursor
     for token in tokens {
@@ -862,6 +918,14 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
                 LookState::AfterFromTable
             }
 
+            (LookState::AfterFromTable, TokenKind::Dot) => {
+                current_schema_name = current_table_name.take();
+                LookState::AfterFromSchemaPrefix
+            }
+            (LookState::AfterFromSchemaPrefix, kind) if is_ident_token(kind) => {
+                current_table_name = Some(token_text());
+                LookState::AfterFromTable
+            }
             (LookState::AfterFromTable, TokenKind::LParen) => {
                 LookState::InTableFunctionArgs { depth: 1, for_join: false }
             }
@@ -869,19 +933,25 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
             (LookState::AfterFromTable, kind) if is_ident_token(kind) => {
                 // Implicit alias
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, Some(token_text())));
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::AfterFromTable
             }
             (LookState::ExpectAlias, kind) if is_ident_token(kind) => {
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, Some(token_text())));
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::AfterFromTable
             }
             (LookState::AfterFromTable, TokenKind::Comma) => {
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::AfterFrom
             }
@@ -889,12 +959,22 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
             // JOIN handling
             (LookState::AfterFromTable, TokenKind::Join | TokenKind::Inner | TokenKind::Left | TokenKind::Right | TokenKind::Full | TokenKind::Cross | TokenKind::Natural) => {
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::AfterJoin
             }
             (LookState::AfterJoin, TokenKind::Join | TokenKind::Outer) => LookState::AfterJoin,
             (LookState::AfterJoin, kind) if is_ident_token(kind) => {
+                current_table_name = Some(token_text());
+                LookState::AfterJoinTable
+            }
+            (LookState::AfterJoinTable, TokenKind::Dot) => {
+                current_schema_name = current_table_name.take();
+                LookState::AfterJoinSchemaPrefix
+            }
+            (LookState::AfterJoinSchemaPrefix, kind) if is_ident_token(kind) => {
                 current_table_name = Some(token_text());
                 LookState::AfterJoinTable
             }
@@ -905,13 +985,17 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
             (LookState::AfterJoinTable, kind) if is_ident_token(kind) => {
                 // Alias for join table
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, Some(token_text())));
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::AfterJoinTable
             }
             (LookState::AfterJoinTable, TokenKind::On) => {
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::AfterJoinTable
             }
@@ -922,7 +1006,9 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
             // End of FROM clause
             (LookState::AfterFromTable | LookState::AfterJoinTable, TokenKind::Where | TokenKind::Group | TokenKind::Order | TokenKind::Limit | TokenKind::Union | TokenKind::Intersect | TokenKind::Except) => {
                 if let Some(name) = current_table_name.take() {
-                    tables.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables.push(tr);
                 }
                 LookState::Done
             }
@@ -934,7 +1020,9 @@ fn look_ahead_for_from_tables(tokens: &[Token], source: &str, cursor_offset: usi
 
     // Add any remaining table
     if let Some(name) = current_table_name {
-        tables.push(TableRef::new(name, None));
+        let mut tr = TableRef::new(name, None);
+        tr.schema = current_schema_name.take();
+        tables.push(tr);
     }
 
     tables
@@ -964,6 +1052,7 @@ pub fn detect_context_from_tokens(
     let mut state = ContextState::Start;
     let mut tables_in_scope: Vec<TableRef> = Vec::new();
     let mut current_table_name: Option<String> = None;
+    let mut current_schema_name: Option<String> = None;
     let mut insert_table_name: Option<String> = None;
     let mut update_table_name: Option<String> = None;
     let mut delete_table_name: Option<String> = None;
@@ -1164,24 +1253,39 @@ pub fn detect_context_from_tokens(
                 current_table_name = Some(token_text());
                 ContextState::AfterFromTable
             }
+            (ContextState::AfterFromTable, TokenKind::Dot) => {
+                // Schema-qualified table: save current name as schema prefix
+                current_schema_name = current_table_name.take();
+                ContextState::AfterFromSchemaPrefix
+            }
+            (ContextState::AfterFromSchemaPrefix, kind) if is_ident_token(kind) => {
+                current_table_name = Some(token_text());
+                ContextState::AfterFromTable
+            }
             (ContextState::AfterFromTable, TokenKind::As) => ContextState::ExpectAlias,
             (ContextState::AfterFromTable, kind) if is_ident_token(kind) => {
                 // Implicit alias
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, Some(token_text())));
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterFromTable
             }
             (ContextState::ExpectAlias, kind) if is_ident_token(kind) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, Some(token_text())));
+                    let mut tr = TableRef::new(name, Some(token_text()));
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterFromTable
             }
             (ContextState::AfterFromTable, TokenKind::Comma) => {
                 // Multiple tables in FROM
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterFrom
             }
@@ -1198,7 +1302,9 @@ pub fn detect_context_from_tokens(
                 | TokenKind::Natural,
             ) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterJoin
             }
@@ -1206,6 +1312,20 @@ pub fn detect_context_from_tokens(
             (ContextState::AfterJoin, TokenKind::Outer) => ContextState::AfterJoin,
             (ContextState::AfterJoin, kind) if is_ident_token(kind) => {
                 join_right_table = Some(TableRef::new(token_text(), None));
+                ContextState::AfterJoinTable
+            }
+            (ContextState::AfterJoinTable, TokenKind::Dot) => {
+                // Schema-qualified join table
+                if let Some(ref mut t) = join_right_table {
+                    current_schema_name = Some(t.name.clone());
+                }
+                ContextState::AfterJoinSchemaPrefix
+            }
+            (ContextState::AfterJoinSchemaPrefix, kind) if is_ident_token(kind) => {
+                if let Some(ref mut t) = join_right_table {
+                    t.name = token_text();
+                    t.schema = current_schema_name.take();
+                }
                 ContextState::AfterJoinTable
             }
             (ContextState::AfterJoinTable, TokenKind::As) => {
@@ -1250,7 +1370,9 @@ pub fn detect_context_from_tokens(
             // WHERE clause
             (ContextState::AfterFromTable, TokenKind::Where) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterWhere
             }
@@ -1288,7 +1410,9 @@ pub fn detect_context_from_tokens(
             // GROUP BY clause
             (ContextState::AfterFromTable, TokenKind::Group) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterGroup
             }
@@ -1304,7 +1428,9 @@ pub fn detect_context_from_tokens(
             // ORDER BY clause
             (ContextState::AfterFromTable, TokenKind::Order) => {
                 if let Some(name) = current_table_name.take() {
-                    tables_in_scope.push(TableRef::new(name, None));
+                    let mut tr = TableRef::new(name, None);
+                    tr.schema = current_schema_name.take();
+                    tables_in_scope.push(tr);
                 }
                 ContextState::AfterOrder
             }
@@ -1535,6 +1661,7 @@ pub fn detect_context_from_tokens(
         state,
         final_tables,
         current_table_name,
+        current_schema_name,
         insert_table_name,
         update_table_name,
         delete_table_name,
@@ -1551,6 +1678,7 @@ fn state_to_context(
     state: ContextState,
     tables_in_scope: Vec<TableRef>,
     _current_table_name: Option<String>,
+    current_schema_name: Option<String>,
     insert_table_name: Option<String>,
     update_table_name: Option<String>,
     delete_table_name: Option<String>,
@@ -1577,6 +1705,18 @@ fn state_to_context(
         ContextState::AfterFrom => CompletionContext::AfterFrom {
             ctes: ctes_in_scope,
         },
+        ContextState::AfterFromSchemaPrefix | ContextState::AfterJoinSchemaPrefix => {
+            // After `schema.` prefix, suggest tables from the attached schema
+            if let Some(schema_name) = current_schema_name {
+                CompletionContext::QualifiedColumn {
+                    qualifier: schema_name,
+                    tables: tables_in_scope,
+                    ctes: ctes_in_scope,
+                }
+            } else {
+                CompletionContext::None
+            }
+        }
         ContextState::AfterFromTable | ContextState::ExpectAlias => {
             // After a table name, suggest JOIN keywords, WHERE, etc.
             CompletionContext::AfterFromTable {

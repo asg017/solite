@@ -115,6 +115,12 @@ pub struct Schema {
     /// Function argument counts: lowercase name -> sorted list of valid narg values.
     /// narg = -1 means variadic (accepts any number of arguments).
     function_nargs: HashMap<String, Vec<i32>>,
+    /// Attached database schemas: lowercase schema name -> Schema
+    attached_schemas: HashMap<String, Schema>,
+    /// Original case attached schema names: lowercase -> original
+    attached_schema_names: HashMap<String, String>,
+    /// Attached schema paths: lowercase schema name -> path expression (e.g., file path or ":memory:")
+    attached_schema_paths: HashMap<String, String>,
 }
 
 impl Schema {
@@ -255,6 +261,17 @@ impl Schema {
         for (name, nargs) in other.function_nargs {
             self.function_nargs.entry(name).or_insert(nargs);
         }
+
+        // Merge attached schemas
+        for (key, schema) in other.attached_schemas {
+            self.attached_schemas.insert(key, schema);
+        }
+        for (key, name) in other.attached_schema_names {
+            self.attached_schema_names.insert(key, name);
+        }
+        for (key, path) in other.attached_schema_paths {
+            self.attached_schema_paths.insert(key, path);
+        }
     }
 
     /// Returns an iterator over all table names (original case)
@@ -385,6 +402,69 @@ impl Schema {
     /// Returns None if the function is not known.
     pub fn function_nargs(&self, name: &str) -> Option<&[i32]> {
         self.function_nargs.get(&name.to_lowercase()).map(|v| v.as_slice())
+    }
+
+    // ========================================
+    // Attached schema methods
+    // ========================================
+
+    /// Attach a schema under a database name (e.g., from ATTACH DATABASE)
+    pub fn attach_schema(&mut self, name: &str, schema: Schema) {
+        let key = name.to_lowercase();
+        self.attached_schema_names.insert(key.clone(), name.to_string());
+        self.attached_schemas.insert(key, schema);
+    }
+
+    /// Attach a schema with a path description (e.g., the database file path)
+    pub fn attach_schema_with_path(&mut self, name: &str, schema: Schema, path: &str) {
+        let key = name.to_lowercase();
+        self.attached_schema_names.insert(key.clone(), name.to_string());
+        self.attached_schema_paths.insert(key.clone(), path.to_string());
+        self.attached_schemas.insert(key, schema);
+    }
+
+    /// Get an attached schema by name (case-insensitive)
+    pub fn get_attached_schema(&self, name: &str) -> Option<&Schema> {
+        self.attached_schemas.get(&name.to_lowercase())
+    }
+
+    /// Get the path/source of an attached schema
+    pub fn get_attached_schema_path(&self, name: &str) -> Option<&str> {
+        self.attached_schema_paths.get(&name.to_lowercase()).map(|s| s.as_str())
+    }
+
+    /// Returns attached schema names (original case)
+    pub fn attached_schema_names(&self) -> impl Iterator<Item = &str> {
+        self.attached_schema_names.values().map(|s| s.as_str())
+    }
+
+    /// Look up a table in an attached schema (e.g., db1.users)
+    pub fn resolve_schema_table(&self, schema_name: &str, table_name: &str) -> Option<&TableInfo> {
+        self.attached_schemas
+            .get(&schema_name.to_lowercase())
+            .and_then(|s| s.get_table(table_name))
+    }
+
+    /// Get column names for a table in an attached schema
+    pub fn columns_for_schema_table(&self, schema_name: &str, table_name: &str) -> Option<&[String]> {
+        self.attached_schemas
+            .get(&schema_name.to_lowercase())
+            .and_then(|s| s.columns_for_table(table_name))
+    }
+
+    /// Get column names (with rowid) for a table in an attached schema
+    pub fn columns_for_schema_table_with_rowid(&self, schema_name: &str, table_name: &str) -> Option<Vec<String>> {
+        self.attached_schemas
+            .get(&schema_name.to_lowercase())
+            .and_then(|s| s.columns_for_table_with_rowid(table_name))
+    }
+
+    /// Get table names in an attached schema (original case)
+    pub fn table_names_in_schema(&self, schema_name: &str) -> Vec<String> {
+        self.attached_schemas
+            .get(&schema_name.to_lowercase())
+            .map(|s| s.table_names().map(|n| n.to_string()).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -780,6 +860,14 @@ fn add_table_to_context<'a>(
     external_schema: Option<&'a Schema>,
 ) {
     match table {
+        TableOrSubquery::Table { schema: Some(s), name, alias, .. } => {
+            // Schema-qualified table: look up in attached schemas
+            let table_info = external_schema.and_then(|es| es.resolve_schema_table(s, name));
+            if let Some(info) = table_info {
+                let effective_name = alias.as_ref().unwrap_or(name);
+                ctx.add_table(effective_name, name, info);
+            }
+        }
         TableOrSubquery::Table { name, alias, .. } => {
             let table_key = name.to_lowercase();
             // Look up table info: CTEs first, then local tables, then external schema
@@ -959,6 +1047,16 @@ fn check_unknown_tables_recursive(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match table {
+        TableOrSubquery::Table { schema: Some(s), name, span, .. } => {
+            // Schema-qualified table: look up in attached schemas
+            let resolved = external_schema.and_then(|es| es.resolve_schema_table(s, name));
+            if resolved.is_none() {
+                diagnostics.push(Diagnostic::error(
+                    format!("Unknown table '{}.{}'", s, name),
+                    span.clone(),
+                ));
+            }
+        }
         TableOrSubquery::Table { name, span, .. } => {
             let table_key = name.to_lowercase();
             // Check CTEs first, then local tables, then external schema
@@ -3638,5 +3736,88 @@ mod tests {
 
         let diagnostics = analyze(&program);
         assert!(diagnostics.is_empty(), "CTE with SELECT * should accept qualified column refs, got: {:?}", diagnostics);
+    }
+
+    // ========================================
+    // Schema-qualified table tests (ATTACH DATABASE)
+    // ========================================
+
+    #[test]
+    fn test_schema_qualified_table_no_error_with_attached() {
+        // ATTACH DATABASE 'file.db' AS db1;
+        // SELECT * FROM db1.t;
+        // When db1.t is in the attached schema, no error should be raised.
+        let source = "SELECT * FROM db1.t";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let mut external = Schema::new();
+        let mut attached = Schema::new();
+        attached.add_table("t", vec!["a".to_string(), "b".to_string()], false);
+        external.attach_schema("db1", attached);
+
+        let diagnostics = analyze_with_schema(&program, Some(&external));
+        assert!(diagnostics.is_empty(), "Schema-qualified table should be found in attached schema, got: {:?}", diagnostics);
+    }
+
+    #[test]
+    fn test_schema_qualified_table_unknown() {
+        // SELECT * FROM db1.nonexistent;
+        // When the table doesn't exist in the attached schema, should error.
+        let source = "SELECT * FROM db1.nonexistent";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let mut external = Schema::new();
+        let mut attached = Schema::new();
+        attached.add_table("t", vec!["a".to_string()], false);
+        external.attach_schema("db1", attached);
+
+        let diagnostics = analyze_with_schema(&program, Some(&external));
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("Unknown table 'db1.nonexistent'"));
+    }
+
+    #[test]
+    fn test_schema_qualified_table_column_validation() {
+        // SELECT a, b FROM db1.t;
+        // Columns from the attached table should be validated.
+        let source = "SELECT a, b FROM db1.t";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let mut external = Schema::new();
+        let mut attached = Schema::new();
+        attached.add_table("t", vec!["a".to_string(), "b".to_string()], false);
+        external.attach_schema("db1", attached);
+
+        let diagnostics = analyze_with_schema(&program, Some(&external));
+        assert!(diagnostics.is_empty(), "Columns from attached schema table should validate, got: {:?}", diagnostics);
+    }
+
+    #[test]
+    fn test_schema_qualified_table_invalid_column() {
+        // SELECT z FROM db1.t;
+        // Column 'z' doesn't exist in db1.t.
+        let source = "SELECT z FROM db1.t";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let mut external = Schema::new();
+        let mut attached = Schema::new();
+        attached.add_table("t", vec!["a".to_string(), "b".to_string()], false);
+        external.attach_schema("db1", attached);
+
+        let diagnostics = analyze_with_schema(&program, Some(&external));
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("Column 'z' does not exist"));
+    }
+
+    #[test]
+    fn test_schema_qualified_no_attached_schema() {
+        // SELECT * FROM unknown_db.t;
+        // When no schema is attached, should error.
+        let source = "SELECT * FROM unknown_db.t";
+        let program = solite_parser::parse_program(source).unwrap();
+
+        let diagnostics = analyze(&program);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("Unknown table 'unknown_db.t'"));
     }
 }

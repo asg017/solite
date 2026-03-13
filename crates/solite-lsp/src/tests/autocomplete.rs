@@ -1,6 +1,7 @@
 //! Smart autocomplete and placeholder-based test framework
 
 use super::*;
+use solite_analyzer::Schema;
 use std::collections::HashMap;
 
 // ========================================================================
@@ -178,6 +179,7 @@ fn test_autocomplete_with_from_clause_only_suggests_table_columns() {
     let tables = vec![TableRef {
         name: "acting_credits".to_string(),
         alias: None,
+        schema: None,
     }];
 
     let ctx = CompletionContext::SelectColumns { tables, ctes: vec![] };
@@ -286,6 +288,13 @@ fn run_autocomplete_test(sql: &str, expectations: &[(usize, &[&str])]) {
     });
     let schema = build_schema(&program);
 
+    run_autocomplete_test_with_schema(sql, &schema, expectations);
+}
+
+/// Run autocomplete test with a pre-built schema.
+fn run_autocomplete_test_with_schema(sql: &str, schema: &Schema, expectations: &[(usize, &[&str])]) {
+    let (processed_sql, markers) = extract_markers(sql);
+
     for (marker_num, expected_labels) in expectations {
         let offset = markers
             .get(marker_num)
@@ -295,7 +304,7 @@ fn run_autocomplete_test(sql: &str, expectations: &[(usize, &[&str])]) {
         let ctx = detect_context(&processed_sql, *offset);
 
         // Get completions
-        let items = get_completions_for_context(&ctx, Some(&schema), None);
+        let items = get_completions_for_context(&ctx, Some(schema), None);
         let actual_labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
         // Check expected labels are present
@@ -803,6 +812,101 @@ fn test_autocomplete_after_table_name_typing_alias() {
                 // Tables
                 "libfec_filings",
             ]),
+        ],
+    );
+}
+
+// ========================================================================
+// Attached Schema (ATTACH DATABASE) Autocomplete Tests
+// ========================================================================
+
+/// Helper to build a schema with an attached database.
+fn build_schema_with_attached(main_sql: &str, attached_name: &str, attached_sql: &str) -> Schema {
+    let mut schema = build_test_schema(main_sql);
+    let attached = build_test_schema(attached_sql);
+    schema.attach_schema(attached_name, attached);
+    schema
+}
+
+#[test]
+fn test_autocomplete_attached_schema_in_from() {
+    // After FROM, should suggest attached database names alongside regular tables
+    let schema = build_schema_with_attached(
+        "CREATE TABLE local_t (id INTEGER);",
+        "db1",
+        "CREATE TABLE remote_t (id INTEGER);",
+    );
+
+    run_autocomplete_test_with_schema(
+        "select * from $$1",
+        &schema,
+        &[(1, &["local_t", "db1"])],
+    );
+}
+
+#[test]
+fn test_autocomplete_attached_schema_tables() {
+    // After "db1.", should suggest tables from the attached schema
+    let schema = build_schema_with_attached(
+        "",
+        "db1",
+        "CREATE TABLE users (id INTEGER, name TEXT); CREATE TABLE orders (id INTEGER, total REAL);",
+    );
+
+    run_autocomplete_test_with_schema(
+        "select * from db1.$$1",
+        &schema,
+        &[(1, &["users", "orders"])],
+    );
+}
+
+#[test]
+fn test_autocomplete_attached_table_columns() {
+    // Columns from attached table should be available in SELECT
+    let schema = build_schema_with_attached(
+        "",
+        "mydb",
+        "CREATE TABLE products (id INTEGER, name TEXT, price REAL);",
+    );
+
+    run_autocomplete_test_with_schema(
+        "select $$1 from mydb.products",
+        &schema,
+        &[(1, &["id", "name", "price", "rowid"])],
+    );
+}
+
+#[test]
+fn test_autocomplete_attached_table_qualified_columns() {
+    // Columns from attached table via alias
+    let schema = build_schema_with_attached(
+        "",
+        "db1",
+        "CREATE TABLE items (id INTEGER, name TEXT, qty INTEGER);",
+    );
+
+    run_autocomplete_test_with_schema(
+        "select p.$$1 from db1.items as p",
+        &schema,
+        &[(1, &["id", "name", "qty", "rowid"])],
+    );
+}
+
+#[test]
+fn test_autocomplete_multiple_attached_schemas() {
+    // Multiple attached databases
+    let mut schema = build_test_schema("");
+    let sales_schema = build_test_schema("CREATE TABLE invoices (id INTEGER, amount REAL);");
+    let inv_schema = build_test_schema("CREATE TABLE stock (id INTEGER, product TEXT);");
+    schema.attach_schema("sales", sales_schema);
+    schema.attach_schema("inventory", inv_schema);
+
+    run_autocomplete_test_with_schema(
+        "select * from sales.$$1; select * from inventory.$$2",
+        &schema,
+        &[
+            (1, &["invoices"]),
+            (2, &["stock"]),
         ],
     );
 }

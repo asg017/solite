@@ -189,9 +189,9 @@ pub fn parse_markdown(content: &str, file_name: &str) -> Result<Vec<MdTest>, MdT
                 assertion_text.push('\n');
             }
             Event::Code(code) => {
-                // Check for file labels like `schema.sql`:
+                // Check for file labels like `schema.sql` or `attach:name`:
                 let code_str = code.to_string();
-                let is_file_label = code_str.ends_with(".sql");
+                let is_file_label = code_str.ends_with(".sql") || code_str.starts_with("attach:");
                 // Add to assertion text
                 assertion_text.push('`');
                 assertion_text.push_str(&code_str);

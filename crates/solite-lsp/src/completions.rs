@@ -106,6 +106,15 @@ pub fn get_completions_extended(
                         ..Default::default()
                     });
                 }
+                // Add attached schema names (e.g., from ATTACH DATABASE)
+                for name in schema.attached_schema_names() {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("attached database".to_string()),
+                        ..Default::default()
+                    });
+                }
             }
             items
         }
@@ -409,15 +418,37 @@ pub fn get_completions_extended(
                     })
                     .collect()
             } else if let Some(schema) = schema {
+                // Check if qualifier matches an attached schema name (e.g., db1.)
+                let schema_tables = schema.table_names_in_schema(qualifier);
+                if !schema_tables.is_empty() {
+                    return schema_tables
+                        .into_iter()
+                        .map(|name| CompletionItem {
+                            label: name.clone(),
+                            insert_text: quote_identifier_if_needed(&name),
+                            kind: Some(CompletionItemKind::CLASS),
+                            ..Default::default()
+                        })
+                        .collect();
+                }
+
                 // Find the table for this qualifier (case-insensitive)
-                let table_name = tables
+                let matched_table = tables
                     .iter()
-                    .find(|t| t.matches_qualifier(qualifier))
+                    .find(|t| t.matches_qualifier(qualifier));
+                let table_name = matched_table
                     .map(|t| t.name.as_str())
                     .unwrap_or(qualifier);
+                let table_schema = matched_table
+                    .and_then(|t| t.schema.as_deref());
 
-                schema
-                    .columns_for_table_with_rowid(table_name)
+                let cols = if let Some(s) = table_schema {
+                    schema.columns_for_schema_table_with_rowid(s, table_name)
+                } else {
+                    schema.columns_for_table_with_rowid(table_name)
+                };
+
+                cols
                     .map(|cols| {
                         cols.into_iter()
                             .map(|col| CompletionItem {
@@ -658,6 +689,14 @@ fn suggest_columns_from_tables(
                             column_sources.entry(col).or_default().push(qualifier);
                         }
                     }
+                }
+            }
+        } else if let Some(ref schema_name) = table_ref.schema {
+            // Schema-qualified table (e.g., from attached database)
+            if let Some(cols) = schema.columns_for_schema_table_with_rowid(schema_name, &table_ref.name) {
+                for col in cols {
+                    let qualifier = table_ref.qualifier().to_string();
+                    column_sources.entry(col).or_default().push(qualifier);
                 }
             }
         } else if let Some(cols) = schema.columns_for_table_with_rowid(&table_ref.name) {

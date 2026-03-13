@@ -44,6 +44,21 @@ pub trait SchemaSource {
     fn function_nargs(&self, _name: &str) -> Option<Vec<i32>> {
         None
     }
+
+    /// Get names of attached schemas (e.g., from ATTACH DATABASE)
+    fn attached_schema_names(&self) -> Vec<String> {
+        vec![]
+    }
+
+    /// Get table names within an attached schema
+    fn table_names_in_schema(&self, _schema: &str) -> Vec<String> {
+        vec![]
+    }
+
+    /// Get column names for a table in an attached schema
+    fn columns_for_schema_table_with_rowid(&self, _schema: &str, _table: &str) -> Option<Vec<String>> {
+        None
+    }
 }
 
 // Implementation for solite_analyzer::Schema when the analyzer feature is enabled
@@ -82,5 +97,19 @@ impl SchemaSource for solite_analyzer::Schema {
 
     fn function_nargs(&self, name: &str) -> Option<Vec<i32>> {
         solite_analyzer::Schema::function_nargs(self, name).map(|s| s.to_vec())
+    }
+
+    fn attached_schema_names(&self) -> Vec<String> {
+        solite_analyzer::Schema::attached_schema_names(self)
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn table_names_in_schema(&self, schema: &str) -> Vec<String> {
+        solite_analyzer::Schema::table_names_in_schema(self, schema)
+    }
+
+    fn columns_for_schema_table_with_rowid(&self, schema: &str, table: &str) -> Option<Vec<String>> {
+        solite_analyzer::Schema::columns_for_schema_table_with_rowid(self, schema, table)
     }
 }

@@ -107,6 +107,50 @@ from t, json_each(t.a -> 'line_items') as li; -- ok
 create table t3 as select 1 as value; -- ok
 ```
 
+## Attached Database (ATTACH DATABASE)
+
+### Valid schema-qualified table
+
+Reference to a table in an attached database should be OK.
+
+`attach:db1`
+
+```sql
+create table users(id integer, name text);
+```
+
+```sql
+select * from db1.users; -- ok
+```
+
+### Unknown table in attached schema
+
+Reference to non-existent table in an attached schema produces a diagnostic.
+
+`attach:db1`
+
+```sql
+create table users(id integer);
+```
+
+```sql
+select * from db1.nonexistent; -- error: "Unknown table 'db1.nonexistent'"
+```
+
+### Column validation in attached table
+
+Column references against attached tables are validated.
+
+`attach:db1`
+
+```sql
+create table t(a integer, b text);
+```
+
+```sql
+select a, b from db1.t; -- ok
+```
+
 ## Parse Errors
 
 Tests for parse error detection are handled separately since

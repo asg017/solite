@@ -444,11 +444,12 @@ const PROMPT: &str = "❱ ";
 const PROMPT_TRANSACTION: &str = "❱• ";
 
 pub fn launch_repl(args: ReplArgs) -> Result<()> {
-    let runtime = Runtime::new_with_remote_bin(
+    let runtime = Runtime::new_with_options(
         args.database
             .as_ref()
             .map(|p| p.to_string_lossy().to_string()),
         args.remote_bin.as_deref(),
+        args.transport.as_deref(),
     );
     let rc_runtime = Rc::new(RefCell::new(runtime));
 

@@ -184,12 +184,22 @@ impl Runtime {
     }
 
     pub fn new_with_remote_bin(path: Option<String>, remote_bin: Option<&str>) -> Self {
-        let connection = match path {
-            Some(ref path) if path.starts_with("ssh://") => {
-                Connection::open_remote_with_bin(path, remote_bin).unwrap()
+        Self::new_with_options(path, remote_bin, None)
+    }
+
+    pub fn new_with_options(path: Option<String>, remote_bin: Option<&str>, transport: Option<&str>) -> Self {
+        let connection = if let Some(ref transport_cmd) = transport {
+            // Custom transport (fly, docker, kubectl, etc.)
+            let db_path = path.as_deref().unwrap_or(":memory:");
+            Connection::open_transport(transport_cmd, db_path, remote_bin).unwrap()
+        } else {
+            match path {
+                Some(ref path) if path.starts_with("ssh://") => {
+                    Connection::open_remote_with_bin(path, remote_bin).unwrap()
+                }
+                Some(path) => Connection::open(path.as_str()).unwrap(),
+                None => Connection::open_in_memory().unwrap(),
             }
-            Some(path) => Connection::open(path.as_str()).unwrap(),
-            None => Connection::open_in_memory().unwrap(),
         };
         if !connection.is_remote() {
             unsafe {

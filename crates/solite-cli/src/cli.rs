@@ -91,6 +91,10 @@ pub struct QueryArgs {
     /// Path to the solite binary on the remote machine (for ssh:// connections)
     #[arg(long)]
     pub remote_bin: Option<String>,
+
+    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+    #[arg(long)]
+    pub transport: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -115,6 +119,10 @@ pub struct ReplArgs {
     /// Path to the solite binary on the remote machine (for ssh:// connections)
     #[arg(long)]
     pub remote_bin: Option<String>,
+
+    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+    #[arg(long)]
+    pub transport: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -218,6 +226,10 @@ pub struct TuiArgs {
     /// Path to the solite binary on the remote machine (for ssh:// connections)
     #[arg(long)]
     pub remote_bin: Option<String>,
+
+    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+    #[arg(long)]
+    pub transport: Option<String>,
 }
 
 #[derive(Args, Debug)]

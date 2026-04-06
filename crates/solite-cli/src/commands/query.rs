@@ -70,9 +70,10 @@ pub(crate) fn query(args: QueryArgs) -> Result<(), ()> {
 fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
     let (db_path, sql) = parse_arguments(&args)?;
 
-    let mut runtime = Runtime::new_with_remote_bin(
+    let mut runtime = Runtime::new_with_options(
         db_path.map(|p| p.to_string_lossy().to_string()),
         args.remote_bin.as_deref(),
+        args.transport.as_deref(),
     );
 
     // Load extensions if specified

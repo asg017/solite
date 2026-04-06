@@ -866,6 +866,67 @@ impl Connection {
         })
     }
 
+    /// Open a remote database via a custom transport command.
+    ///
+    /// `transport_cmd` is a shell command prefix (e.g. `"fly ssh console -a my-app -C"`).
+    /// We append `<remote_bin> serve <db_path>` and spawn it.
+    pub fn open_transport(transport_cmd: &str, db_path: &str, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
+        let bin = remote_bin.unwrap_or("solite");
+        let full_cmd = format!("{} {} serve {}", transport_cmd, bin, db_path);
+
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&full_cmd)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .map_err(|e| SQLiteError {
+                result_code: -1,
+                code_description: "TRANSPORT_ERROR".to_string(),
+                message: format!("Failed to spawn transport '{}': {}", full_cmd, e),
+                offset: None,
+            })?;
+
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+
+        let mut transport = RemoteTransport {
+            child,
+            reader: std::io::BufReader::new(stdout),
+            writer: std::io::BufWriter::new(stdin),
+        };
+
+        let response = transport.send_request(&crate::rpc::Request::InTransaction);
+        match response {
+            Ok(crate::rpc::Response::InTransaction { .. }) => {}
+            Ok(other) => {
+                let _ = transport.child.wait();
+                return Err(SQLiteError {
+                    result_code: -1,
+                    code_description: "TRANSPORT_ERROR".to_string(),
+                    message: format!("Unexpected response from remote: {:?}", other),
+                    offset: None,
+                });
+            }
+            Err(e) => {
+                let _ = transport.child.wait();
+                return Err(SQLiteError {
+                    result_code: -1,
+                    code_description: "TRANSPORT_ERROR".to_string(),
+                    message: format!("Failed to connect via transport: {}", e.message),
+                    offset: None,
+                });
+            }
+        }
+
+        Ok(Connection {
+            inner: ConnectionInner::Remote {
+                transport: RefCell::new(transport),
+            },
+        })
+    }
+
     /// Returns true if this is a remote (SSH) connection.
     pub fn is_remote(&self) -> bool {
         matches!(self.inner, ConnectionInner::Remote { .. })

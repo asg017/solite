@@ -243,9 +243,10 @@ pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
 
 pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
     color_eyre::install().unwrap();
-    let mut runtime = Runtime::new_with_remote_bin(
+    let mut runtime = Runtime::new_with_options(
         Some(cmd.database.to_str().unwrap().to_owned()),
         cmd.remote_bin.as_deref(),
+        cmd.transport.as_deref(),
     );
     let theme = CTP_MOCHA_THEME.clone();
     let page = Page::Listing(ListingPage::new(&runtime, &theme));

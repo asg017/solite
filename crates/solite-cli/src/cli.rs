@@ -87,6 +87,10 @@ pub struct QueryArgs {
 
     #[arg(long)]
     pub load_extension: Option<Vec<PathBuf>>,
+
+    /// Path to the solite binary on the remote machine (for ssh:// connections)
+    #[arg(long)]
+    pub remote_bin: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -107,6 +111,10 @@ pub struct ExecuteArgs {
 #[derive(Args, Debug)]
 pub struct ReplArgs {
     pub database: Option<PathBuf>,
+
+    /// Path to the solite binary on the remote machine (for ssh:// connections)
+    #[arg(long)]
+    pub remote_bin: Option<String>,
 }
 
 #[derive(Args, Debug)]

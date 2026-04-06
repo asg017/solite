@@ -180,9 +180,13 @@ fn extract_preamble(code: &str) -> (&str, Option<&str>) {
 
 impl Runtime {
     pub fn new(path: Option<String>) -> Self {
+        Self::new_with_remote_bin(path, None)
+    }
+
+    pub fn new_with_remote_bin(path: Option<String>, remote_bin: Option<&str>) -> Self {
         let connection = match path {
             Some(ref path) if path.starts_with("ssh://") => {
-                Connection::open_remote(path).unwrap()
+                Connection::open_remote_with_bin(path, remote_bin).unwrap()
             }
             Some(path) => Connection::open(path.as_str()).unwrap(),
             None => Connection::open_in_memory().unwrap(),

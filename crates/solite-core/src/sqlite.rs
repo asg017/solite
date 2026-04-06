@@ -785,7 +785,14 @@ impl Connection {
     ///
     /// Parses an `ssh://[user@]host[:port]/path` URL and spawns an SSH process
     /// running `solite serve <path>` on the remote host.
+    ///
+    /// `remote_bin` optionally specifies the absolute path to the `solite` binary
+    /// on the remote machine. If `None`, uses `"solite"` (must be on remote `$PATH`).
     pub fn open_remote(url: &str) -> Result<Self, SQLiteError> {
+        Self::open_remote_with_bin(url, None)
+    }
+
+    pub fn open_remote_with_bin(url: &str, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
         let (user, host, port, db_path) = parse_ssh_url(url).map_err(|msg| SQLiteError {
             result_code: -1,
             code_description: "SSH_ERROR".to_string(),
@@ -794,7 +801,6 @@ impl Connection {
         })?;
 
         let mut cmd = std::process::Command::new("ssh");
-        cmd.arg("-o").arg("BatchMode=yes");
         if let Some(port) = port {
             cmd.arg("-p").arg(port.to_string());
         }
@@ -802,13 +808,14 @@ impl Connection {
             Some(u) => format!("{}@{}", u, host),
             None => host,
         };
+        let bin = remote_bin.unwrap_or("solite");
         cmd.arg(&target)
-            .arg("solite")
+            .arg(bin)
             .arg("serve")
             .arg(&db_path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            .stderr(std::process::Stdio::inherit());
 
         let mut child = cmd.spawn().map_err(|e| SQLiteError {
             result_code: -1,
@@ -820,13 +827,41 @@ impl Connection {
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
 
+        let mut transport = RemoteTransport {
+            child,
+            reader: std::io::BufReader::new(stdout),
+            writer: std::io::BufWriter::new(stdin),
+        };
+
+        // Verify the connection works by sending a ping request.
+        // This catches SSH failures (bad hostname, auth rejected, remote binary not found).
+        let response = transport.send_request(&crate::rpc::Request::InTransaction);
+        match response {
+            Ok(crate::rpc::Response::InTransaction { .. }) => {}
+            Ok(other) => {
+                let _ = transport.child.wait();
+                return Err(SQLiteError {
+                    result_code: -1,
+                    code_description: "SSH_ERROR".to_string(),
+                    message: format!("Unexpected response from remote: {:?}", other),
+                    offset: None,
+                });
+            }
+            Err(e) => {
+                // Wait for the child to finish so we don't leave zombies
+                let _ = transport.child.wait();
+                return Err(SQLiteError {
+                    result_code: -1,
+                    code_description: "SSH_ERROR".to_string(),
+                    message: format!("Failed to connect to remote database: {}", e.message),
+                    offset: None,
+                });
+            }
+        }
+
         Ok(Connection {
             inner: ConnectionInner::Remote {
-                transport: RefCell::new(RemoteTransport {
-                    child,
-                    reader: std::io::BufReader::new(stdout),
-                    writer: std::io::BufWriter::new(stdin),
-                }),
+                transport: RefCell::new(transport),
             },
         })
     }

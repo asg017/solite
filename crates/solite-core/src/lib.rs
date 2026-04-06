@@ -1,6 +1,7 @@
 pub mod dot;
 pub mod procedure;
 pub mod replacement_scans;
+pub mod rpc;
 pub mod sqlite;
 pub mod exporter;
 
@@ -180,11 +181,16 @@ fn extract_preamble(code: &str) -> (&str, Option<&str>) {
 impl Runtime {
     pub fn new(path: Option<String>) -> Self {
         let connection = match path {
+            Some(ref path) if path.starts_with("ssh://") => {
+                Connection::open_remote(path).unwrap()
+            }
             Some(path) => Connection::open(path.as_str()).unwrap(),
             None => Connection::open_in_memory().unwrap(),
         };
-        unsafe {
-            solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
+        if !connection.is_remote() {
+            unsafe {
+                solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
+            }
         }
         Runtime {
             connection,

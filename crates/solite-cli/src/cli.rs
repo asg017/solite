@@ -306,6 +306,12 @@ pub struct VacuumArgs {
     pub destination: Option<PathBuf>,
 }
 
+#[derive(Args, Debug)]
+pub struct ServeArgs {
+    /// Path to the database file to serve
+    pub database: String,
+}
+
 impl VacuumArgs {
     pub fn into_path(&self) -> Option<&PathBuf> {
         self.into.as_ref().or(self.destination.as_ref())
@@ -407,6 +413,10 @@ pub enum Commands {
 
     /// Rebuild a database file, repacking it into minimal disk space
     Vacuum(VacuumArgs),
+
+    /// Serve a database over stdin/stdout (used by SSH remote connections)
+    #[command(hide = true)]
+    Serve(ServeArgs),
 
     /// Streaming replication, like litestream
     #[cfg(feature = "ritestream")]

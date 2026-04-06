@@ -43,12 +43,16 @@ impl OpenCommand {
     ///
     /// Returns `DotError::Sqlite` if the database file cannot be opened.
     pub fn execute(&self, runtime: &mut Runtime) -> Result<(), DotError> {
-        let connection = Connection::open(&self.path)?;
-
-        // Initialize standard library functions
-        unsafe {
-            solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
-        }
+        let connection = if self.path.starts_with("ssh://") {
+            Connection::open_remote(&self.path)?
+        } else {
+            let conn = Connection::open(&self.path)?;
+            // Initialize standard library functions (local connections only)
+            unsafe {
+                solite_stdlib_init(conn.db(), std::ptr::null_mut(), std::ptr::null_mut());
+            }
+            conn
+        };
 
         runtime.connection = connection;
         Ok(())

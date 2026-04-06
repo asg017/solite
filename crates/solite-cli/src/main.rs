@@ -59,6 +59,7 @@ fn main() {
         cli::Commands::Schema(args) => commands::schema::schema(args.database),
         cli::Commands::Backup(args) => commands::backup::backup(args),
         cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),
+        cli::Commands::Serve(args) => commands::serve::serve(args),
         #[cfg(feature = "ritestream")]
         cli::Commands::Stream(cmd) => commands::stream::stream(cmd),
     };

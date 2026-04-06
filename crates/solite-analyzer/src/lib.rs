@@ -167,10 +167,27 @@ impl Schema {
         self.original_names.insert(table_key, name);
     }
 
-    /// Add a view to the schema
+    /// Add a view to the schema.
+    /// Views are also registered in the tables map so they can be queried like tables.
     pub fn add_view(&mut self, name: impl Into<String>, columns: Vec<String>) {
         let name = name.into();
         let view_key = name.to_lowercase();
+
+        // Register in the tables map so views are findable via get_table/table_names/columns_for_table
+        let col_set: HashSet<String> = columns.iter().map(|c| c.to_lowercase()).collect();
+        self.tables.insert(
+            view_key.clone(),
+            TableInfo {
+                columns: col_set,
+                original_columns: columns.clone(),
+                without_rowid: true, // views don't have rowid
+                doc: None,
+                column_docs: HashMap::new(),
+            },
+        );
+        self.original_names
+            .insert(view_key.clone(), name.clone());
+
         self.views.insert(
             view_key,
             ViewInfo {
@@ -238,7 +255,21 @@ impl Schema {
         }
 
         // Merge views - other's views override self's
+        // Also update tables/original_names so views remain queryable as tables
         for (name, view) in other.views {
+            let col_set: HashSet<String> = view.columns.iter().map(|c| c.to_lowercase()).collect();
+            self.tables.insert(
+                name.clone(),
+                TableInfo {
+                    columns: col_set,
+                    original_columns: view.columns.clone(),
+                    without_rowid: true,
+                    doc: None,
+                    column_docs: HashMap::new(),
+                },
+            );
+            self.original_names
+                .insert(name.clone(), view.name.clone());
             self.views.insert(name, view);
         }
 
@@ -531,8 +562,6 @@ pub fn build_schema(program: &Program) -> Schema {
             }
 
             Statement::CreateView(create) => {
-                let view_key = create.view_name.to_lowercase();
-
                 // If explicit columns are provided, use them
                 // Otherwise, infer from the SELECT statement
                 let columns = if let Some(ref cols) = create.columns {
@@ -541,13 +570,7 @@ pub fn build_schema(program: &Program) -> Schema {
                     infer_columns_from_select(&create.select)
                 };
 
-                schema.views.insert(
-                    view_key,
-                    ViewInfo {
-                        name: create.view_name.clone(),
-                        columns,
-                    },
-                );
+                schema.add_view(create.view_name.clone(), columns);
             }
 
             Statement::CreateTrigger(create) => {
@@ -598,6 +621,8 @@ pub fn build_schema(program: &Program) -> Schema {
             Statement::DropView(drop) => {
                 let view_key = drop.view_name.to_lowercase();
                 schema.views.remove(&view_key);
+                schema.tables.remove(&view_key);
+                schema.original_names.remove(&view_key);
             }
 
             Statement::DropTrigger(drop) => {
@@ -752,6 +777,8 @@ struct ExprContext<'a> {
     /// Table-valued function aliases whose columns are unknown at analysis time.
     /// Qualified references to these aliases (e.g. alias.col) are accepted without validation.
     opaque_aliases: HashSet<String>,
+    /// SELECT column aliases (lowercase). Visible in ORDER BY and HAVING.
+    column_aliases: HashSet<String>,
 }
 
 impl<'a> ExprContext<'a> {
@@ -816,12 +843,15 @@ impl<'a> ExprContext<'a> {
             .map(|(orig, _)| orig.as_str())
     }
 
-    /// Check if an unqualified column exists in any available table.
+    /// Check if an unqualified column exists in any available table or is a known alias.
     /// Returns true if any available table has unknown columns (empty set),
     /// since we can't validate columns we don't know about.
     fn unqualified_column_exists(&self, column_name: &str) -> bool {
         let col_key = column_name.to_lowercase();
         if self.all_columns.contains_key(&col_key) {
+            return true;
+        }
+        if self.column_aliases.contains(&col_key) {
             return true;
         }
         // If any table has unknown columns (opaque), accept any column
@@ -970,6 +1000,13 @@ fn analyze_select(
     // Check WHERE clause expression
     if let Some(ref where_expr) = select.where_clause {
         check_expr_with_context(where_expr, &expr_ctx, diagnostics);
+    }
+
+    // Collect SELECT column aliases so they can be referenced in GROUP BY, HAVING, ORDER BY
+    for col in &select.columns {
+        if let ResultColumn::Expr { alias: Some(alias), .. } = col {
+            expr_ctx.column_aliases.insert(alias.to_lowercase());
+        }
     }
 
     // Check GROUP BY expressions
@@ -1222,17 +1259,36 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
                     column_docs: HashMap::new(),
                 });
             }
+            Statement::CreateView(create) => {
+                // Register view as a table for future SELECT validation
+                let columns = if let Some(ref cols) = create.columns {
+                    cols.clone()
+                } else {
+                    infer_columns_from_select(&create.select)
+                };
+                let col_set: HashSet<String> = columns.iter().map(|c| c.to_lowercase()).collect();
+                let table_key = create.view_name.to_lowercase();
+                tables.insert(table_key, TableInfo {
+                    columns: col_set,
+                    original_columns: columns,
+                    without_rowid: true,
+                    doc: None,
+                    column_docs: HashMap::new(),
+                });
+            }
+            Statement::DropView(drop) => {
+                let view_key = drop.view_name.to_lowercase();
+                tables.remove(&view_key);
+            }
             // Other statement types - no specific analysis yet
             Statement::Insert(_)
             | Statement::Update(_)
             | Statement::Delete(_)
             | Statement::CreateIndex(_)
-            | Statement::CreateView(_)
             | Statement::CreateTrigger(_)
             | Statement::AlterTable(_)
             | Statement::DropTable(_)
             | Statement::DropIndex(_)
-            | Statement::DropView(_)
             | Statement::DropTrigger(_)
             | Statement::Begin(_)
             | Statement::Commit(_)

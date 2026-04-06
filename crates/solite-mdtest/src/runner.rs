@@ -258,47 +258,57 @@ fn extract_schema_from_ddl(sql: &str) -> Schema {
         return build_schema(&program);
     }
 
-    // If that fails, try to extract and parse individual CREATE statements
+    // If that fails, try to extract and parse individual DDL statements
     let mut schema = Schema::default();
     let sql_lower = sql.to_lowercase();
-    let mut offset = 0;
 
-    while let Some(create_pos) = sql_lower[offset..].find("create table") {
-        let start = offset + create_pos;
-        let rest = &sql[start..];
-        let end = if let Some(semi_pos) = rest.find(';') {
-            start + semi_pos + 1
-        } else {
-            sql.len()
-        };
+    // Extract CREATE TABLE and CREATE VIEW statements
+    for keyword in &["create table", "create view", "create temp table", "create temporary table"] {
+        let mut offset = 0;
+        while let Some(create_pos) = sql_lower[offset..].find(keyword) {
+            let start = offset + create_pos;
+            let rest = &sql[start..];
+            let end = if let Some(semi_pos) = rest.find(';') {
+                start + semi_pos + 1
+            } else {
+                sql.len()
+            };
 
-        let stmt_sql = &sql[start..end];
+            let stmt_sql = &sql[start..end];
 
-        if let Ok(program) = parse_program(stmt_sql) {
-            let stmt_schema = build_schema(&program);
-            for name in stmt_schema.table_names() {
-                if let Some(cols) = stmt_schema.columns_for_table(name) {
-                    let without_rowid = stmt_schema
-                        .columns_for_table_with_rowid(name)
-                        .map(|c| c.len() == cols.len())
-                        .unwrap_or(false);
+            if let Ok(program) = parse_program(stmt_sql) {
+                let stmt_schema = build_schema(&program);
+                // Merge all discovered tables (includes views registered as tables)
+                for name in stmt_schema.table_names() {
+                    if let Some(cols) = stmt_schema.columns_for_table(name) {
+                        let without_rowid = stmt_schema
+                            .columns_for_table_with_rowid(name)
+                            .map(|c| c.len() == cols.len())
+                            .unwrap_or(false);
 
-                    if let Some(info) = stmt_schema.get_table(name) {
-                        schema.add_table_with_doc(
-                            name,
-                            cols.to_vec(),
-                            without_rowid,
-                            info.doc.clone(),
-                            info.column_docs.clone(),
-                        );
-                    } else {
-                        schema.add_table(name, cols.to_vec(), without_rowid);
+                        if let Some(info) = stmt_schema.get_table(name) {
+                            schema.add_table_with_doc(
+                                name,
+                                cols.to_vec(),
+                                without_rowid,
+                                info.doc.clone(),
+                                info.column_docs.clone(),
+                            );
+                        } else {
+                            schema.add_table(name, cols.to_vec(), without_rowid);
+                        }
+                    }
+                }
+                // Also merge views so view_names() works
+                for view_name in stmt_schema.view_names() {
+                    if let Some(cols) = stmt_schema.columns_for_view(view_name) {
+                        schema.add_view(view_name, cols.to_vec());
                     }
                 }
             }
-        }
 
-        offset = end;
+            offset = end;
+        }
     }
 
     schema

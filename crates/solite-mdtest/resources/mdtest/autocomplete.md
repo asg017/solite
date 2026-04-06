@@ -82,6 +82,31 @@ select * from final;
 
 - `<ac1>`: on, as
 
+### Views in FROM
+
+Views should appear as completions after FROM.
+
+```sql
+create table users(id integer);
+create view active_users as select id from users;
+
+select * from <ac1>;
+```
+
+- `<ac1>`: users, active_users
+
+### View column completions
+
+Columns from views should be suggested.
+
+```sql
+create view v as select 1 as a, 2 as b, 3 as c;
+
+select <ac1> from v;
+```
+
+- `<ac1>`: a, b, c
+
 ## Column Completion
 
 ### Unqualified Columns

@@ -171,6 +171,80 @@ create table t(a, b, c);
 select * from main.t; -- ok
 ```
 
+## Views
+
+### Select from view
+
+Views should be queryable like tables.
+
+```sql
+create view vvvv as select 1 as a, 2 as b, 3 as c;
+select * from vvvv; -- ok
+```
+
+### View column validation
+
+Column references against views are validated.
+
+```sql
+create view v as select 1 as x, 2 as y;
+select x, y from v; -- ok
+```
+
+### Invalid column on view
+
+```sql
+create view v as select 1 as x;
+select z from v; -- error: "Column 'z' does not exist"
+```
+
+### View with explicit columns
+
+```sql
+create view v(a, b) as select 1, 2;
+select a, b from v; -- ok
+```
+
+### Drop view removes it
+
+```sql
+create view v as select 1 as a;
+drop view v;
+select * from v; -- error: "Unknown table"
+```
+
+## SELECT Aliases
+
+### Alias in ORDER BY
+
+SELECT aliases can be referenced in ORDER BY.
+
+```sql
+create table t(a, b);
+select *, count(*) as ttt from t order by ttt; -- ok
+```
+
+### Alias in GROUP BY
+
+```sql
+create table t(a, b);
+select a || b as combined from t group by combined; -- ok
+```
+
+### Alias in HAVING
+
+```sql
+create table t(a);
+select count(*) as cnt from t having cnt > 1; -- ok
+```
+
+### Invalid alias in ORDER BY
+
+```sql
+create table t(a);
+select a from t order by nonexistent; -- error: "Column 'nonexistent' does not exist"
+```
+
 ## Parse Errors
 
 Tests for parse error detection are handled separately since

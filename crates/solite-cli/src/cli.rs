@@ -214,6 +214,10 @@ pub struct DocsInlineArgs {
 pub struct TuiArgs {
     pub database: PathBuf,
     pub table: Option<String>,
+
+    /// Path to the solite binary on the remote machine (for ssh:// connections)
+    #[arg(long)]
+    pub remote_bin: Option<String>,
 }
 
 #[derive(Args, Debug)]

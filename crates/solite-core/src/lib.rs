@@ -915,9 +915,9 @@ mod tests {
             .unwrap()
             .1
             .unwrap();
-        assert_eq!(
-            stmt.next().unwrap().unwrap().first().unwrap().as_str(),
-            "3.52.0"
+        insta::assert_snapshot!(
+            "sqlite_version",
+            stmt.next().unwrap().unwrap().first().unwrap().as_str()
         );
         insta::assert_yaml_snapshot!(functions_of(&runtime.connection));
         insta::assert_yaml_snapshot!(modules_of(&runtime.connection));

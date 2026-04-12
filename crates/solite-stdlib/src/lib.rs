@@ -17,7 +17,7 @@ include!(concat!(env!("OUT_DIR"), "/builtins.rs"));
 
 #[link(name = "base64")]
 extern "C" {
-    fn sqlite3_base_init();
+    fn sqlite3_base64_init();
 }
 //#[link(name = "base85")]
 //extern "C" {
@@ -119,7 +119,7 @@ pub unsafe extern "C" fn solite_stdlib_init(
 
     sqlite3_solite_stdlib_init(db, pz_err_msg, p_api);
 
-    init_arg0(sqlite3_base_init, db, pz_err_msg, p_api);
+    init_arg0(sqlite3_base64_init, db, pz_err_msg, p_api);
 
     //sqlite3_fastrand_init(db, pz_err_msg, p_api);
     init_arg0(sqlite3_vec_init, db, pz_err_msg, p_api);
@@ -161,11 +161,10 @@ mod tests {
     fn stdlib_basic() {
         let db = Connection::open_in_memory().unwrap();
 
-        assert_eq!(
+        insta::assert_snapshot!(
             db.query_row("select sqlite_version();", [], |r| r
                 .get::<usize, String>(0))
-                .unwrap(),
-            "3.52.0"
+                .unwrap()
         );
 
         let base_functions: Vec<String> = functions_of(db);

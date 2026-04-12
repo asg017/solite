@@ -1,0 +1,6 @@
+---
+source: crates/solite-core/src/lib.rs
+expression: stmt.next().unwrap().unwrap().first().unwrap().as_str()
+snapshot_kind: text
+---
+3.53.0

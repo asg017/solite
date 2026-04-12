@@ -206,6 +206,7 @@ fn main() {
         .define("sqlite3_series_init", Some("_shell_series_init"))
         .define("sqlite3_fileio_init", Some("_shell_fileio_init"))
         .define("sqlite3CompletionVtabInit", Some("_shell_CompletionVtabInit"))
+        .define("sqlite3_base64_init", Some("_shell_base64_init"))
         .define("sqlite3_completion_init", Some("_shell_completion_init"))
         .warnings(false);
     if cfg!(target_os = "windows") {

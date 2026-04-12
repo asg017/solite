@@ -247,6 +247,7 @@ pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
         Some(cmd.database.to_str().unwrap().to_owned()),
         cmd.remote.remote_bin.as_deref(),
         cmd.remote.transport.as_deref(),
+        cmd.remote.allow_ssh,
     ).map_err(|e| {
         eprintln!("Error: {}", e);
     })?;

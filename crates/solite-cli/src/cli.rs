@@ -13,6 +13,10 @@ pub struct RemoteArgs {
     /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
     #[arg(long)]
     pub transport: Option<String>,
+
+    /// Whether SSH/remote connections are allowed (set from top-level --allow-ssh)
+    #[arg(skip)]
+    pub allow_ssh: bool,
 }
 
 #[derive(Args, Debug)]
@@ -496,6 +500,10 @@ Compatibility:
   help_template = HELP_TEMPLATE,
 )]
 pub struct Cli {
+    /// Allow SSH and remote transport connections
+    #[arg(long, global = true)]
+    pub allow_ssh: bool,
+
     #[command(subcommand)]
     pub command: Box<Commands>,
 }

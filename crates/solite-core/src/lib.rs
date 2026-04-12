@@ -180,14 +180,22 @@ fn extract_preamble(code: &str) -> (&str, Option<&str>) {
 
 impl Runtime {
     pub fn new(path: Option<String>) -> Result<Self, SQLiteError> {
-        Self::new_with_remote_bin(path, None)
+        Self::new_with_options(path, None, None, false)
     }
 
-    pub fn new_with_remote_bin(path: Option<String>, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
-        Self::new_with_options(path, remote_bin, None)
-    }
+    pub fn new_with_options(path: Option<String>, remote_bin: Option<&str>, transport: Option<&str>, allow_ssh: bool) -> Result<Self, SQLiteError> {
+        let is_remote = transport.is_some()
+            || path.as_ref().map_or(false, |p| sqlite::is_remote_path(p));
 
-    pub fn new_with_options(path: Option<String>, remote_bin: Option<&str>, transport: Option<&str>) -> Result<Self, SQLiteError> {
+        if is_remote && !allow_ssh {
+            return Err(SQLiteError {
+                result_code: -1,
+                code_description: "SSH_DENIED".to_string(),
+                message: "Remote connections require --allow-ssh flag".to_string(),
+                offset: None,
+            });
+        }
+
         let connection = if let Some(ref transport_cmd) = transport {
             let db_path = path.as_deref().unwrap_or(":memory:");
             Connection::open_transport(transport_cmd, db_path, remote_bin)?

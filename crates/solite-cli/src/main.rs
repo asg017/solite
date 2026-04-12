@@ -15,7 +15,7 @@ fn main() {
         Ok(cli) => cli.command,
         Err(err) => match err.kind() {
             clap::error::ErrorKind::MissingSubcommand => {
-                Box::new(cli::Commands::Repl(ReplArgs { database: None, remote_bin: None, transport: None }))
+                Box::new(cli::Commands::Repl(ReplArgs { database: None, remote: Default::default() }))
             }
             clap::error::ErrorKind::InvalidSubcommand => {
               // if the "invalid subcommand" is actually a path to a database file,
@@ -27,8 +27,7 @@ fn main() {
                 {
                     Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),
-                        remote_bin: None,
-                        transport: None,
+                        remote: Default::default(),
                     }))
                 } else {
                     err.print().unwrap();

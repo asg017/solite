@@ -72,8 +72,8 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
 
     let mut runtime = Runtime::new_with_options(
         db_path.map(|p| p.to_string_lossy().to_string()),
-        args.remote_bin.as_deref(),
-        args.transport.as_deref(),
+        args.remote.remote_bin.as_deref(),
+        args.remote.transport.as_deref(),
     );
 
     // Load extensions if specified
@@ -244,6 +244,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            remote: Default::default(),
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Csv));
@@ -258,6 +259,7 @@ mod tests {
             output: Some(PathBuf::from("output.csv")),
             load_extension: None,
             parameters: vec![],
+            remote: Default::default(),
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Csv));
@@ -272,6 +274,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            remote: Default::default(),
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Json));

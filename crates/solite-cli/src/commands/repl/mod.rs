@@ -448,8 +448,8 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
         args.database
             .as_ref()
             .map(|p| p.to_string_lossy().to_string()),
-        args.remote_bin.as_deref(),
-        args.transport.as_deref(),
+        args.remote.remote_bin.as_deref(),
+        args.remote.transport.as_deref(),
     );
     let rc_runtime = Rc::new(RefCell::new(runtime));
 

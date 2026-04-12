@@ -234,7 +234,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
 
     // No args → REPL; only a database → REPL on that db
     if script.is_none() && procedure.is_none() {
-        crate::commands::repl::repl(ReplArgs { database, remote_bin: None, transport: None })
+        crate::commands::repl::repl(ReplArgs { database, remote: Default::default() })
             .map_err(|_| anyhow::anyhow!("Failed to open REPL"))?;
         return Ok(());
     }

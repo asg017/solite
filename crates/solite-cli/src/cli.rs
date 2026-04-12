@@ -3,6 +3,18 @@ use std::{collections::HashMap, env, path::PathBuf};
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::ExportFormat;
 
+/// Shared args for connecting to remote databases over SSH or custom transports.
+#[derive(Args, Debug, Clone, Default)]
+pub struct RemoteArgs {
+    /// Path to the solite binary on the remote machine (for ssh:// connections)
+    #[arg(long)]
+    pub remote_bin: Option<String>,
+
+    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+    #[arg(long)]
+    pub transport: Option<String>,
+}
+
 #[derive(Args, Debug)]
 pub struct RunArgs {
     /// Positional args: [database] [script.sql] [procedureName]
@@ -88,13 +100,8 @@ pub struct QueryArgs {
     #[arg(long)]
     pub load_extension: Option<Vec<PathBuf>>,
 
-    /// Path to the solite binary on the remote machine (for ssh:// connections)
-    #[arg(long)]
-    pub remote_bin: Option<String>,
-
-    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
-    #[arg(long)]
-    pub transport: Option<String>,
+    #[command(flatten)]
+    pub remote: RemoteArgs,
 }
 
 #[derive(Args, Debug)]
@@ -116,13 +123,8 @@ pub struct ExecuteArgs {
 pub struct ReplArgs {
     pub database: Option<PathBuf>,
 
-    /// Path to the solite binary on the remote machine (for ssh:// connections)
-    #[arg(long)]
-    pub remote_bin: Option<String>,
-
-    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
-    #[arg(long)]
-    pub transport: Option<String>,
+    #[command(flatten)]
+    pub remote: RemoteArgs,
 }
 
 #[derive(Args, Debug)]
@@ -223,13 +225,8 @@ pub struct TuiArgs {
     pub database: PathBuf,
     pub table: Option<String>,
 
-    /// Path to the solite binary on the remote machine (for ssh:// connections)
-    #[arg(long)]
-    pub remote_bin: Option<String>,
-
-    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
-    #[arg(long)]
-    pub transport: Option<String>,
+    #[command(flatten)]
+    pub remote: RemoteArgs,
 }
 
 #[derive(Args, Debug)]

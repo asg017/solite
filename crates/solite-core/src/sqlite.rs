@@ -64,6 +64,8 @@ impl fmt::Display for SQLiteError {
     }
 }
 
+impl std::error::Error for SQLiteError {}
+
 // Use the SQLite printf '%Q' conversion to escape a string as a SQL string literal, surrounded by single quotes.
 pub fn escape_string(value: &str) -> String {
     let s = CString::new(value).unwrap();

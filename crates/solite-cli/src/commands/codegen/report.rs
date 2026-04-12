@@ -36,7 +36,7 @@ pub fn report_from_file(
 ) -> Result<Report> {
     let mut report = Report::new();
 
-    let mut rt = Runtime::new(None);
+    let mut rt = Runtime::new(None)?;
     let conn = create_connection(&base_db_type, &mut report)?;
     rt.connection = conn;
 

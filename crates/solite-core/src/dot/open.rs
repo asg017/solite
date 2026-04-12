@@ -69,7 +69,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let cmd = OpenCommand {
             path: db_path.to_string_lossy().to_string(),
         };
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_open_memory() {
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let cmd = OpenCommand {
             path: ":memory:".to_string(),
         };
@@ -116,7 +116,7 @@ mod tests {
             stmt.unwrap().execute().unwrap();
         }
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let cmd = OpenCommand {
             path: db_path.to_string_lossy().to_string(),
         };

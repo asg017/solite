@@ -179,26 +179,25 @@ fn extract_preamble(code: &str) -> (&str, Option<&str>) {
 }
 
 impl Runtime {
-    pub fn new(path: Option<String>) -> Self {
+    pub fn new(path: Option<String>) -> Result<Self, SQLiteError> {
         Self::new_with_remote_bin(path, None)
     }
 
-    pub fn new_with_remote_bin(path: Option<String>, remote_bin: Option<&str>) -> Self {
+    pub fn new_with_remote_bin(path: Option<String>, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
         Self::new_with_options(path, remote_bin, None)
     }
 
-    pub fn new_with_options(path: Option<String>, remote_bin: Option<&str>, transport: Option<&str>) -> Self {
+    pub fn new_with_options(path: Option<String>, remote_bin: Option<&str>, transport: Option<&str>) -> Result<Self, SQLiteError> {
         let connection = if let Some(ref transport_cmd) = transport {
-            // Custom transport (fly, docker, kubectl, etc.)
             let db_path = path.as_deref().unwrap_or(":memory:");
-            Connection::open_transport(transport_cmd, db_path, remote_bin).unwrap()
+            Connection::open_transport(transport_cmd, db_path, remote_bin)?
         } else {
             match path {
                 Some(ref path) if sqlite::is_remote_path(path) => {
-                    Connection::open_remote_with_bin(path, remote_bin).unwrap()
+                    Connection::open_remote_with_bin(path, remote_bin)?
                 }
-                Some(path) => Connection::open(path.as_str()).unwrap(),
-                None => Connection::open_in_memory().unwrap(),
+                Some(path) => Connection::open(path.as_str())?,
+                None => Connection::open_in_memory()?,
             }
         };
         if !connection.is_remote() {
@@ -206,16 +205,15 @@ impl Runtime {
                 solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
             }
         }
-        Runtime {
+        Ok(Runtime {
             connection,
             stack: vec![],
-            //state: State::default(),
             initialized_sqlite_parameters_table: false,
             procedures: HashMap::new(),
             loaded_files: std::collections::HashSet::new(),
             virtual_files: HashMap::new(),
             running_files: Vec::new(),
-        }
+        })
     }
 
     pub fn new_readonly(path: &str) -> Self {
@@ -902,7 +900,7 @@ mod tests {
 
     #[test]
     fn core_basic() {
-        let runtime = Runtime::new(None);
+        let runtime = Runtime::new(None).unwrap();
         let stmt = runtime
             .connection
             .prepare("select sqlite_version();")
@@ -921,7 +919,7 @@ mod tests {
     
     #[test]
     fn snap2() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.enqueue(
             "[input]",
             "
@@ -987,7 +985,7 @@ select not_exist();",
 
         // Seed a database
         {
-            let rt = Runtime::new(Some(db_str.to_string()));
+            let rt = Runtime::new(Some(db_str.to_string())).unwrap();
             rt.connection
                 .execute_script("CREATE TABLE t(x TEXT); INSERT INTO t VALUES ('hi');")
                 .unwrap();
@@ -1009,7 +1007,7 @@ select not_exist();",
 
         // Seed a database
         {
-            let rt = Runtime::new(Some(db_str.to_string()));
+            let rt = Runtime::new(Some(db_str.to_string())).unwrap();
             rt.connection
                 .execute_script("CREATE TABLE t(x TEXT)")
                 .unwrap();
@@ -1029,21 +1027,21 @@ select not_exist();",
 
     #[test]
     fn test_virtual_file_read() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/test.sql", "select 42;");
         assert_eq!(rt.read_file("/test.sql").unwrap(), "select 42;");
     }
 
     #[test]
     fn test_virtual_file_fallback() {
-        let rt = Runtime::new(None);
+        let rt = Runtime::new(None).unwrap();
         let result = rt.read_file("/nonexistent_file_12345.sql");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_load_file_uses_virtual_fs() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "create table vtest(x); insert into vtest values (99);");
         rt.load_file("/helper.sql").unwrap();
         let (_, stmt) = rt.connection.prepare("select x from vtest").unwrap();
@@ -1054,7 +1052,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_begin_reads_virtual_file() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/test.sql", "select 1;");
         let saved = rt.run_file_begin("/test.sql", &HashMap::new()).unwrap();
         // Stack should have one block (the file)
@@ -1064,7 +1062,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_begin_cycle_self() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/self.sql", ".run /self.sql");
         rt.running_files.push("/self.sql".to_string());
         let result = rt.run_file_begin("/self.sql", &HashMap::new());
@@ -1074,7 +1072,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_begin_cycle_mutual() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/a.sql", ".run /b.sql");
         rt.add_virtual_file("/b.sql", ".run /a.sql");
         rt.running_files.push("/a.sql".to_string());
@@ -1088,7 +1086,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_begin_cycle_deep() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/a.sql", "");
         rt.running_files.push("/a.sql".to_string());
         rt.running_files.push("/b.sql".to_string());
@@ -1101,7 +1099,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_end_restores_stack() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/test.sql", "select 1;");
         // Set up some existing stack
         rt.enqueue("[outer]", "select 'outer';", BlockSource::Repl);
@@ -1117,7 +1115,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_end_restores_params() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/test.sql", "select 1;");
         rt.define_parameter("name".to_string(), "original".to_string()).unwrap();
 
@@ -1146,7 +1144,7 @@ select not_exist();",
 
     #[test]
     fn test_run_path_resolution() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/dir/helper.sql", "select 42;");
         rt.add_virtual_file("/dir/main.sql", ".run helper.sql\n");
         rt.enqueue("/dir/main.sql", ".run helper.sql\n", BlockSource::File(PathBuf::from("/dir/main.sql")));
@@ -1260,7 +1258,7 @@ select not_exist();",
 
     #[test]
     fn test_run_basic_execution() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "select 42;");
         rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
         rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
@@ -1270,7 +1268,7 @@ select not_exist();",
 
     #[test]
     fn test_run_multiple_statements() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "select 'a';\nselect 'b';\nselect 'c';");
         rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
         rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
@@ -1280,7 +1278,7 @@ select not_exist();",
 
     #[test]
     fn test_run_with_dot_commands() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", ".print hello\n");
         rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
         rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));
@@ -1290,7 +1288,7 @@ select not_exist();",
 
     #[test]
     fn test_run_step_ordering() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "select 'b';");
         let code = "select 'a';\n.run /helper.sql\nselect 'c';";
         rt.add_virtual_file("/main.sql", code);
@@ -1301,7 +1299,7 @@ select not_exist();",
 
     #[test]
     fn test_run_nested() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/c.sql", "select 'c';");
         rt.add_virtual_file("/b.sql", "select 'b';\n.run /c.sql");
         let code = "select 'a';\n.run /b.sql\nselect 'd';";
@@ -1313,7 +1311,7 @@ select not_exist();",
 
     #[test]
     fn test_run_params_scoped() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "select :name;");
         let code = ".run /helper.sql --name=alex\nselect :name;";
         rt.add_virtual_file("/main.sql", code);
@@ -1329,7 +1327,7 @@ select not_exist();",
 
     #[test]
     fn test_run_params_override_restored() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "select :name;");
         rt.define_parameter("name".to_string(), "original".to_string()).unwrap();
         let code = ".run /helper.sql --name=override";
@@ -1347,7 +1345,7 @@ select not_exist();",
 
     #[test]
     fn test_run_cycle_error_message() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/a.sql", ".run /b.sql");
         rt.add_virtual_file("/b.sql", ".run /a.sql");
         rt.enqueue("/a.sql", ".run /b.sql", BlockSource::File(PathBuf::from("/a.sql")));
@@ -1361,7 +1359,7 @@ select not_exist();",
 
     #[test]
     fn test_run_file_not_found_error() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         let code = ".run /nonexistent.sql";
         rt.enqueue("/main.sql", code, BlockSource::File(PathBuf::from("/main.sql")));
 
@@ -1372,7 +1370,7 @@ select not_exist();",
 
     #[test]
     fn test_run_traceback_shows_correct_file() {
-        let mut rt = Runtime::new(None);
+        let mut rt = Runtime::new(None).unwrap();
         rt.add_virtual_file("/helper.sql", "select 42;");
         rt.add_virtual_file("/main.sql", ".run /helper.sql\n");
         rt.enqueue("/main.sql", ".run /helper.sql\n", BlockSource::File(PathBuf::from("/main.sql")));

@@ -62,7 +62,8 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     let content = read_to_string(&source_path)
         .map_err(|e| TestError::FileRead(format!("{}: {}", source_path.display(), e)))?;
 
-    let mut rt = Runtime::new(None);
+    let mut rt = Runtime::new(None)
+        .map_err(|e| TestError::FileRead(format!("Failed to initialize runtime: {}", e)))?;
     rt.enqueue(
         &source_path.to_string_lossy(),
         &content,

@@ -169,7 +169,7 @@ mod tests {
             message: "How many users are there?".to_string(),
         };
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
 
         // Create a test table
         let (_, stmt) = runtime
@@ -193,7 +193,7 @@ mod tests {
             message: "test".to_string(),
         };
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let result = cmd.execute(&mut runtime);
 
         assert!(matches!(result, Err(DotError::Env(_))));

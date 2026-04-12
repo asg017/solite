@@ -148,14 +148,15 @@ fn print_results(sql: &str, times: &[jiff::Span], steps: Vec<solite_core::sqlite
 
 /// Entry point for the bench command.
 pub fn bench(args: BenchArgs) -> Result<(), ()> {
-    let mut runtime = Runtime::new(None);
+    bench_impl(args).map_err(|e| eprintln!("Error: {e:?}"))
+}
+
+fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
+    let mut runtime = Runtime::new(None)?;
 
     // Load extensions for the runtime connection
     if let Some(ref extensions) = args.load_extension {
-        if let Err(e) = load_extensions(&runtime.connection, extensions) {
-            eprintln!("{}", e);
-            return Err(());
-        }
+        load_extensions(&runtime.connection, extensions)?;
     }
 
     let pb = create_progress_bar();
@@ -163,35 +164,16 @@ pub fn bench(args: BenchArgs) -> Result<(), ()> {
     for (idx, sql_arg) in args.sql.iter().enumerate() {
         // Set up connection for this query
         if let Some(databases) = &args.database {
-            let db_path = match databases.get(idx) {
-                Some(p) => p,
-                None => {
-                    eprintln!("No database specified for SQL argument {}", idx);
-                    return Err(());
-                }
-            };
+            let db_path = databases.get(idx)
+                .ok_or_else(|| anyhow::anyhow!("No database specified for SQL argument {}", idx))?;
 
-            let path_str = match db_path.as_os_str().to_str() {
-                Some(s) => s,
-                None => {
-                    eprintln!("Invalid database path: {}", db_path.display());
-                    return Err(());
-                }
-            };
+            let path_str = db_path.as_os_str().to_str()
+                .ok_or_else(|| anyhow::anyhow!("Invalid database path: {}", db_path.display()))?;
 
-            let conn = match Connection::open(path_str) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to open database {}: {:?}", db_path.display(), e);
-                    return Err(());
-                }
-            };
+            let conn = Connection::open(path_str)?;
 
             if let Some(ref extensions) = args.load_extension {
-                if let Err(e) = load_extensions(&conn, extensions) {
-                    eprintln!("{}", e);
-                    return Err(());
-                }
+                load_extensions(&conn, extensions)?;
             }
 
             runtime.connection = conn;
@@ -200,33 +182,16 @@ pub fn bench(args: BenchArgs) -> Result<(), ()> {
         }
 
         // Resolve SQL (from file or direct)
-        let sql = match resolve_sql(sql_arg) {
-            Ok(s) => {
-                if sql_arg.ends_with(".sql") {
-                    pb.set_message(format!("Reading SQL file: {}", sql_arg));
-                } else {
-                    pb.set_message(format!("SQL: {}", sql_arg));
-                }
-                s
-            }
-            Err(e) => {
-                eprintln!("{}", e);
-                return Err(());
-            }
-        };
+        let sql = resolve_sql(sql_arg)?;
+        if sql_arg.ends_with(".sql") {
+            pb.set_message(format!("Reading SQL file: {}", sql_arg));
+        } else {
+            pb.set_message(format!("SQL: {}", sql_arg));
+        }
 
         // Prepare the statement
-        let stmt = match runtime.connection.prepare(&sql) {
-            Ok((_, Some(stmt))) => stmt,
-            Ok((_, None)) => {
-                eprintln!("Failed to prepare statement: no statement returned");
-                return Err(());
-            }
-            Err(e) => {
-                eprintln!("Failed to prepare statement: {:?}", e);
-                return Err(());
-            }
-        };
+        let (_, stmt) = runtime.connection.prepare(&sql)?;
+        let stmt = stmt.ok_or_else(|| anyhow::anyhow!("Failed to prepare statement: no statement returned"))?;
 
         // Run benchmark iterations
         let mut times = vec![];
@@ -238,10 +203,7 @@ pub fn bench(args: BenchArgs) -> Result<(), ()> {
             pb.inc(1);
             let tn = jiff::Timestamp::now();
 
-            if let Err(e) = stmt.execute() {
-                eprintln!("Failed to execute statement: {:?}", e);
-                return Err(());
-            }
+            stmt.execute()?;
             stmt.reset();
 
             times.push(jiff::Timestamp::now() - tn);

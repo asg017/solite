@@ -74,7 +74,7 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
         db_path.map(|p| p.to_string_lossy().to_string()),
         args.remote.remote_bin.as_deref(),
         args.remote.transport.as_deref(),
-    );
+    ).map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
 
     // Load extensions if specified
     if let Some(exts) = &args.load_extension {

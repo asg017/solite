@@ -17,7 +17,7 @@ pub(crate) fn exec(args: ExecuteArgs) -> Result<(), ()> {
 fn exec_impl(args: ExecuteArgs) -> Result<()> {
     let (db_path, sql) = parse_arguments(&args);
 
-    let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()));
+    let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()))?;
 
     // Set parameters
     for chunk in args.parameters.chunks(2) {
@@ -150,7 +150,7 @@ mod tests {
         let db_str = db_path.to_str().unwrap();
 
         {
-            let rt = Runtime::new(Some(db_str.to_string()));
+            let rt = Runtime::new(Some(db_str.to_string())).unwrap();
             rt.connection
                 .execute_script("CREATE TABLE t(a INTEGER)")
                 .unwrap();
@@ -167,7 +167,7 @@ mod tests {
         };
         exec_impl(args).unwrap();
 
-        let rt = Runtime::new(Some(db_str.to_string()));
+        let rt = Runtime::new(Some(db_str.to_string())).unwrap();
         assert_eq!(query_val(&rt, "SELECT a FROM t"), "42");
     }
 

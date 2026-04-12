@@ -163,7 +163,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
                 None => bail!("--readonly requires a database path"),
             }
         } else {
-            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
         };
 
         if flags.trace.is_some() {
@@ -206,7 +206,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
                 None => bail!("--readonly requires a database path"),
             }
         } else {
-            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
         };
 
         if flags.trace.is_some() {
@@ -253,7 +253,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
             }
         }
     } else {
-        Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+        Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
     };
 
     // Set up tracing if requested

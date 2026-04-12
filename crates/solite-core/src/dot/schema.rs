@@ -63,7 +63,7 @@ mod tests {
     use super::*;
 
     fn create_test_runtime() -> Runtime {
-        Runtime::new(None)
+        Runtime::new(None).unwrap()
     }
 
     #[test]

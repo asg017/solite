@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_vegalite_bar_chart() {
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
 
         // Create test data
         let (_, stmt) = runtime
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_vegalite_encoding_types() {
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
 
         let (_, stmt) = runtime
             .connection
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_vegalite_empty_data() {
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
 
         let (_, stmt) = runtime
             .connection

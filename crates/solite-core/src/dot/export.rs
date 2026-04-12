@@ -114,7 +114,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("output.csv");
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
 
         // Create test data
         let (_, stmt) = runtime
@@ -152,7 +152,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("output.xyz");
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
 
         let (_, stmt) = runtime
             .connection

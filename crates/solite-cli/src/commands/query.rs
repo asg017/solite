@@ -70,7 +70,12 @@ pub(crate) fn query(args: QueryArgs) -> Result<(), ()> {
 fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
     let (db_path, sql) = parse_arguments(&args)?;
 
-    let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()));
+    let mut runtime = Runtime::new_with_options(
+        db_path.map(|p| p.to_string_lossy().to_string()),
+        args.remote.remote_bin.as_deref(),
+        args.remote.transport.as_deref(),
+        args.remote.allow_ssh,
+    ).map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
 
     // Load extensions if specified
     if let Some(exts) = &args.load_extension {
@@ -133,12 +138,32 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
 }
 
 /// Parse command line arguments to determine database path and SQL.
+fn is_remote_url(s: &str) -> bool {
+    solite_core::sqlite::is_remote_path(s)
+}
+
 fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryError> {
     match &args.database {
-        None => Ok((None, args.statement.clone())),
+        None => {
+            // Check if the statement arg is actually an ssh:// URL (user put db first)
+            if is_remote_url(&args.statement) {
+                return Err(QueryError::ExecutionFailed(
+                    "Usage: solite query <sql> <database>".to_string(),
+                ));
+            }
+            Ok((None, args.statement.clone()))
+        }
         Some(arg1) => {
             let arg0 = &args.statement;
-            if arg1.exists() {
+            let arg1_str = arg1.to_string_lossy();
+
+            // If either arg looks like an ssh:// URL, treat it as the database
+            if is_remote_url(&arg1_str) {
+                Ok((Some(arg1.clone()), arg0.clone()))
+            } else if is_remote_url(arg0) {
+                let sql = arg1_str.to_string();
+                Ok((Some(PathBuf::from(arg0)), sql))
+            } else if arg1.exists() {
                 Ok((Some(arg1.clone()), arg0.clone()))
             } else {
                 let p = PathBuf::from(arg0);
@@ -220,6 +245,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            remote: Default::default(),
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Csv));
@@ -234,6 +260,7 @@ mod tests {
             output: Some(PathBuf::from("output.csv")),
             load_extension: None,
             parameters: vec![],
+            remote: Default::default(),
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Csv));
@@ -248,6 +275,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            remote: Default::default(),
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Json));

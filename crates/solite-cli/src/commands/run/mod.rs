@@ -163,7 +163,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
                 None => bail!("--readonly requires a database path"),
             }
         } else {
-            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
         };
 
         if flags.trace.is_some() {
@@ -206,7 +206,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
                 None => bail!("--readonly requires a database path"),
             }
         } else {
-            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
         };
 
         if flags.trace.is_some() {
@@ -234,7 +234,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
 
     // No args → REPL; only a database → REPL on that db
     if script.is_none() && procedure.is_none() {
-        crate::commands::repl::repl(ReplArgs { database })
+        crate::commands::repl::repl(ReplArgs { database, remote: Default::default() })
             .map_err(|_| anyhow::anyhow!("Failed to open REPL"))?;
         return Ok(());
     }
@@ -253,7 +253,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
             }
         }
     } else {
-        Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))
+        Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
     };
 
     // Set up tracing if requested

@@ -11,11 +11,11 @@ use cli::ReplArgs;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let x = match cli::Cli::try_parse_from(&args) {
-        Ok(cli) => cli.command,
+    let (allow_ssh, x) = match cli::Cli::try_parse_from(&args) {
+        Ok(cli) => (cli.allow_ssh, cli.command),
         Err(err) => match err.kind() {
             clap::error::ErrorKind::MissingSubcommand => {
-                Box::new(cli::Commands::Repl(ReplArgs { database: None }))
+                (false, Box::new(cli::Commands::Repl(ReplArgs { database: None, remote: Default::default() })))
             }
             clap::error::ErrorKind::InvalidSubcommand => {
               // if the "invalid subcommand" is actually a path to a database file,
@@ -25,9 +25,10 @@ fn main() {
                     .map(PathBuf::from)
                     .filter(|p: &PathBuf| p.extension().is_some_and(|ext| ext == "db"))
                 {
-                    Box::new(cli::Commands::Repl(ReplArgs {
+                    (false, Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),
-                    }))
+                        remote: Default::default(),
+                    })))
                 } else {
                     err.print().unwrap();
                     exit(1);
@@ -39,6 +40,14 @@ fn main() {
             }
         },
     };
+    let mut x = x;
+    // Propagate top-level --allow-ssh into command RemoteArgs
+    match x.as_mut() {
+        cli::Commands::Repl(a) => a.remote.allow_ssh = allow_ssh,
+        cli::Commands::Query(a) => a.remote.allow_ssh = allow_ssh,
+        cli::Commands::Tui(a) => a.remote.allow_ssh = allow_ssh,
+        _ => {}
+    }
     let result = match *x {
         cli::Commands::Run(args) => commands::run::run(args),
         cli::Commands::Query(args) => commands::query::query(args),
@@ -59,6 +68,7 @@ fn main() {
         cli::Commands::Schema(args) => commands::schema::schema(args.database),
         cli::Commands::Backup(args) => commands::backup::backup(args),
         cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),
+        cli::Commands::Serve(args) => commands::serve::serve(args),
         #[cfg(feature = "ritestream")]
         cli::Commands::Stream(cmd) => commands::stream::stream(cmd),
     };

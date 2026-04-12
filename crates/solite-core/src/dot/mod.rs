@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_file_only() {
-        let mut rt = crate::Runtime::new(None);
+        let mut rt = crate::Runtime::new(None).unwrap();
         let cmd = parse_dot("run", "file.sql", "", &mut rt).unwrap();
         match cmd {
             DotCommand::Run(run_cmd) => {
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_file_and_procedure() {
-        let mut rt = crate::Runtime::new(None);
+        let mut rt = crate::Runtime::new(None).unwrap();
         let cmd = parse_dot("run", "file.sql procName", "", &mut rt).unwrap();
         match cmd {
             DotCommand::Run(run_cmd) => {
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_file_and_params() {
-        let mut rt = crate::Runtime::new(None);
+        let mut rt = crate::Runtime::new(None).unwrap();
         let cmd = parse_dot("run", "file.sql --name=alex --age 20", "", &mut rt).unwrap();
         match cmd {
             DotCommand::Run(run_cmd) => {
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_file_procedure_and_params() {
-        let mut rt = crate::Runtime::new(None);
+        let mut rt = crate::Runtime::new(None).unwrap();
         let cmd = parse_dot("run", "file.sql procName --name alex --age=20", "", &mut rt).unwrap();
         match cmd {
             DotCommand::Run(run_cmd) => {
@@ -441,14 +441,14 @@ mod tests {
 
     #[test]
     fn test_parse_run_missing_file() {
-        let mut rt = crate::Runtime::new(None);
+        let mut rt = crate::Runtime::new(None).unwrap();
         let result = parse_dot("run", "", "", &mut rt);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_run_param_missing_value() {
-        let mut rt = crate::Runtime::new(None);
+        let mut rt = crate::Runtime::new(None).unwrap();
         let result = parse_dot("run", "file.sql --name", "", &mut rt);
         assert!(result.is_err());
         match result.unwrap_err() {

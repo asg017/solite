@@ -43,12 +43,16 @@ impl OpenCommand {
     ///
     /// Returns `DotError::Sqlite` if the database file cannot be opened.
     pub fn execute(&self, runtime: &mut Runtime) -> Result<(), DotError> {
-        let connection = Connection::open(&self.path)?;
-
-        // Initialize standard library functions
-        unsafe {
-            solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
-        }
+        let connection = if crate::sqlite::is_remote_path(&self.path) {
+            Connection::open_remote(&self.path)?
+        } else {
+            let conn = Connection::open(&self.path)?;
+            // Initialize standard library functions (local connections only)
+            unsafe {
+                solite_stdlib_init(conn.db(), std::ptr::null_mut(), std::ptr::null_mut());
+            }
+            conn
+        };
 
         runtime.connection = connection;
         Ok(())
@@ -65,7 +69,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let cmd = OpenCommand {
             path: db_path.to_string_lossy().to_string(),
         };
@@ -85,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_open_memory() {
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let cmd = OpenCommand {
             path: ":memory:".to_string(),
         };
@@ -112,7 +116,7 @@ mod tests {
             stmt.unwrap().execute().unwrap();
         }
 
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         let cmd = OpenCommand {
             path: db_path.to_string_lossy().to_string(),
         };

@@ -444,11 +444,14 @@ const PROMPT: &str = "❱ ";
 const PROMPT_TRANSACTION: &str = "❱• ";
 
 pub fn launch_repl(args: ReplArgs) -> Result<()> {
-    let runtime = Runtime::new(
+    let runtime = Runtime::new_with_options(
         args.database
             .as_ref()
             .map(|p| p.to_string_lossy().to_string()),
-    );
+        args.remote.remote_bin.as_deref(),
+        args.remote.transport.as_deref(),
+        args.remote.allow_ssh,
+    ).map_err(|e| ReadlineError::Io(std::io::Error::other(e.to_string())))?;
     let rc_runtime = Rc::new(RefCell::new(runtime));
 
     let mut timer = true;

@@ -30,7 +30,7 @@ mod tests {
 
     #[test]
     fn test_render_app() {
-        let mut runtime = Runtime::new(None);
+        let mut runtime = Runtime::new(None).unwrap();
         runtime
             .connection
             .execute_script(

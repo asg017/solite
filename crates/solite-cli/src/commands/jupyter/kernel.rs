@@ -39,7 +39,7 @@ pub struct SoliteKernel {
 impl SoliteKernel {
     /// Start the kernel with the given connection info.
     pub async fn start(connection_info: &ConnectionInfo) -> Result<()> {
-        let runtime = Runtime::new(None);
+        let runtime = Runtime::new(None)?;
         let session_id = Uuid::new_v4().to_string();
 
         let mut heartbeat =

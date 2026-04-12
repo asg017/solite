@@ -93,7 +93,7 @@ impl std::error::Error for DocsError {}
 
 /// Process inline documentation.
 fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
-    let rt = Runtime::new(None);
+    let rt = Runtime::new(None).map_err(|e| DocsError::SqlError(e.to_string()))?;
 
     // Attach in-memory database for tracking
     if let Err(e) = rt

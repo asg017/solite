@@ -3,6 +3,22 @@ use std::{collections::HashMap, env, path::PathBuf};
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::ExportFormat;
 
+/// Shared args for connecting to remote databases over SSH or custom transports.
+#[derive(Args, Debug, Clone, Default)]
+pub struct RemoteArgs {
+    /// Path to the solite binary on the remote machine (for ssh:// connections)
+    #[arg(long)]
+    pub remote_bin: Option<String>,
+
+    /// Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+    #[arg(long)]
+    pub transport: Option<String>,
+
+    /// Whether SSH/remote connections are allowed (set from top-level --allow-ssh)
+    #[arg(skip)]
+    pub allow_ssh: bool,
+}
+
 #[derive(Args, Debug)]
 pub struct RunArgs {
     /// Positional args: [database] [script.sql] [procedureName]
@@ -87,6 +103,9 @@ pub struct QueryArgs {
 
     #[arg(long)]
     pub load_extension: Option<Vec<PathBuf>>,
+
+    #[command(flatten)]
+    pub remote: RemoteArgs,
 }
 
 #[derive(Args, Debug)]
@@ -107,6 +126,9 @@ pub struct ExecuteArgs {
 #[derive(Args, Debug)]
 pub struct ReplArgs {
     pub database: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub remote: RemoteArgs,
 }
 
 #[derive(Args, Debug)]
@@ -206,6 +228,9 @@ pub struct DocsInlineArgs {
 pub struct TuiArgs {
     pub database: PathBuf,
     pub table: Option<String>,
+
+    #[command(flatten)]
+    pub remote: RemoteArgs,
 }
 
 #[derive(Args, Debug)]
@@ -304,6 +329,12 @@ pub struct VacuumArgs {
     /// Positional alias for --into
     #[arg(hide = true)]
     pub destination: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct ServeArgs {
+    /// Path to the database file to serve
+    pub database: String,
 }
 
 impl VacuumArgs {
@@ -408,6 +439,10 @@ pub enum Commands {
     /// Rebuild a database file, repacking it into minimal disk space
     Vacuum(VacuumArgs),
 
+    /// Serve a database over stdin/stdout (used by SSH remote connections)
+    #[command(hide = true)]
+    Serve(ServeArgs),
+
     /// Streaming replication, like litestream
     #[cfg(feature = "ritestream")]
     Stream(StreamNamespace),
@@ -465,6 +500,10 @@ Compatibility:
   help_template = HELP_TEMPLATE,
 )]
 pub struct Cli {
+    /// Allow SSH and remote transport connections
+    #[arg(long, global = true)]
+    pub allow_ssh: bool,
+
     #[command(subcommand)]
     pub command: Box<Commands>,
 }

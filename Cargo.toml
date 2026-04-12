@@ -16,6 +16,7 @@ members = [
     "crates/solite-mdtest",
     "crates/solite-completion",
     "crates/solite-table",
+    "crates/solite-serve",
 ]
 
 [workspace.dependencies]

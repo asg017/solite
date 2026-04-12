@@ -4377,6 +4377,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solite-serve"
+version = "0.0.1-alpha.1"
+dependencies = [
+ "solite-core",
+ "solite-stdlib",
+]
+
+[[package]]
 name = "solite-stdlib"
 version = "0.0.1-alpha.1"
 dependencies = [

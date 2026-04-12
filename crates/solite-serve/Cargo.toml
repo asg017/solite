@@ -1,0 +1,14 @@
+[package]
+name = "solite-serve"
+version = "0.0.1-alpha.1"
+edition = "2021"
+description = "Minimal remote database server for solite"
+repository = "https://github.com/asg017/solite"
+
+[[bin]]
+name = "solite-serve"
+path = "src/main.rs"
+
+[dependencies]
+solite-core = { path = "../solite-core", default-features = false }
+solite-stdlib = { path = "../solite-stdlib" }

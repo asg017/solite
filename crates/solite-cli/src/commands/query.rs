@@ -138,7 +138,7 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
 
 /// Parse command line arguments to determine database path and SQL.
 fn is_remote_url(s: &str) -> bool {
-    s.starts_with("ssh://")
+    solite_core::sqlite::is_remote_path(s)
 }
 
 fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryError> {

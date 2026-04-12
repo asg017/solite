@@ -43,7 +43,7 @@ impl OpenCommand {
     ///
     /// Returns `DotError::Sqlite` if the database file cannot be opened.
     pub fn execute(&self, runtime: &mut Runtime) -> Result<(), DotError> {
-        let connection = if self.path.starts_with("ssh://") {
+        let connection = if crate::sqlite::is_remote_path(&self.path) {
             Connection::open_remote(&self.path)?
         } else {
             let conn = Connection::open(&self.path)?;

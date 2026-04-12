@@ -793,7 +793,7 @@ impl Connection {
     }
 
     pub fn open_remote_with_bin(url: &str, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
-        let (user, host, port, db_path) = parse_ssh_url(url).map_err(|msg| SQLiteError {
+        let (user, host, port, db_path) = parse_remote_path(url).map_err(|msg| SQLiteError {
             result_code: -1,
             code_description: "SSH_ERROR".to_string(),
             message: msg,
@@ -1272,35 +1272,103 @@ impl Drop for Connection {
     }
 }
 
-/// Parse an ssh:// URL into (user, host, port, path) components.
-fn parse_ssh_url(url: &str) -> Result<(Option<String>, String, Option<u16>, String), String> {
-    let rest = url
-        .strip_prefix("ssh://")
-        .ok_or_else(|| "URL must start with ssh://".to_string())?;
+/// Check if a path string refers to a remote database.
+///
+/// Supports two formats:
+/// - URL-style: `ssh://[user@]host[:port]/path`
+/// - scp-style: `[user@]host:/path` (same as sqlite3_rsync)
+///
+/// The scp-style detection mirrors sqlite3_rsync's `hostSeparator()`:
+/// a `:` with no `/` or `\` before it indicates a remote host.
+pub fn is_remote_path(s: &str) -> bool {
+    if s.starts_with("ssh://") {
+        return true;
+    }
+    host_separator(s).is_some()
+}
 
-    // Split user@host:port/path
-    let (authority, path) = rest
-        .split_once('/')
-        .ok_or_else(|| "URL must contain a path after host".to_string())?;
+/// Find the host:path separator in an scp-style remote path.
+/// Returns the byte index of the `:` if found, or None if this is a local path.
+///
+/// Mirrors sqlite3_rsync's `hostSeparator()` logic:
+/// - Find the first `:`
+/// - If any `/` or `\` appears before it, it's a local path (not a host separator)
+/// - On Windows, skip drive letters like `C:\`
+fn host_separator(s: &str) -> Option<usize> {
+    let colon_pos = s.find(':')?;
 
-    let path = format!("/{}", path);
+    // Must have something before the colon (the host part)
+    if colon_pos == 0 {
+        return None;
+    }
 
-    let (userhost, port) = if let Some((uh, p)) = authority.rsplit_once(':') {
-        match p.parse::<u16>() {
-            Ok(port) => (uh, Some(port)),
-            Err(_) => (authority, None), // colon wasn't a port separator
-        }
+    // The part after colon must start with / (an absolute path on the remote)
+    if !s.get(colon_pos + 1..).map_or(false, |rest| rest.starts_with('/')) {
+        return None;
+    }
+
+    // Skip Windows drive letters (e.g. C:\)
+    #[cfg(windows)]
+    if colon_pos == 1
+        && s.as_bytes()[0].is_ascii_alphabetic()
+        && s.get(2..3).map_or(false, |c| c == "/" || c == "\\")
+    {
+        return None;
+    }
+
+    // If any / or \ appears before the colon, it's a local path
+    if s[..colon_pos].contains('/') || s[..colon_pos].contains('\\') {
+        return None;
+    }
+
+    Some(colon_pos)
+}
+
+/// Parse a remote path into (user, host, port, path) components.
+///
+/// Accepts both formats:
+/// - `ssh://[user@]host[:port]/path`
+/// - `[user@]host:/path` (scp-style)
+fn parse_remote_path(input: &str) -> Result<(Option<String>, String, Option<u16>, String), String> {
+    if let Some(rest) = input.strip_prefix("ssh://") {
+        // URL-style: ssh://[user@]host[:port]/path
+        let (authority, path) = rest
+            .split_once('/')
+            .ok_or_else(|| "URL must contain a path after host".to_string())?;
+
+        let path = format!("/{}", path);
+
+        let (userhost, port) = if let Some((uh, p)) = authority.rsplit_once(':') {
+            match p.parse::<u16>() {
+                Ok(port) => (uh, Some(port)),
+                Err(_) => (authority, None),
+            }
+        } else {
+            (authority, None)
+        };
+
+        let (user, host) = if let Some((u, h)) = userhost.split_once('@') {
+            (Some(u.to_string()), h.to_string())
+        } else {
+            (None, userhost.to_string())
+        };
+
+        Ok((user, host, port, path))
+    } else if let Some(colon_pos) = host_separator(input) {
+        // scp-style: [user@]host:/path
+        let userhost = &input[..colon_pos];
+        let path = &input[colon_pos + 1..];
+
+        let (user, host) = if let Some((u, h)) = userhost.split_once('@') {
+            (Some(u.to_string()), h.to_string())
+        } else {
+            (None, userhost.to_string())
+        };
+
+        Ok((user, host, None, path.to_string()))
     } else {
-        (authority, None)
-    };
-
-    let (user, host) = if let Some((u, h)) = userhost.split_once('@') {
-        (Some(u.to_string()), h.to_string())
-    } else {
-        (None, userhost.to_string())
-    };
-
-    Ok((user, host, port, path))
+        Err(format!("Not a remote path: {}", input))
+    }
 }
 
 /// https://www.sqlite.org/c3ref/complete.html
@@ -1395,6 +1463,59 @@ mod tests {
         // Verify writes are blocked
         let result = conn.execute_script("INSERT INTO t VALUES ('world')");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_remote_path() {
+        // ssh:// URLs
+        assert!(is_remote_path("ssh://user@host/path/to/db"));
+        assert!(is_remote_path("ssh://host/path"));
+        assert!(is_remote_path("ssh://user@host:2222/path"));
+
+        // scp-style
+        assert!(is_remote_path("user@host:/path/to/db"));
+        assert!(is_remote_path("host:/path/to/db"));
+        assert!(is_remote_path("user@myserver.com:/data/app.db"));
+
+        // Local paths (not remote)
+        assert!(!is_remote_path("/path/to/db"));
+        assert!(!is_remote_path("relative/path.db"));
+        assert!(!is_remote_path("./db.sqlite"));
+        assert!(!is_remote_path(":memory:"));
+    }
+
+    #[test]
+    fn test_parse_remote_path_ssh_url() {
+        let (user, host, port, path) =
+            parse_remote_path("ssh://alex@myhost/data/app.db").unwrap();
+        assert_eq!(user.as_deref(), Some("alex"));
+        assert_eq!(host, "myhost");
+        assert_eq!(port, None);
+        assert_eq!(path, "/data/app.db");
+
+        let (user, host, port, path) =
+            parse_remote_path("ssh://alex@myhost:2222/data/app.db").unwrap();
+        assert_eq!(user.as_deref(), Some("alex"));
+        assert_eq!(host, "myhost");
+        assert_eq!(port, Some(2222));
+        assert_eq!(path, "/data/app.db");
+    }
+
+    #[test]
+    fn test_parse_remote_path_scp_style() {
+        let (user, host, port, path) =
+            parse_remote_path("alex@myhost:/data/app.db").unwrap();
+        assert_eq!(user.as_deref(), Some("alex"));
+        assert_eq!(host, "myhost");
+        assert_eq!(port, None);
+        assert_eq!(path, "/data/app.db");
+
+        let (user, host, port, path) =
+            parse_remote_path("myhost:/data/app.db").unwrap();
+        assert_eq!(user, None);
+        assert_eq!(host, "myhost");
+        assert_eq!(port, None);
+        assert_eq!(path, "/data/app.db");
     }
 
     #[test]

@@ -194,7 +194,7 @@ impl Runtime {
             Connection::open_transport(transport_cmd, db_path, remote_bin).unwrap()
         } else {
             match path {
-                Some(ref path) if path.starts_with("ssh://") => {
+                Some(ref path) if sqlite::is_remote_path(path) => {
                     Connection::open_remote_with_bin(path, remote_bin).unwrap()
                 }
                 Some(path) => Connection::open(path.as_str()).unwrap(),

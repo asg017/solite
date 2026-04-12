@@ -26,7 +26,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libreadline-dev libedit-dev
       - run: cargo build
         shell: bash
-      - run: cargo run -- jupyter install
+      - run: cargo run --bin solite -- jupyter install
       - run: uv run --with ipykernel --with jupyter-core jupyter kernelspec list
         shell: bash
       - run: make test

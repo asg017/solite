@@ -12,9 +12,9 @@ test-pytest:
 	uv run --project tests pytest -vv
 
 test-snap:
-	cargo run -- test --update tests/snaps/snap1.sql
-	cargo run -- test --update tests/snaps/snap2.sql
-	cargo run -- test --update tests/snaps/compile_options.sql
+	cargo run --bin solite -- test --update tests/snaps/snap1.sql
+	cargo run --bin solite -- test --update tests/snaps/snap2.sql
+	cargo run --bin solite -- test --update tests/snaps/compile_options.sql
 
 .PHONY: test test-cargo test-pytest test-snap
 

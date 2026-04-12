@@ -53,6 +53,14 @@ cargo insta accept
 
 Then rerun `cargo test` to confirm everything passes. Snapshot failures can cascade (insta stops on the first mismatch per test), so you may need to accept and rerun more than once.
 
+The Python integration tests (`tests/`) also have snapshots that embed the SQLite version (REPL banner, help output). Update those with:
+
+```sh
+uv run --project tests pytest --snapshot-update
+```
+
+Run the full suite with `make test` to verify everything passes end-to-end.
+
 ## 5. Update the standalone Makefile (if needed)
 
 `sqlite3/Makefile` has `SQLITE_VERSION` and `SQLITE_YEAR` variables used to download the official amalgamation zip for standalone `sqlite3` builds. Update these if you use that build path.

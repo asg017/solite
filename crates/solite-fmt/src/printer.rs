@@ -7,7 +7,7 @@ use crate::comment::CommentMap;
 use crate::config::{CommaPosition, FormatConfig, KeywordCase, LogicalOperatorPosition};
 use crate::format::FormatNode;
 use crate::ignore::IgnoreDirectives;
-use solite_ast::{Program, Statement};
+use solite_ast::{DocComment, Program, Statement};
 
 /// Printer for generating formatted SQL output
 pub struct Printer<'a> {
@@ -254,6 +254,41 @@ impl<'a> Printer<'a> {
             for comment in comments {
                 self.space();
                 self.write(&comment.text);
+            }
+        }
+    }
+
+    /// Emit a table-level doc comment (`--!` lines)
+    pub fn emit_table_doc_comment(&mut self, doc: &DocComment) {
+        self.emit_doc_comment_lines(doc, "--!");
+    }
+
+    /// Emit a column-level doc comment (`---` lines)
+    pub fn emit_column_doc_comment(&mut self, doc: &DocComment) {
+        self.emit_doc_comment_lines(doc, "---");
+    }
+
+    /// Emit doc comment lines with the given prefix
+    fn emit_doc_comment_lines(&mut self, doc: &DocComment, prefix: &str) {
+        if !doc.description.is_empty() {
+            self.write(prefix);
+            self.write(" ");
+            self.write(&doc.description);
+            self.newline();
+        }
+        // Emit tags in sorted order for deterministic output
+        let mut tags: Vec<_> = doc.tags.iter().collect();
+        tags.sort_by_key(|(k, _)| (*k).clone());
+        for (tag, values) in tags {
+            for value in values {
+                self.write(prefix);
+                self.write(" @");
+                self.write(tag);
+                if !value.is_empty() {
+                    self.write(" ");
+                    self.write(value);
+                }
+                self.newline();
             }
         }
     }

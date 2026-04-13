@@ -1,0 +1,31 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table students(
+--   --! All students that attend Foo University. One row per enrolled
+--   --! student, active and historical.
+-- 
+--   --- ID assigned to the student at orientation.
+--   --- @example 'S10483'
+--   student_id text primary key,
+-- 
+--   --- Full name of the student.
+--   --- @example 'Alex Garcia'
+--   name text
+-- )
+
+-- Output:
+create table students(
+  --! All students that attend Foo University. One row per enrolled student, active and historical.
+
+  --- ID assigned to the student at orientation.
+  --- @example 'S10483'
+  student_id text primary key,
+
+  --- Full name of the student.
+  --- @example 'Alex Garcia'
+  name text
+);

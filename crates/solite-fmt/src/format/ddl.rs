@@ -49,11 +49,25 @@ impl FormatNode for CreateTableStmt {
             p.newline();
             p.indent();
 
+            // Table-level doc comment (--!)
+            if let Some(doc) = &self.doc {
+                p.emit_table_doc_comment(doc);
+                p.newline();
+            }
+
             // Column definitions
             let total_items = self.columns.len() + self.table_constraints.len();
             for (i, col) in self.columns.iter().enumerate() {
                 if i > 0 {
+                    // Add extra blank line before columns with doc comments
+                    if col.doc.is_some() {
+                        p.newline();
+                    }
                     p.newline();
+                }
+                // Column-level doc comment (---)
+                if let Some(doc) = &col.doc {
+                    p.emit_column_doc_comment(doc);
                 }
                 col.format(p);
 

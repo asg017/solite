@@ -38,11 +38,24 @@ impl CommentMap {
         let tokens = lex(source);
         let mut comments = Vec::new();
 
-        // Extract all comments from tokens
+        // Extract all comments from tokens, skipping doc comments (--! and ---)
+        // which are handled via the AST's DocComment fields instead
         for token in &tokens {
             if token.kind == TokenKind::Comment || token.kind == TokenKind::BlockComment {
                 let text = source[token.span.clone()].to_string();
                 let is_block = token.kind == TokenKind::BlockComment;
+
+                // Skip doc comments — they are preserved through the AST
+                if !is_block {
+                    let trimmed = text.trim();
+                    if trimmed.starts_with("--!") {
+                        continue;
+                    }
+                    if trimmed.starts_with("---") && !trimmed.starts_with("----") {
+                        continue;
+                    }
+                }
+
                 let line = source[..token.span.start].matches('\n').count();
 
                 comments.push(Comment {

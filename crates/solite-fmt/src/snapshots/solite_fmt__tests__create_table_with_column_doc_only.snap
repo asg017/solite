@@ -1,0 +1,23 @@
+---
+source: crates/solite-fmt/src/tests.rs
+expression: "snapshot(sql, &config)"
+snapshot_kind: text
+---
+-- Input:
+-- create table t(
+--   --- Unique identifier
+--   id integer primary key,
+--   name text,
+--   --- Contact email address
+--   email text
+-- )
+
+-- Output:
+create table t(
+  --- Unique identifier
+  id integer primary key,
+  name text,
+
+  --- Contact email address
+  email text
+);

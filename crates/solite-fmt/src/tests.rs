@@ -1189,6 +1189,37 @@ fn create_table_autoincrement() {
 }
 
 #[test]
+fn create_table_with_doc_comments() {
+    let sql = "create table students(
+  --! All students that attend Foo University. One row per enrolled
+  --! student, active and historical.
+
+  --- ID assigned to the student at orientation.
+  --- @example 'S10483'
+  student_id text primary key,
+
+  --- Full name of the student.
+  --- @example 'Alex Garcia'
+  name text
+)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
+fn create_table_with_column_doc_only() {
+    let sql = "create table t(
+  --- Unique identifier
+  id integer primary key,
+  name text,
+  --- Contact email address
+  email text
+)";
+    let config = FormatConfig::default();
+    assert_snapshot!(snapshot(sql, &config));
+}
+
+#[test]
 fn create_table_multiple_defaults() {
     let sql = "create table t (a integer default 0, b text default 'unknown', c real default 0.0, d integer default null)";
     let config = FormatConfig::default();

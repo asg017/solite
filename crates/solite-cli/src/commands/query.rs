@@ -7,8 +7,9 @@ use solite_core::{exporter::ExportFormat, replacement_scans::replacement_scan, R
 use solite_table::TableConfig;
 use std::{
     fmt,
+    fs,
     io::{stdout, IsTerminal, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use crate::cli::QueryArgs;
@@ -30,6 +31,8 @@ pub enum QueryError {
     ExecutionFailed(String),
     /// SQL syntax or preparation error (already reported).
     SqlError,
+    /// Failed to read SQL file.
+    FileReadError(PathBuf, std::io::Error),
 }
 
 impl fmt::Display for QueryError {
@@ -46,6 +49,9 @@ impl fmt::Display for QueryError {
             QueryError::ReplacementScanFailed => write!(f, "Replacement scan failed"),
             QueryError::ExecutionFailed(msg) => write!(f, "Execution failed: {}", msg),
             QueryError::SqlError => write!(f, "SQL error"),
+            QueryError::FileReadError(path, err) => {
+                write!(f, "Failed to read SQL file '{}': {}", path.display(), err)
+            }
         }
     }
 }
@@ -66,9 +72,29 @@ pub(crate) fn query(args: QueryArgs) -> Result<(), ()> {
     }
 }
 
+/// If the string looks like a path to a `.sql` file, read and return its
+/// contents. Otherwise return the string as-is.
+fn resolve_sql(sql: String) -> Result<String, QueryError> {
+    let path = Path::new(&sql);
+    if path.extension().is_some_and(|ext| ext == "sql") {
+        if !path.exists() {
+            return Err(QueryError::FileReadError(
+                path.to_path_buf(),
+                std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
+            ));
+        }
+        let contents = fs::read_to_string(path)
+            .map_err(|e| QueryError::FileReadError(path.to_path_buf(), e))?;
+        Ok(contents.trim().to_string())
+    } else {
+        Ok(sql)
+    }
+}
+
 /// Internal implementation of the query command.
 fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
     let (db_path, sql) = parse_arguments(&args)?;
+    let sql = resolve_sql(sql)?;
 
     let mut runtime = Runtime::new_with_options(
         db_path.map(|p| p.to_string_lossy().to_string()),
@@ -142,6 +168,10 @@ fn is_remote_url(s: &str) -> bool {
     solite_core::sqlite::is_remote_path(s)
 }
 
+fn is_sql_file(p: &Path) -> bool {
+    p.extension().is_some_and(|ext| ext == "sql")
+}
+
 fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryError> {
     match &args.database {
         None => {
@@ -163,6 +193,13 @@ fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryE
             } else if is_remote_url(arg0) {
                 let sql = arg1_str.to_string();
                 Ok((Some(PathBuf::from(arg0)), sql))
+            } else if is_sql_file(arg1) {
+                // .sql file as second arg is SQL, first arg is database
+                let p = PathBuf::from(arg0);
+                Ok((Some(p), arg1_str.to_string()))
+            } else if is_sql_file(Path::new(arg0)) {
+                // .sql file as first arg is SQL, second arg is database
+                Ok((Some(arg1.clone()), arg0.clone()))
             } else if arg1.exists() {
                 Ok((Some(arg1.clone()), arg0.clone()))
             } else {
@@ -279,5 +316,100 @@ mod tests {
         };
         let format = determine_format(&args);
         assert!(matches!(format, ExportFormat::Json));
+    }
+
+    #[test]
+    fn test_resolve_sql_inline() {
+        let result = resolve_sql("SELECT 1".to_string()).unwrap();
+        assert_eq!(result, "SELECT 1");
+    }
+
+    #[test]
+    fn test_resolve_sql_from_file() {
+        let dir = std::env::temp_dir().join("solite_test_resolve_sql");
+        let _ = fs::create_dir_all(&dir);
+        let file = dir.join("query.sql");
+        fs::write(&file, "  SELECT 42;\n").unwrap();
+
+        let result = resolve_sql(file.to_string_lossy().to_string()).unwrap();
+        assert_eq!(result, "SELECT 42;");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_resolve_sql_nonexistent_file() {
+        let result = resolve_sql("/tmp/solite_does_not_exist.sql".to_string());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, QueryError::FileReadError(..)));
+        assert!(err.to_string().contains("solite_does_not_exist.sql"));
+    }
+
+    #[test]
+    fn test_resolve_sql_non_sql_extension_not_read() {
+        // A string ending in .db should not be treated as a SQL file,
+        // even if it happens to exist on disk
+        let result = resolve_sql(":memory:".to_string()).unwrap();
+        assert_eq!(result, ":memory:");
+    }
+
+    #[test]
+    fn test_parse_arguments_sql_file_only() {
+        let args = QueryArgs {
+            statement: "test.sql".to_string(),
+            database: None,
+            format: None,
+            output: None,
+            load_extension: None,
+            parameters: vec![],
+            remote: Default::default(),
+        };
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert!(db.is_none());
+        assert_eq!(sql, "test.sql");
+    }
+
+    #[test]
+    fn test_parse_arguments_sql_file_then_db() {
+        let args = QueryArgs {
+            statement: "query.sql".to_string(),
+            database: Some(PathBuf::from("data.db")),
+            format: None,
+            output: None,
+            load_extension: None,
+            parameters: vec![],
+            remote: Default::default(),
+        };
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from("data.db"));
+        assert_eq!(sql, "query.sql");
+    }
+
+    #[test]
+    fn test_parse_arguments_db_then_sql_file() {
+        let args = QueryArgs {
+            statement: ":memory:".to_string(),
+            database: Some(PathBuf::from("query.sql")),
+            format: None,
+            output: None,
+            load_extension: None,
+            parameters: vec![],
+            remote: Default::default(),
+        };
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert_eq!(sql, "query.sql");
+    }
+
+    #[test]
+    fn test_file_read_error_display() {
+        let err = QueryError::FileReadError(
+            PathBuf::from("/tmp/test.sql"),
+            std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("/tmp/test.sql"));
+        assert!(msg.contains("file not found"));
     }
 }

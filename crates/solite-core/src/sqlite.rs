@@ -222,6 +222,11 @@ pub struct ColumnMeta {
     pub origin_table: Option<String>,
     pub origin_column: Option<String>,
     pub decltype: Option<String>,
+    /// `Some(true)` if the origin column permits NULL, `Some(false)` if it has a
+    /// NOT NULL constraint, or `None` when the column is not a direct reference
+    /// to a base-table column (e.g. expressions, aggregates, unions).
+    #[serde(default)]
+    pub nullable: Option<bool>,
 }
 
 pub enum IsExplain{
@@ -348,6 +353,7 @@ impl Statement {
         match &self.inner {
             StatementInner::Local { statement } => unsafe {
                 let mut columns = vec![];
+                let db = sqlite3_db_handle(*statement);
                 let n = sqlite3_column_count(*statement);
                 for i in 0..n {
                     let name = CStr::from_ptr(sqlite3_column_name(*statement, i));
@@ -355,6 +361,29 @@ impl Statement {
                     let origin_table = sqlite3_column_table_name(*statement, i);
                     let origin_column = sqlite3_column_origin_name(*statement, i);
                     let decltype = sqlite3_column_decltype(*statement, i);
+
+                    let nullable = if !origin_table.is_null() && !origin_column.is_null() {
+                        let mut not_null: c_int = 0;
+                        let rc = sqlite3_table_column_metadata(
+                            db,
+                            origin_database,
+                            origin_table,
+                            origin_column,
+                            ptr::null_mut(),
+                            ptr::null_mut(),
+                            &mut not_null,
+                            ptr::null_mut(),
+                            ptr::null_mut(),
+                        );
+                        if rc == SQLITE_OK {
+                            Some(not_null == 0)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     columns.push(ColumnMeta {
                         name: name.to_string_lossy().to_string(),
                         origin_database: origin_database
@@ -369,6 +398,7 @@ impl Statement {
                         decltype: decltype
                             .as_ref()
                             .map(|s| CStr::from_ptr(s).to_string_lossy().to_string()),
+                        nullable,
                     });
                 }
                 columns
@@ -1440,6 +1470,35 @@ mod tests {
         assert!(!complete("select 1"));
         // TODO handle
         //assert!(!complete("select '\0'"));
+    }
+
+    #[test]
+    fn test_column_meta_nullable() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_script(
+            "CREATE TABLE t(a INTEGER NOT NULL, b TEXT, c INTEGER PRIMARY KEY)",
+        )
+        .unwrap();
+
+        let (_, stmt) = conn
+            .prepare("SELECT a, b, c, a + 1 AS expr FROM t")
+            .unwrap();
+        let stmt = stmt.unwrap();
+        let meta = stmt.column_meta();
+
+        assert_eq!(meta[0].name, "a");
+        assert_eq!(meta[0].nullable, Some(false));
+
+        assert_eq!(meta[1].name, "b");
+        assert_eq!(meta[1].nullable, Some(true));
+
+        // INTEGER PRIMARY KEY is nullable at the SQL level (it's an alias for ROWID).
+        assert_eq!(meta[2].name, "c");
+        assert_eq!(meta[2].nullable, Some(true));
+
+        // Expression columns have no origin column, so nullability is unknown.
+        assert_eq!(meta[3].name, "expr");
+        assert_eq!(meta[3].nullable, None);
     }
 
     #[test]

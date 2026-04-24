@@ -418,6 +418,28 @@ pub fn write_output(
     }
 }
 
+/// Write statement results to an in-memory buffer.
+#[cfg(feature = "object_store")]
+pub fn write_output_to_bytes(
+    stmt: &mut Statement,
+    format: ExportFormat,
+) -> Result<Vec<u8>, ExportError> {
+    let mut buf = Vec::new();
+    match format {
+        ExportFormat::Csv => write_csv(stmt, &mut buf)?,
+        ExportFormat::Tsv => write_tsv(stmt, &mut buf)?,
+        ExportFormat::Json => write_json(stmt, &mut buf)?,
+        ExportFormat::Ndjson => write_ndjson(stmt, &mut buf)?,
+        ExportFormat::Value => write_value(stmt, &mut buf)?,
+        ExportFormat::Clipboard => {
+            return Err(ExportError::Io(std::io::Error::other(
+                "clipboard export is not supported for remote targets",
+            )));
+        }
+    }
+    Ok(buf)
+}
+
 /// Determine export format from file path extension.
 ///
 /// Handles compressed files by looking at the extension before `.gz` or `.zst`.

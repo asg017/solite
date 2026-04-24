@@ -4,6 +4,8 @@ pub mod replacement_scans;
 pub mod rpc;
 pub mod sqlite;
 pub mod exporter;
+#[cfg(feature = "object_store")]
+pub mod object_store;
 
 use crate::dot::{DotCommand, ShellCommand, AskCommand};
 use crate::procedure::Procedure;

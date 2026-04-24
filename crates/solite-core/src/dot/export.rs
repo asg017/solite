@@ -16,7 +16,11 @@
 //! Parameters are looked up from the runtime's parameter table.
 
 use crate::dot::DotError;
+#[cfg(feature = "object_store")]
+use crate::exporter::write_output_to_bytes;
 use crate::exporter::{format_from_path, output_from_path, write_output};
+#[cfg(feature = "object_store")]
+use crate::object_store;
 use crate::sqlite::{OwnedValue, Statement};
 use crate::{ParseDotError, Runtime};
 use regex::{Captures, Regex};
@@ -86,9 +90,6 @@ impl ExportCommand {
     /// - `DotError::InvalidData` if the format cannot be determined
     /// - `DotError::Io` if the file cannot be written
     pub fn execute(&mut self) -> Result<(), DotError> {
-        let output = output_from_path(&self.target)
-            .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
-
         let format = format_from_path(&self.target).ok_or_else(|| {
             DotError::InvalidData(format!(
                 "Cannot determine format from path: {}",
@@ -96,6 +97,20 @@ impl ExportCommand {
             ))
         })?;
 
+        #[cfg(feature = "object_store")]
+        {
+            let target_str = self.target.to_string_lossy();
+            if object_store::is_object_store_url(&target_str) {
+                let data = write_output_to_bytes(&mut self.statement, format)
+                    .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
+                object_store::upload(&target_str, data)
+                    .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
+                return Ok(());
+            }
+        }
+
+        let output = output_from_path(&self.target)
+            .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
         write_output(&mut self.statement, output, format)
             .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
 

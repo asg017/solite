@@ -4,8 +4,9 @@ name = "solite-core"
 edition = "2021"
 
 [features]
-default = ["ritestream"]
+default = ["ritestream", "object_store"]
 ritestream = ["dep:ritestream-api"]
+object_store = ["dep:object_store", "dep:tokio"]
 
 [dependencies]
 ritestream-api = { git = "https://github.com/asg017/litestream-rust", optional = true }
@@ -29,6 +30,8 @@ ureq = "3.0.12"
 dotenvy = "0.15.7"
 term_size = "0.3.2"
 rmp-serde = "1"
+object_store = { version = "0.13", features = ["aws"], optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 rusqlite.workspace = true

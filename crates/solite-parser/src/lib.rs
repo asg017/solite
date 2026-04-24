@@ -8260,6 +8260,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_delete_typed_params_and_collate() {
+        let sql = "delete from datasette_sheets_named_range\n\
+            where sheet_id = $sheet_id::text\n\
+              and name = $name::text collate nocase\n\
+            returning name;";
+        let program = parse_program(sql).unwrap();
+        match &program.statements[0] {
+            Statement::Delete(stmt) => {
+                assert!(stmt.where_clause.is_some());
+                let ret = stmt.returning.as_ref().expect("Expected RETURNING");
+                assert_eq!(ret.len(), 1);
+            }
+            _ => panic!("Expected DELETE"),
+        }
+    }
+
+    #[test]
     fn test_parse_delete_returning_star() {
         let program = parse_program("DELETE FROM users RETURNING *;").unwrap();
         match &program.statements[0] {

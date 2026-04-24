@@ -478,13 +478,13 @@ pub enum TokenKind {
     #[regex(r"\?[0-9]*")]
     BindParam,
 
-    #[regex(r":[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex(r":[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z0-9_]*)*(\([^)]*\))?")]
     BindParamColon,
 
-    #[regex(r"@[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex(r"@[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z0-9_]*)*(\([^)]*\))?")]
     BindParamAt,
 
-    #[regex(r"\$[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex(r"\$[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z0-9_]*)*(\([^)]*\))?")]
     BindParamDollar,
 
     // Hexadecimal integer literal
@@ -596,6 +596,26 @@ mod tests {
         assert_eq!(tokens[3].kind, TokenKind::BindParamColon);
         assert_eq!(tokens[5].kind, TokenKind::BindParamAt);
         assert_eq!(tokens[7].kind, TokenKind::BindParamDollar);
+    }
+
+    #[test]
+    fn test_lex_bind_params_tcl_style() {
+        let source = "$id::text :name::int @v::bool::(arr) $trailing:: $with(idx) $ns::scoped::name";
+        let tokens = lex(source);
+        let slice = |t: &Token| &source[t.span.clone()];
+
+        assert_eq!(tokens[0].kind, TokenKind::BindParamDollar);
+        assert_eq!(slice(&tokens[0]), "$id::text");
+        assert_eq!(tokens[1].kind, TokenKind::BindParamColon);
+        assert_eq!(slice(&tokens[1]), ":name::int");
+        assert_eq!(tokens[2].kind, TokenKind::BindParamAt);
+        assert_eq!(slice(&tokens[2]), "@v::bool::(arr)");
+        assert_eq!(tokens[3].kind, TokenKind::BindParamDollar);
+        assert_eq!(slice(&tokens[3]), "$trailing::");
+        assert_eq!(tokens[4].kind, TokenKind::BindParamDollar);
+        assert_eq!(slice(&tokens[4]), "$with(idx)");
+        assert_eq!(tokens[5].kind, TokenKind::BindParamDollar);
+        assert_eq!(slice(&tokens[5]), "$ns::scoped::name");
     }
 
     #[test]

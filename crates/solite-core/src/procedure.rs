@@ -8,9 +8,15 @@ use regex::Regex;
 use serde::Serialize;
 use std::sync::LazyLock;
 
-/// Regex for parsing `-- name: xxx :annotation` lines.
-static NAME_LINE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^--\s+name:\s+(\w+)((?:\s+:\w+)*)").expect("valid regex"));
+/// Regex for parsing `-- name: xxx :annotation [-> ClassName]` lines.
+///
+/// Anchored with `\s*$` so trailing content (e.g. annotations placed after
+/// the `-> Class` hint) causes the line to not parse as a procedure name,
+/// making the mistake visible to the author.
+static NAME_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^--\s+name:\s+(\w+)((?:\s+:\w+)*)(?:\s+->\s+(\w+))?\s*$")
+        .expect("valid regex")
+});
 
 /// The expected result type of a procedure.
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -63,12 +69,22 @@ pub struct Procedure {
     pub parameters: Vec<ProcedureParam>,
     /// Column metadata for the result set
     pub columns: Vec<ColumnMeta>,
+    /// Optional result class hint from `-> ClassName` on the `-- name:` line.
+    ///
+    /// When set, multiple procedures may share the same class name if (and
+    /// only if) their column shapes match. Enforcement of that match lives in
+    /// the codegen layer; this field only carries the declared name.
+    pub result_class: Option<String>,
 }
 
-/// Parse a `-- name: xxx :annotation` line.
+/// Parse a `-- name: xxx :annotation -> ClassName` line.
 ///
-/// Returns the name and list of annotations (without the leading colon).
-pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>)> {
+/// Returns `(name, annotations, result_class)` where:
+/// - `name` is the procedure name,
+/// - `annotations` is the list of `:rows` / `:row` / etc. tokens (without the
+///   leading colon), and
+/// - `result_class` is the optional identifier after `->`, if any.
+pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>, Option<String>)> {
     let caps = NAME_LINE_RE.captures(line)?;
     let name = caps.get(1)?.as_str().to_string();
 
@@ -78,7 +94,9 @@ pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>)> {
         .filter_map(|s| s.strip_prefix(':').map(|a| a.to_string()))
         .collect();
 
-    Some((name, annotations))
+    let result_class = caps.get(3).map(|m| m.as_str().to_string());
+
+    Some((name, annotations, result_class))
 }
 
 /// Parse a parameter string into a ProcedureParam struct.
@@ -145,27 +163,30 @@ mod tests {
     fn test_parse_name_line_simple() {
         let result = parse_name_line("-- name: getUsers");
         assert!(result.is_some());
-        let (name, annotations) = result.unwrap();
+        let (name, annotations, class) = result.unwrap();
         assert_eq!(name, "getUsers");
         assert!(annotations.is_empty());
+        assert_eq!(class, None);
     }
 
     #[test]
     fn test_parse_name_line_with_annotation() {
         let result = parse_name_line("-- name: getUsers :rows");
         assert!(result.is_some());
-        let (name, annotations) = result.unwrap();
+        let (name, annotations, class) = result.unwrap();
         assert_eq!(name, "getUsers");
         assert_eq!(annotations, vec!["rows"]);
+        assert_eq!(class, None);
     }
 
     #[test]
     fn test_parse_name_line_multiple_annotations() {
         let result = parse_name_line("-- name: insertUser :row :returning");
         assert!(result.is_some());
-        let (name, annotations) = result.unwrap();
+        let (name, annotations, class) = result.unwrap();
         assert_eq!(name, "insertUser");
         assert_eq!(annotations, vec!["row", "returning"]);
+        assert_eq!(class, None);
     }
 
     #[test]
@@ -173,6 +194,41 @@ mod tests {
         assert!(parse_name_line("-- not a name line").is_none());
         assert!(parse_name_line("select * from users").is_none());
         assert!(parse_name_line("").is_none());
+    }
+
+    #[test]
+    fn test_parse_name_line_with_result_class() {
+        let result = parse_name_line("-- name: listWorkbooks :rows -> Workbook");
+        assert!(result.is_some());
+        let (name, annotations, class) = result.unwrap();
+        assert_eq!(name, "listWorkbooks");
+        assert_eq!(annotations, vec!["rows"]);
+        assert_eq!(class, Some("Workbook".to_string()));
+    }
+
+    #[test]
+    fn test_parse_name_line_result_class_no_annotations() {
+        let result = parse_name_line("-- name: getWorkbook -> Workbook");
+        assert!(result.is_some());
+        let (name, annotations, class) = result.unwrap();
+        assert_eq!(name, "getWorkbook");
+        assert!(annotations.is_empty());
+        assert_eq!(class, Some("Workbook".to_string()));
+    }
+
+    #[test]
+    fn test_parse_name_line_annotations_after_arrow_rejected() {
+        // The arrow must come last; trailing `:annotation` causes the line to
+        // not parse, so the author notices the mistake.
+        assert!(parse_name_line("-- name: foo :rows -> Workbook :extra").is_none());
+    }
+
+    #[test]
+    fn test_parse_name_line_trailing_whitespace_ok() {
+        let result = parse_name_line("-- name: foo :rows -> Workbook   ");
+        assert!(result.is_some());
+        let (_, _, class) = result.unwrap();
+        assert_eq!(class, Some("Workbook".to_string()));
     }
 
     #[test]

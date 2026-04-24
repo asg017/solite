@@ -27,3 +27,4 @@ exports:
         origin_column: name
         decltype: TEXT
         nullable: true
+    result_class: ~

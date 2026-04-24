@@ -25,3 +25,4 @@ exports:
         origin_column: c
         decltype: INT
         nullable: true
+    result_class: ~

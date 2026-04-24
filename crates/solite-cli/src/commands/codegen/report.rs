@@ -1,8 +1,9 @@
 //! Report generation from SQL files.
 
 use anyhow::{anyhow, Result};
-use solite_core::sqlite::Connection;
+use solite_core::sqlite::{ColumnMeta, Connection};
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::types::{Export, Report};
@@ -133,6 +134,9 @@ fn setup_from_sql_file(path: &PathBuf, report: &mut Report) -> Result<Connection
 
 /// Process all steps from the runtime.
 fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
+    // class name -> (first query that declared it, its column shape)
+    let mut declared_classes: HashMap<String, (String, Vec<ColumnMeta>)> = HashMap::new();
+
     loop {
         match rt.next_stepx() {
             None => break,
@@ -148,12 +152,37 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                     }
                 }
                 StepResult::ProcedureDefinition(proc) => {
+                    if let Some(class_name) = &proc.result_class {
+                        match declared_classes.get(class_name) {
+                            None => {
+                                declared_classes.insert(
+                                    class_name.clone(),
+                                    (proc.name.clone(), proc.columns.clone()),
+                                );
+                            }
+                            Some((first_query, first_shape)) => {
+                                if let Err(msg) =
+                                    check_shape_match(first_shape, &proc.columns)
+                                {
+                                    return Err(anyhow!(
+                                        "Result class `{}` shape mismatch between `{}` and `{}`: {}",
+                                        class_name,
+                                        first_query,
+                                        proc.name,
+                                        msg
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
                     report.exports.push(Export {
                         name: proc.name.clone(),
                         parameters: proc.parameters.clone(),
                         columns: proc.columns.clone(),
                         sql: proc.sql.clone(),
                         result_type: proc.result_type.clone(),
+                        result_class: proc.result_class.clone(),
                     });
                 }
                 StepResult::DotCommand(cmd) => {
@@ -162,6 +191,51 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
             },
         }
     }
+    Ok(())
+}
+
+/// Compare two result-set column shapes for codegen purposes.
+///
+/// Returns Ok(()) when the shapes match: same column count, and for each
+/// position the name, decltype (case-insensitive), and nullability agree.
+/// `origin_database` / `origin_table` / `origin_column` are intentionally
+/// ignored so queries that produce the same shape from different sources
+/// (e.g. a view and a base table) can share a class.
+fn check_shape_match(
+    first: &[ColumnMeta],
+    other: &[ColumnMeta],
+) -> std::result::Result<(), String> {
+    if first.len() != other.len() {
+        return Err(format!(
+            "column count differs ({} vs {})",
+            first.len(),
+            other.len()
+        ));
+    }
+
+    for (idx, (a, b)) in first.iter().zip(other.iter()).enumerate() {
+        if a.name != b.name {
+            return Err(format!(
+                "column {} name differs: `{}` vs `{}`",
+                idx, a.name, b.name
+            ));
+        }
+        let a_decl = a.decltype.as_deref().unwrap_or("");
+        let b_decl = b.decltype.as_deref().unwrap_or("");
+        if !a_decl.eq_ignore_ascii_case(b_decl) {
+            return Err(format!(
+                "column {} (`{}`) decltype differs: `{}` vs `{}`",
+                idx, a.name, a_decl, b_decl
+            ));
+        }
+        if a.nullable != b.nullable {
+            return Err(format!(
+                "column {} (`{}`) nullability differs: {:?} vs {:?}",
+                idx, a.name, a.nullable, b.nullable
+            ));
+        }
+    }
+
     Ok(())
 }
 

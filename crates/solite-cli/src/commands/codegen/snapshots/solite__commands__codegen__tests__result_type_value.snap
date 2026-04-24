@@ -17,3 +17,4 @@ exports:
         origin_column: ~
         decltype: ~
         nullable: ~
+    result_class: ~

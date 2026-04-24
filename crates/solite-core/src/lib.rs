@@ -466,7 +466,7 @@ impl Runtime {
                             .map(|l| l.trim())
                             .find(|l| l.starts_with("-- name:"));
                         if let Some(name_line) = name_line {
-                            if let Some((name, annotations)) = procedure::parse_name_line(name_line) {
+                            if let Some((name, annotations, result_class)) = procedure::parse_name_line(name_line) {
                                 let columns = stmt.column_meta();
                                 let parameters: Vec<_> = stmt
                                     .parameter_info()
@@ -481,6 +481,7 @@ impl Runtime {
                                     result_type,
                                     parameters,
                                     columns,
+                                    result_class,
                                 };
                                 self.procedures.insert(name, proc.clone());
 

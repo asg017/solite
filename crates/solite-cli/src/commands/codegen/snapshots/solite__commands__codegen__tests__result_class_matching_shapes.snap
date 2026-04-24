@@ -1,0 +1,48 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table workbooks(id integer primary key, name text not null);\n\n            -- name: listWorkbooks :rows -> Workbook\n            select id, name from workbooks;\n\n            -- name: getWorkbook :row -> Workbook\n            select id, name from workbooks where id = $id::int;\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table workbooks(id integer primary key, name text not null);"
+exports:
+  - name: listWorkbooks
+    result_type: Rows
+    sql: "select id, name from workbooks;"
+    parameters: []
+    columns:
+      - name: id
+        origin_database: main
+        origin_table: workbooks
+        origin_column: id
+        decltype: INTEGER
+        nullable: true
+      - name: name
+        origin_database: main
+        origin_table: workbooks
+        origin_column: name
+        decltype: TEXT
+        nullable: false
+    result_class: Workbook
+  - name: getWorkbook
+    result_type: Row
+    sql: "select id, name from workbooks where id = $id::int;"
+    parameters:
+      - full_name: "$id::int"
+        name: id
+        annotated_type: int
+        nullable: false
+    columns:
+      - name: id
+        origin_database: main
+        origin_table: workbooks
+        origin_column: id
+        decltype: INTEGER
+        nullable: true
+      - name: name
+        origin_database: main
+        origin_table: workbooks
+        origin_column: name
+        decltype: TEXT
+        nullable: false
+    result_class: Workbook

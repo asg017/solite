@@ -19,6 +19,18 @@
 //! - `:row` - Returns exactly one row
 //! - `:value` - Returns a single value
 //! - `:list` - Returns a list of single values
+//! - `-> ClassName` - Optional. Attaches a shared result-class name. Multiple
+//!   queries may share a class when their column shapes match; codegen rejects
+//!   mismatched shapes with an explicit error. The arrow must come last on the
+//!   line; trailing annotations are rejected.
+//!
+//! ```sql
+//! -- name: listWorkbooks :rows -> Workbook
+//! SELECT * FROM workbooks;
+//!
+//! -- name: getWorkbook :row -> Workbook
+//! SELECT * FROM workbooks WHERE id = $id::int;
+//! ```
 //!
 //! # Parameter Types and Nullability
 //!
@@ -270,6 +282,63 @@ mod tests {
             insert into t values ($a, $b::, $c::text, $d::text::);
             "#
         ));
+    }
+
+    #[test]
+    fn test_result_class_matching_shapes() {
+        assert_yaml_snapshot!(report(
+            r#"
+            create table workbooks(id integer primary key, name text not null);
+
+            -- name: listWorkbooks :rows -> Workbook
+            select id, name from workbooks;
+
+            -- name: getWorkbook :row -> Workbook
+            select id, name from workbooks where id = $id::int;
+            "#
+        ));
+    }
+
+    #[test]
+    fn test_result_class_mismatched_shapes_errors() {
+        let err = report_from_file(
+            r#"
+            create table workbooks(id integer primary key, name text not null, deleted_at text);
+
+            -- name: listWorkbooks :rows -> Workbook
+            select id, name, deleted_at from workbooks;
+
+            -- name: getWorkbook :row -> Workbook
+            select id, name from workbooks where id = $id::int;
+            "#,
+            &PathBuf::from("[test]"),
+            BaseDatabaseType::None,
+        )
+        .expect_err("should error on shape mismatch");
+
+        let msg = err.to_string();
+        assert!(msg.contains("Workbook"), "error mentions class: {msg}");
+        assert!(msg.contains("listWorkbooks"), "error mentions first query: {msg}");
+        assert!(msg.contains("getWorkbook"), "error mentions second query: {msg}");
+        assert!(msg.contains("column count differs"), "error describes the diff: {msg}");
+    }
+
+    #[test]
+    fn test_result_class_without_hint_no_validation() {
+        // Two queries with identical shapes but no -> hint; should coexist fine.
+        let r = report(
+            r#"
+            create table workbooks(id integer primary key, name text not null);
+
+            -- name: listWorkbooks :rows
+            select id, name from workbooks;
+
+            -- name: listWorkbooksAgain :rows
+            select id, name from workbooks;
+            "#,
+        );
+        assert_eq!(r.exports.len(), 2);
+        assert!(r.exports.iter().all(|e| e.result_class.is_none()));
     }
 
     #[test]

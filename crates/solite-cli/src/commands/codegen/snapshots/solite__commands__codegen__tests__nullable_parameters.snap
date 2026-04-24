@@ -27,3 +27,4 @@ exports:
         annotated_type: text
         nullable: true
     columns: []
+    result_class: ~

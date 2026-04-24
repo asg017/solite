@@ -18,6 +18,11 @@ pub struct Export {
     pub parameters: Vec<Parameter>,
     /// Column metadata for the result set
     pub columns: Vec<ColumnMeta>,
+    /// Optional result class hint (from `-> ClassName` on the `-- name:` line).
+    ///
+    /// Multiple exports may share the same class when their column shapes
+    /// match; codegen rejects mismatched shapes with an explicit error.
+    pub result_class: Option<String>,
 }
 
 /// The complete codegen report.

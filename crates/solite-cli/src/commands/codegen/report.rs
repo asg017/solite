@@ -244,9 +244,122 @@ fn handle_step_error(error: StepError) -> anyhow::Error {
         StepError::ParseDot(e) => anyhow!("Dot command parse error: {:?}", e),
         StepError::Prepare {
             file_name,
+            src,
             offset,
             error,
-            ..
-        } => anyhow!("Failed to prepare statement at {}:{}: {:?}", file_name, offset, error),
+        } => {
+            // block.offset points at the start of the failing statement; if SQLite
+            // reported its own offset into that statement, combine them to land
+            // on the exact token.
+            let abs_offset = offset.saturating_add(error.offset.unwrap_or(0));
+            let (line, col) = offset_to_line_col(&src, abs_offset);
+            let line_text = first_line_at(&src, abs_offset);
+            if line_text.is_empty() {
+                anyhow!(
+                    "Failed to prepare statement at {}:{}:{}: {}",
+                    file_name, line, col, error.message,
+                )
+            } else {
+                anyhow!(
+                    "Failed to prepare statement at {}:{}:{}: {}\n  > {}",
+                    file_name, line, col, error.message, line_text,
+                )
+            }
+        }
+    }
+}
+
+/// Return the 1-based (line, column) of `offset` within `src`.
+///
+/// Byte offsets are counted; the column is also in bytes. Offsets past the end
+/// of `src` are clamped to the final byte.
+fn offset_to_line_col(src: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(src.len());
+    let prefix = &src[..offset];
+    let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
+    let last_newline = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = offset - last_newline + 1;
+    (line, col)
+}
+
+/// Return the line of `src` that contains byte `offset`, trimmed of trailing
+/// whitespace. Returns empty string if `src` is empty.
+fn first_line_at(src: &str, offset: usize) -> &str {
+    if src.is_empty() {
+        return "";
+    }
+    let offset = offset.min(src.len().saturating_sub(1));
+    let start = src[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end = src[start..]
+        .find('\n')
+        .map(|i| start + i)
+        .unwrap_or(src.len());
+    src[start..end].trim_end()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_offset_to_line_col_first_line() {
+        assert_eq!(offset_to_line_col("select 1", 0), (1, 1));
+        assert_eq!(offset_to_line_col("select 1", 7), (1, 8));
+    }
+
+    #[test]
+    fn test_offset_to_line_col_mid_file() {
+        let src = "line one\nline two\nline three";
+        // offset of 'l' in "line two"
+        let off = src.find("line two").unwrap();
+        assert_eq!(offset_to_line_col(src, off), (2, 1));
+        // offset of 't' in "three"
+        let off = src.find("three").unwrap();
+        assert_eq!(offset_to_line_col(src, off), (3, 6));
+    }
+
+    #[test]
+    fn test_offset_to_line_col_past_end() {
+        let src = "short";
+        assert_eq!(offset_to_line_col(src, 999), (1, 6));
+    }
+
+    #[test]
+    fn test_first_line_at_start() {
+        let src = "create table t(a);\nselect * from t;\n";
+        let off = src.find("select").unwrap();
+        assert_eq!(first_line_at(src, off), "select * from t;");
+    }
+
+    #[test]
+    fn test_first_line_at_no_trailing_newline() {
+        let src = "one\ntwo";
+        let off = src.find("two").unwrap();
+        assert_eq!(first_line_at(src, off), "two");
+    }
+
+    #[test]
+    fn test_first_line_at_empty_src() {
+        assert_eq!(first_line_at("", 0), "");
+    }
+
+    #[test]
+    fn test_handle_step_error_formats_line_col() {
+        use solite_core::sqlite::SQLiteError;
+        let err = StepError::Prepare {
+            file_name: "queries.sql".to_string(),
+            src: "\ncreate table t(a);\n\nselect * from missing;\n".to_string(),
+            offset: "\ncreate table t(a);\n\n".len(),
+            error: SQLiteError {
+                result_code: 1,
+                code_description: "SQL logic error".to_string(),
+                message: "no such table: missing".to_string(),
+                offset: None,
+            },
+        };
+        let msg = handle_step_error(err).to_string();
+        assert!(msg.contains("queries.sql:4:1"), "msg = {msg}");
+        assert!(msg.contains("no such table: missing"), "msg = {msg}");
+        assert!(msg.contains("> select * from missing;"), "msg = {msg}");
     }
 }

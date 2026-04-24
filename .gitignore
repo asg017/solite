@@ -13,3 +13,5 @@ examples/codegen-python
 
 .env
 .envrc
+
+.dex/

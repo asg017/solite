@@ -29,17 +29,25 @@ pub enum ResultType {
 
 /// A SQL parameter with optional type annotation.
 ///
-/// Parameters can be annotated with types using the `::type` syntax:
-/// - `$name::text` - parameter named "name" with type "text"
-/// - `$id::int` - parameter named "id" with type "int"
+/// Parameters can be annotated with types using the `::type` syntax, and
+/// marked nullable/not-required with a trailing `::`:
+/// - `$name`          - required, untyped
+/// - `$name::`        - not required, untyped
+/// - `$name::text`    - required, typed as text
+/// - `$name::text::`  - not required, typed as text
+///
+/// The `nullable` flag is metadata for downstream codegen tools; solite itself
+/// does not enforce required-ness at bind time.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct ProcedureParam {
-    /// The full parameter name as it appears in SQL (e.g., "$name::text")
+    /// The full parameter name as it appears in SQL (e.g., "$name::text::")
     pub full_name: String,
-    /// The parameter name without prefix or type (e.g., "name")
+    /// The parameter name without prefix, type, or nullability marker (e.g., "name")
     pub name: String,
     /// The annotated type, if any (e.g., "text")
     pub annotated_type: Option<String>,
+    /// Whether the parameter is marked not-required (trailing `::`).
+    pub nullable: bool,
 }
 
 /// A named SQL procedure with metadata.
@@ -75,30 +83,40 @@ pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>)> {
 
 /// Parse a parameter string into a ProcedureParam struct.
 ///
-/// Handles both simple parameters (`$name`) and typed parameters (`$name::text`).
+/// Handles the four shapes produced by `-- name:` preamble scans:
+/// - `$name`          → untyped, required
+/// - `$name::`        → untyped, nullable
+/// - `$name::type`    → typed, required
+/// - `$name::type::`  → typed, nullable
+///
+/// Works for both `$` and `:` prefixes. The full input is preserved as
+/// `full_name` so generators can bind using the exact SQLite bind key.
 pub fn parse_parameter(param: &str) -> ProcedureParam {
-    // Check if it starts with $ or : and contains ::
-    if (param.starts_with('$') || param.starts_with(':')) && param.contains("::") {
-        if let Some(idx) = param.find("::") {
-            let prefix_and_name = &param[..idx];
-            let type_annotation = &param[idx + 2..];
-            return ProcedureParam {
-                full_name: param.to_string(),
-                name: prefix_and_name[1..].to_string(),
-                annotated_type: Some(type_annotation.to_string()),
-            };
-        }
-    }
+    let full_name = param.to_string();
 
-    // Simple parameter without type annotation
+    let rest = match param.as_bytes().first() {
+        Some(b'$') | Some(b':') => &param[1..],
+        _ => param,
+    };
+
+    let (body, nullable) = match rest.strip_suffix("::") {
+        Some(stripped) => (stripped, true),
+        None => (rest, false),
+    };
+
+    let (name, annotated_type) = match body.find("::") {
+        Some(idx) => (
+            body[..idx].to_string(),
+            Some(body[idx + 2..].to_string()),
+        ),
+        None => (body.to_string(), None),
+    };
+
     ProcedureParam {
-        full_name: param.to_string(),
-        name: if param.is_empty() {
-            String::new()
-        } else {
-            param[1..].to_string()
-        },
-        annotated_type: None,
+        full_name,
+        name,
+        annotated_type,
+        nullable,
     }
 }
 
@@ -163,6 +181,7 @@ mod tests {
         assert_eq!(param.full_name, "$name");
         assert_eq!(param.name, "name");
         assert!(param.annotated_type.is_none());
+        assert!(!param.nullable);
     }
 
     #[test]
@@ -171,6 +190,7 @@ mod tests {
         assert_eq!(param.full_name, "$name::text");
         assert_eq!(param.name, "name");
         assert_eq!(param.annotated_type, Some("text".to_string()));
+        assert!(!param.nullable);
     }
 
     #[test]
@@ -179,6 +199,43 @@ mod tests {
         assert_eq!(param.full_name, ":id::int");
         assert_eq!(param.name, "id");
         assert_eq!(param.annotated_type, Some("int".to_string()));
+        assert!(!param.nullable);
+    }
+
+    #[test]
+    fn test_parse_parameter_untyped_nullable() {
+        let param = parse_parameter("$name::");
+        assert_eq!(param.full_name, "$name::");
+        assert_eq!(param.name, "name");
+        assert!(param.annotated_type.is_none());
+        assert!(param.nullable);
+    }
+
+    #[test]
+    fn test_parse_parameter_typed_nullable() {
+        let param = parse_parameter("$name::text::");
+        assert_eq!(param.full_name, "$name::text::");
+        assert_eq!(param.name, "name");
+        assert_eq!(param.annotated_type, Some("text".to_string()));
+        assert!(param.nullable);
+    }
+
+    #[test]
+    fn test_parse_parameter_colon_prefix_nullable() {
+        let param = parse_parameter(":id::int::");
+        assert_eq!(param.full_name, ":id::int::");
+        assert_eq!(param.name, "id");
+        assert_eq!(param.annotated_type, Some("int".to_string()));
+        assert!(param.nullable);
+    }
+
+    #[test]
+    fn test_parse_parameter_colon_prefix_untyped_nullable() {
+        let param = parse_parameter(":id::");
+        assert_eq!(param.full_name, ":id::");
+        assert_eq!(param.name, "id");
+        assert!(param.annotated_type.is_none());
+        assert!(param.nullable);
     }
 
     #[test]

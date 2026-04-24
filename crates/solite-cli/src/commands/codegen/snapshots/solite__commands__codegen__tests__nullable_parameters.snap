@@ -1,0 +1,29 @@
+---
+source: crates/solite-cli/src/commands/codegen/mod.rs
+expression: "report(r#\"\n            create table t(a text, b text, c text, d text);\n\n            -- name: mixedParams\n            insert into t values ($a, $b::, $c::text, $d::text::);\n            \"#)"
+snapshot_kind: text
+---
+setup:
+  - "create table t(a text, b text, c text, d text);"
+exports:
+  - name: mixedParams
+    result_type: Void
+    sql: "insert into t values ($a, $b::, $c::text, $d::text::);"
+    parameters:
+      - full_name: $a
+        name: a
+        annotated_type: ~
+        nullable: false
+      - full_name: "$b::"
+        name: b
+        annotated_type: ~
+        nullable: true
+      - full_name: "$c::text"
+        name: c
+        annotated_type: text
+        nullable: false
+      - full_name: "$d::text::"
+        name: d
+        annotated_type: text
+        nullable: true
+    columns: []

@@ -16,6 +16,7 @@ exports:
         origin_table: t
         origin_column: a
         decltype: ~
+        nullable: true
   - name: getB
     result_type: Rows
     sql: select b from t;
@@ -26,6 +27,7 @@ exports:
         origin_table: t
         origin_column: b
         decltype: TEXT
+        nullable: true
   - name: getC
     result_type: Rows
     sql: select c from t;
@@ -36,3 +38,4 @@ exports:
         origin_table: t
         origin_column: c
         decltype: INT
+        nullable: true

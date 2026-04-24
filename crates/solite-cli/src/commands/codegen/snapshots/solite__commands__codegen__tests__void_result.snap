@@ -13,4 +13,5 @@ exports:
       - full_name: $id
         name: id
         annotated_type: ~
+        nullable: false
     columns: []

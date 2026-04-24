@@ -13,14 +13,17 @@ exports:
       - full_name: $id
         name: id
         annotated_type: ~
+        nullable: false
     columns:
       - name: id
         origin_database: main
         origin_table: users
         origin_column: id
         decltype: INT
+        nullable: true
       - name: name
         origin_database: main
         origin_table: users
         origin_column: name
         decltype: TEXT
+        nullable: true

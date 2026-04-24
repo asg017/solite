@@ -20,15 +20,36 @@
 //! - `:value` - Returns a single value
 //! - `:list` - Returns a list of single values
 //!
-//! # Parameter Types
+//! # Parameter Types and Nullability
 //!
-//! Parameters can be annotated with types using `::type` syntax:
+//! Parameters can be annotated with a type using `::type` and marked
+//! not-required/nullable with a trailing `::`. The two markers are
+//! orthogonal:
+//!
+//! | Syntax            | Type     | Nullable |
+//! |-------------------|----------|----------|
+//! | `$name`           | none     | no       |
+//! | `$name::`         | none     | yes      |
+//! | `$name::text`     | `text`   | no       |
+//! | `$name::text::`   | `text`   | yes      |
 //!
 //! ```sql
 //! -- name: insertUser :row
-//! INSERT INTO users (name, email) VALUES ($name::text, $email::text)
+//! INSERT INTO users (name, email, nickname)
+//! VALUES ($name::text, $email::text, $nickname::text::)
 //! RETURNING *;
 //! ```
+//!
+//! Both `$` and `:` prefixes are supported. `solite codegen` only surfaces
+//! the `nullable` flag in the IR; enforcement (raise if missing, default to
+//! NULL, etc.) is left to downstream generators.
+//!
+//! # Bind-key gotcha
+//!
+//! SQLite treats the full string after the prefix as the bind name, so
+//! `$name::text::` binds to the key `name::text::` — not `name`. Generators
+//! that construct parameter dicts for sqlite3 should use the IR's `full_name`
+//! (minus the leading `$`/`:`) as the key.
 //!
 //! # Schema Support
 //!
@@ -233,8 +254,52 @@ mod tests {
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].name, "a");
         assert_eq!(params[0].annotated_type, Some("text".to_string()));
+        assert!(!params[0].nullable);
         assert_eq!(params[1].name, "b");
         assert_eq!(params[1].annotated_type, Some("int".to_string()));
+        assert!(!params[1].nullable);
+    }
+
+    #[test]
+    fn test_nullable_parameters() {
+        assert_yaml_snapshot!(report(
+            r#"
+            create table t(a text, b text, c text, d text);
+
+            -- name: mixedParams
+            insert into t values ($a, $b::, $c::text, $d::text::);
+            "#
+        ));
+    }
+
+    #[test]
+    fn test_nullable_parameter_fields() {
+        let r = report(
+            r#"
+            create table t(a text, b text, c text, d text);
+
+            -- name: mixed
+            insert into t values ($a, $b::, $c::text, $d::text::);
+            "#,
+        );
+        let params = &r.exports[0].parameters;
+        assert_eq!(params.len(), 4);
+
+        assert_eq!(params[0].name, "a");
+        assert_eq!(params[0].annotated_type, None);
+        assert!(!params[0].nullable);
+
+        assert_eq!(params[1].name, "b");
+        assert_eq!(params[1].annotated_type, None);
+        assert!(params[1].nullable);
+
+        assert_eq!(params[2].name, "c");
+        assert_eq!(params[2].annotated_type, Some("text".to_string()));
+        assert!(!params[2].nullable);
+
+        assert_eq!(params[3].name, "d");
+        assert_eq!(params[3].annotated_type, Some("text".to_string()));
+        assert!(params[3].nullable);
     }
 
     #[test]

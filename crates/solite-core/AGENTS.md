@@ -190,9 +190,10 @@ Procedures are named SQL blocks declared with a `-- name: foo :annotation` comme
 pub enum ResultType { Void, Rows, Row, Value, List }
 
 pub struct ProcedureParam {
-    pub full_name: String,          // "$name::text"
+    pub full_name: String,          // "$name::text::"
     pub name: String,               // "name"
     pub annotated_type: Option<String>,  // Some("text")
+    pub nullable: bool,             // trailing `::` on the param means not-required
 }
 
 pub struct Procedure {

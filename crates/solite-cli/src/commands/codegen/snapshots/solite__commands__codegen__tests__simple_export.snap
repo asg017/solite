@@ -15,13 +15,16 @@ exports:
         origin_table: ~
         origin_column: ~
         decltype: ~
+        nullable: ~
       - name: "2"
         origin_database: ~
         origin_table: ~
         origin_column: ~
         decltype: ~
+        nullable: ~
       - name: "3"
         origin_database: ~
         origin_table: ~
         origin_column: ~
         decltype: ~
+        nullable: ~

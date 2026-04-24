@@ -13,12 +13,15 @@ exports:
       - full_name: "$a::text"
         name: a
         annotated_type: text
+        nullable: false
       - full_name: "$b::text"
         name: b
         annotated_type: text
+        nullable: false
     columns:
       - name: c
         origin_database: main
         origin_table: t
         origin_column: c
         decltype: INT
+        nullable: true

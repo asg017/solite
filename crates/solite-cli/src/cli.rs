@@ -220,13 +220,34 @@ pub struct CodegenArgs {
 
 
 
+const TEST_AFTER_HELP: &str = "\
+Test files are plain SQL. The comment after a statement's semicolon is its
+assertion, compared against the first column of the first row:
+
+  SELECT 1 + 1;             -- 2
+  SELECT 'hi';              -- 'hi'
+  SELECT NULL;              -- NULL
+  SELECT * FROM empty;      -- [no results]
+  SELECT * FROM nope;       -- error: no such table: nope
+  SELECT * FROM users;      -- @snap all-users
+  SELECT slow();            -- TODO speed this up (fails until resolved)
+
+Statements without an assertion comment are setup and run silently, against
+an in-memory database. `error:` matches the error message exactly.
+Snapshots (`@snap <name>`) are stored in __snapshots__/ next to the test
+file; use --update to accept changes, --review to accept interactively.
+Dot commands available in tests: .load, .param, .call, .run";
+
 #[derive(Args, Debug)]
 pub struct TestArgs {
+    /// SQL test file with inline `-- expected` assertions
     pub file: PathBuf,
 
-    #[arg(long)]
+    /// Reserved; currently ignored (tests always run in-memory)
+    #[arg(long, hide = true)]
     pub database: Option<PathBuf>,
 
+    /// Also print expected/actual detail for failing assertions
     #[arg(long)]
     pub verbose: bool,
 
@@ -463,6 +484,7 @@ pub enum Commands {
     Execute(ExecuteArgs),
 
     /// Run SQL-based inline tests in a single file
+    #[command(after_long_help = TEST_AFTER_HELP)]
     Test(TestArgs),
 
     /// Manage the Solite Jupyter kernel

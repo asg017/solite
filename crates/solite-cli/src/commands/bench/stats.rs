@@ -24,18 +24,20 @@ pub fn average(times: &[Span]) -> Option<Span> {
 
 /// Calculate the standard deviation of a slice of time spans.
 ///
-/// Returns a Span representing the standard deviation, or None if the slice is empty.
+/// This is the *sample* standard deviation (Bessel-corrected, n-1
+/// denominator) — `statistical::standard_deviation` divides the sum of
+/// squared deviations by `len - 1`. The right choice for benchmark runs,
+/// which sample a small number of iterations from a larger population.
+///
+/// Returns None for fewer than two data points (the sample formula needs
+/// at least two; `statistical` asserts on less).
 pub fn stddev(times: &[Span]) -> Option<Span> {
-    if times.is_empty() {
-        return None;
-    }
-
     let microseconds: Vec<f64> = times
         .iter()
         .filter_map(|span| span.total(jiff::Unit::Microsecond).ok())
         .collect();
 
-    if microseconds.is_empty() {
+    if microseconds.len() < 2 {
         return None;
     }
 
@@ -96,6 +98,26 @@ mod tests {
     #[test]
     fn test_stddev_empty() {
         assert!(stddev(&[]).is_none());
+    }
+
+    #[test]
+    fn test_stddev_single_point_is_none() {
+        // sample stddev is undefined for n=1 (and `statistical` asserts)
+        let times = vec![Span::new().milliseconds(100)];
+        assert!(stddev(&times).is_none());
+    }
+
+    #[test]
+    fn test_stddev_is_sample_stddev() {
+        // sample (n-1) stddev of {100, 200, 300}ms = sqrt(20000/2) = 100ms
+        let times = vec![
+            Span::new().milliseconds(100),
+            Span::new().milliseconds(200),
+            Span::new().milliseconds(300),
+        ];
+        let s = stddev(&times).unwrap();
+        let total = s.total(jiff::Unit::Millisecond).unwrap();
+        assert!((total - 100.0).abs() < 0.001);
     }
 
     #[test]

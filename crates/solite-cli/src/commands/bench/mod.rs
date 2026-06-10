@@ -42,30 +42,21 @@ use crate::cli::BenchArgs;
 use format::format_runtime;
 use stats::{average, max, min, stddev};
 
-/// Error type for benchmark operations.
+/// Error type for benchmark operations. Open/prepare/execute errors are
+/// reported through `anyhow` in `bench_impl`.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum BenchError {
     /// Failed to load an extension.
     ExtensionLoad(String),
-    /// Failed to open a database.
-    DatabaseOpen(String),
     /// Failed to read a SQL file.
     FileRead(String),
-    /// Failed to prepare a SQL statement.
-    PrepareStatement(String),
-    /// Failed to execute a SQL statement.
-    ExecuteStatement(String),
 }
 
 impl std::fmt::Display for BenchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BenchError::ExtensionLoad(msg) => write!(f, "Failed to load extension: {}", msg),
-            BenchError::DatabaseOpen(msg) => write!(f, "Failed to open database: {}", msg),
             BenchError::FileRead(msg) => write!(f, "Failed to read file: {}", msg),
-            BenchError::PrepareStatement(msg) => write!(f, "Failed to prepare statement: {}", msg),
-            BenchError::ExecuteStatement(msg) => write!(f, "Failed to execute statement: {}", msg),
         }
     }
 }
@@ -202,11 +193,10 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
         for _ in 0..10 {
             pb.inc(1);
             let tn = jiff::Timestamp::now();
-
             stmt.execute()?;
-            stmt.reset();
-
             times.push(jiff::Timestamp::now() - tn);
+
+            stmt.reset();
 
             if let Some(avg) = average(&times) {
                 pb.set_message(format!(

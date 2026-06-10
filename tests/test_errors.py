@@ -10,6 +10,7 @@ import pytest
         ["codegen", "/nonexistent-dir/nope.sql"],
         ["vacuum", "/nonexistent-dir/nope.db"],
         ["backup", "/nonexistent-dir/nope.db", "/nonexistent-dir/out.db"],
+        ["bench"],
     ],
     ids=lambda args: args[0],
 )

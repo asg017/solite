@@ -217,7 +217,8 @@ pub struct ReplArgs {
 
 const BENCH_AFTER_HELP: &str = "\
 Each SQL argument is benchmarked over 10 iterations, reporting
-mean ± stddev, min … max, and the statement's bytecode steps.
+mean ± stddev (sample, n-1), min … max, and the statement's
+bytecode steps.
 
 Examples:
   solite bench --database app.db \"SELECT count(*) FROM users\"
@@ -230,6 +231,7 @@ dot command.";
 #[derive(Args, Debug)]
 pub struct BenchArgs {
     /// SQL statements (or .sql file paths) to benchmark
+    #[arg(required = true)]
     pub sql: Vec<String>,
 
     /// Database for each SQL argument, paired by position

@@ -32,7 +32,6 @@ ifndef VERSION
 endif
 	@command -v cargo-insta >/dev/null || { echo "cargo-insta not found; install with: cargo install cargo-insta"; exit 1; }
 	cd vendor/sqlite && git fetch --depth 1 origin tag version-$(VERSION) && git checkout version-$(VERSION)
-	-cd vendor/sqlite && make clean
 	cargo build
 	cargo insta test --accept
 	uv run --project tests pytest --snapshot-update

@@ -29,6 +29,31 @@ fn generate_builtins() {
 
 fn build_amalgamation_if_needed(sqlite_dir: &Path) -> PathBuf {
     let sqlite3_c = sqlite_dir.join("sqlite3.c");
+
+    // sqlite3.c is generated and untracked, so checking out a different
+    // submodule commit leaves the previous version's amalgamation on disk.
+    // Stamp the generated sources with manifest.uuid (the exact source
+    // checkout id) and regenerate whenever it doesn't match.
+    let stamp_path = sqlite_dir.join(".solite-amalgamation-stamp");
+    let manifest_uuid = std::fs::read_to_string(sqlite_dir.join("manifest.uuid"))
+        .expect("vendor/sqlite/manifest.uuid missing — is the submodule checked out? (git submodule update --init)");
+    let stamp_matches = std::fs::read_to_string(&stamp_path)
+        .map(|s| s == manifest_uuid)
+        .unwrap_or(false);
+
+    if sqlite3_c.exists() && !stamp_matches {
+        // Stale amalgamation from a previous checkout: clean the generated
+        // sources. make clean can exit nonzero yet still do its job, so
+        // verify by deleting the key outputs ourselves if they survived.
+        let _ = Command::new("make")
+            .arg("clean")
+            .current_dir(sqlite_dir)
+            .status();
+        for f in ["sqlite3.c", "sqlite3.h", "shell.c"] {
+            let _ = std::fs::remove_file(sqlite_dir.join(f));
+        }
+    }
+
     if !sqlite3_c.exists() {
         // On Windows, ./configure is a shell script so we invoke it via sh.
         // make/sh are available via Git for Windows / MSYS2.
@@ -66,6 +91,9 @@ fn build_amalgamation_if_needed(sqlite_dir: &Path) -> PathBuf {
         if !status.success() {
             panic!("make sqlite3.c failed in sqlite submodule");
         }
+
+        std::fs::write(&stamp_path, &manifest_uuid)
+            .expect("failed to write amalgamation stamp");
     }
     sqlite_dir.to_path_buf()
 }
@@ -108,6 +136,12 @@ fn main() {
     let sqlite_dir = manifest_dir.join("../../vendor/sqlite");
 
     println!("cargo:rerun-if-env-changed=SOLITE_AMALGAMMATION_DIR");
+    // Re-run when the submodule checkout moves so the stamp check in
+    // build_amalgamation_if_needed() gets a chance to regenerate.
+    println!(
+        "cargo:rerun-if-changed={}",
+        sqlite_dir.join("manifest.uuid").display()
+    );
     let amalgamation_dir = env::var("SOLITE_AMALGAMMATION_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| build_amalgamation_if_needed(&sqlite_dir));

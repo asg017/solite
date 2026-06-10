@@ -10,14 +10,32 @@ use solite_core::sqlite::Connection;
 use crate::cli::BackupArgs;
 
 fn get_page_size(conn: &Connection) -> u64 {
-    let (_, stmt) = conn.prepare("PRAGMA page_size").unwrap();
-    let stmt = stmt.unwrap();
+    let Ok((_, Some(stmt))) = conn.prepare("PRAGMA page_size") else {
+        return 4096;
+    };
     if let Ok(Some(row)) = stmt.next() {
         if let solite_core::sqlite::ValueRefXValue::Int(v) = row[0].value {
             return v as u64;
         }
     }
     4096
+}
+
+/// Error message from a SQLite handle. A null handle (sqlite3_open_v2 only
+/// leaves one on OOM) falls back to the generic message for `rc`.
+fn sqlite_error_message(db: *mut sqlite3, rc: std::os::raw::c_int) -> String {
+    unsafe {
+        let p = if db.is_null() {
+            sqlite3_errstr(rc)
+        } else {
+            sqlite3_errmsg(db)
+        };
+        if p.is_null() {
+            "unknown error".to_string()
+        } else {
+            std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+        }
+    }
 }
 
 /// Remove a destination file left behind by a failed backup. The file did
@@ -72,14 +90,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         )
     };
     if rc != SQLITE_OK {
-        let msg = unsafe {
-            let p = sqlite3_errmsg(dest_db);
-            if p.is_null() {
-                "unknown error".to_string()
-            } else {
-                std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
-            }
-        };
+        let msg = sqlite_error_message(dest_db, rc);
         eprintln!("Error opening destination database: {msg}");
         unsafe { sqlite3_close(dest_db) };
         remove_failed_destination(&args.destination);
@@ -95,14 +106,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         sqlite3_backup_init(dest_db, dest_name.as_ptr(), source.db(), db_name.as_ptr())
     };
     if backup.is_null() {
-        let msg = unsafe {
-            let p = sqlite3_errmsg(dest_db);
-            if p.is_null() {
-                "unknown error".to_string()
-            } else {
-                std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
-            }
-        };
+        let msg = sqlite_error_message(dest_db, SQLITE_ERROR);
         eprintln!("Error initializing backup: {msg}");
         unsafe { sqlite3_close(dest_db) };
         remove_failed_destination(&args.destination);
@@ -140,14 +144,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         // Error during backup
         pb.finish_and_clear();
         let finish_rc = unsafe { sqlite3_backup_finish(backup) };
-        let msg = unsafe {
-            let p = sqlite3_errmsg(dest_db);
-            if p.is_null() {
-                "unknown error".to_string()
-            } else {
-                std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
-            }
-        };
+        let msg = sqlite_error_message(dest_db, finish_rc);
         eprintln!("Backup failed (rc={finish_rc}): {msg}");
         unsafe { sqlite3_close(dest_db) };
         remove_failed_destination(&args.destination);
@@ -158,14 +155,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
 
     let rc = unsafe { sqlite3_backup_finish(backup) };
     if rc != SQLITE_OK {
-        let msg = unsafe {
-            let p = sqlite3_errmsg(dest_db);
-            if p.is_null() {
-                "unknown error".to_string()
-            } else {
-                std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
-            }
-        };
+        let msg = sqlite_error_message(dest_db, rc);
         eprintln!("Backup finish failed: {msg}");
         unsafe { sqlite3_close(dest_db) };
         remove_failed_destination(&args.destination);

@@ -25,12 +25,12 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), ()> {
                 })?;
             }
             let (_, stmt) = conn.prepare("VACUUM INTO ?").map_err(|e| {
-                eprintln!("Vacuum failed: {}", e.message);
+                eprintln!("Vacuum failed preparing VACUUM INTO: {}", e.message);
             })?;
-            let stmt = stmt.unwrap();
+            let stmt = stmt.expect("VACUUM INTO ? always yields a statement");
             stmt.bind_text(1, into.to_string_lossy());
             stmt.execute().map_err(|e| {
-                eprintln!("Vacuum failed: {}", e.message);
+                eprintln!("Vacuum failed executing VACUUM INTO: {}", e.message);
             })?;
             into.clone()
         }

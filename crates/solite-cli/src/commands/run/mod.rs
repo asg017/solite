@@ -71,9 +71,11 @@ enum InputType {
 /// Classify a positional argument by file extension.
 fn classify_arg(s: &str) -> InputType {
     let path = std::path::Path::new(s);
+    if crate::cli::is_database_path(path) {
+        return InputType::Database(PathBuf::from(s));
+    }
     match path.extension().and_then(OsStr::to_str) {
         Some("sql") | Some("ipynb") => InputType::Script(PathBuf::from(s)),
-        Some("db") | Some("sqlite") | Some("sqlite3") => InputType::Database(PathBuf::from(s)),
         _ => InputType::Procedure(s.to_string()),
     }
 }

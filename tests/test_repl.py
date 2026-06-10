@@ -39,3 +39,22 @@ def test_help_lists_dot_commands(solite_cli):
 def test_help_topic(solite_cli):
     output = solite_cli([], communicate=[b".help export\n"], kill=True).stdout
     assert ".export <path>" in output
+
+
+def test_db_file_opens_repl(solite_cli, tmp_path):
+    # `solite <file>` opens a REPL for any recognized database extension
+    import shutil
+    from pathlib import Path
+
+    src = Path(__file__).parent / "legislators.db"
+    for ext in ["db", "sqlite", "sqlite3"]:
+        db = tmp_path / f"data.{ext}"
+        shutil.copy(src, db)
+        result = solite_cli([str(db)], communicate=[b".tables\n"], kill=True)
+        assert f'Connected to "{db}"' in result.stdout, ext
+
+
+def test_non_db_file_is_usage_error(solite_cli):
+    result = solite_cli(["not-a-db.txt"])
+    assert not result.success
+    assert result.stderr != ""

@@ -5,6 +5,7 @@
   Solite CLI
   
   Usage: solite [OPTIONS] [COMMAND]
+         solite <file>.db        Open the REPL on a database (also .sqlite, .sqlite3)
   
   Options:
         --allow-ssh  Allow SSH and remote transport connections

@@ -3,6 +3,15 @@ use std::{collections::HashMap, env, path::PathBuf};
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::ExportFormat;
 
+/// Extensions treated as SQLite database files, for positional-arg
+/// classification (`solite run`) and the bare `solite <file>` REPL fallback.
+pub(crate) fn is_database_path(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(std::ffi::OsStr::to_str),
+        Some("db" | "sqlite" | "sqlite3")
+    )
+}
+
 /// Shared args for connecting to remote databases over SSH or custom transports.
 #[derive(Args, Debug, Clone, Default)]
 pub struct RemoteArgs {
@@ -459,6 +468,7 @@ const HELP_TEMPLATE: &str = "\
 {about}
 
 {usage-heading} {usage}
+       solite <file>.db        Open the REPL on a database (also .sqlite, .sqlite3)
 
 Options:
 {options}
@@ -512,4 +522,20 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Box<Commands>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn database_path_extensions() {
+        for ok in ["a.db", "a.sqlite", "a.sqlite3", "/x/y/a.db"] {
+            assert!(is_database_path(Path::new(ok)), "{ok}");
+        }
+        for not in ["a.sql", "a.csv", "a", "a.db.bak", "db"] {
+            assert!(!is_database_path(Path::new(not)), "{not}");
+        }
+    }
 }

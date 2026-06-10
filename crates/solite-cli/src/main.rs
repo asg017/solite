@@ -23,7 +23,7 @@ fn main() {
                 if let Some(path) = args
                     .get(1)
                     .map(PathBuf::from)
-                    .filter(|p: &PathBuf| p.extension().is_some_and(|ext| ext == "db"))
+                    .filter(|p: &PathBuf| cli::is_database_path(p))
                 {
                     (false, Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),

@@ -3,4 +3,4 @@ source: crates/solite-stdlib/src/lib.rs
 expression: "db.query_row(\"select sqlite_version();\", [], |r| r.get::<usize,\nString>(0)).unwrap()"
 snapshot_kind: text
 ---
-3.53.0
+3.53.2

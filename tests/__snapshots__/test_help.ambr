@@ -117,18 +117,12 @@
     [ARGS]...  Positional args: [database] [script.sql] [procedureName]
   
   Options:
-        --allow-ssh
-            Allow SSH and remote transport connections
-    -c, --command <COMMAND>
-            Execute SQL/dot commands from the given string (instead of a .sql file)
-    -p, --parameters <PARAMETERS> <PARAMETERS>
-            
-        --trace <TRACE>
-            
-        --readonly
-            
-    -h, --help
-            Print help
+        --allow-ssh                  Allow SSH and remote transport connections
+    -c, --command <COMMAND>          Execute SQL/dot commands from the given string (instead of a .sql file)
+    -p, --parameters <NAME> <VALUE>  Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file` to bind the file's bytes as a BLOB
+        --trace <TRACE>              
+        --readonly                   
+    -h, --help                       Print help
   
   '''
 # ---

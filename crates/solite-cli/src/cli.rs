@@ -99,8 +99,11 @@ pub enum QueryFormat {
     Tsv,
     #[default]
     Json,
+    /// Newline-delimited JSON, one object per row
     Ndjson,
+    /// Bare value of the first column of the first row, for shell interpolation
     Value,
+    /// Copy results to the system clipboard
     Clipboard,
 }
 
@@ -117,21 +120,39 @@ impl From<QueryFormat> for ExportFormat {
     }
 }
 
+const QUERY_AFTER_HELP: &str = "\
+Examples:
+  solite query \"SELECT count(*) FROM users\" app.db
+  solite query app.db report.sql -f json          # SQL from a file; order-agnostic
+  solite query \"SELECT * FROM users\" app.db -o users.csv.gz
+  solite query \"SELECT * FROM 'data.csv' LIMIT 5\" # query a CSV/TSV file directly
+  solite query \"SELECT name FROM users WHERE id = $id\" app.db -p id 42
+  solite q \"SELECT 1\"                             # 'q' alias, in-memory database";
+
 #[derive(Args, Debug)]
 pub struct QueryArgs {
+    /// SQL to run (read-only; use `solite execute` for writes), or a
+    /// path to a .sql file containing it
     pub statement: String,
+
+    /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
     pub database: Option<PathBuf>,
 
+    /// Write results to a file; format inferred from extension
+    /// (.csv, .tsv, .json, .ndjson; .gz/.zst compression supported)
     #[arg(long, short = 'o')]
     pub output: Option<PathBuf>,
 
+    /// Output format (default: table on a TTY, json otherwise)
     #[arg(long, short = 'f', value_enum)]
     pub format: Option<QueryFormat>,
 
-    #[arg(long, short = 'p', num_args = 2)]
+    /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
+    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"])]
     pub parameters: Vec<String>,
 
-    #[arg(long)]
+    /// Load SQLite extension(s) before running the query
+    #[arg(long, value_name = "PATH")]
     pub load_extension: Option<Vec<PathBuf>>,
 
     #[command(flatten)]
@@ -417,7 +438,7 @@ pub enum Commands {
     Repl(ReplArgs),
 
     /// Run a read-only SQL query and output results to a file
-    #[command(alias = "q")]
+    #[command(alias = "q", after_long_help = QUERY_AFTER_HELP)]
     Query(QueryArgs),
 
     /// Execute a write SQL statement on a database

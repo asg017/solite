@@ -68,26 +68,52 @@
   Usage: solite query [OPTIONS] <STATEMENT> [DATABASE]
   
   Arguments:
-    <STATEMENT>  
-    [DATABASE]   
+    <STATEMENT>
+            SQL to run (read-only; use `solite execute` for writes), or a path to a .sql file containing it
+  
+    [DATABASE]
+            Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
   
   Options:
         --allow-ssh
             Allow SSH and remote transport connections
+  
     -o, --output <OUTPUT>
-            
+            Write results to a file; format inferred from extension (.csv, .tsv, .json, .ndjson; .gz/.zst compression supported)
+  
     -f, --format <FORMAT>
-            [possible values: csv, tsv, json, ndjson, value, clipboard]
-    -p, --parameters <PARAMETERS> <PARAMETERS>
-            
-        --load-extension <LOAD_EXTENSION>
-            
+            Output format (default: table on a TTY, json otherwise)
+  
+            Possible values:
+            - csv
+            - tsv
+            - json
+            - ndjson:    Newline-delimited JSON, one object per row
+            - value:     Bare value of the first column of the first row, for shell interpolation
+            - clipboard: Copy results to the system clipboard
+  
+    -p, --parameters <NAME> <VALUE>
+            Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
+  
+        --load-extension <PATH>
+            Load SQLite extension(s) before running the query
+  
         --remote-bin <REMOTE_BIN>
             Path to the solite binary on the remote machine (for ssh:// connections)
+  
         --transport <TRANSPORT>
             Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+  
     -h, --help
-            Print help
+            Print help (see a summary with '-h')
+  
+  Examples:
+    solite query "SELECT count(*) FROM users" app.db
+    solite query app.db report.sql -f json          # SQL from a file; order-agnostic
+    solite query "SELECT * FROM users" app.db -o users.csv.gz
+    solite query "SELECT * FROM 'data.csv' LIMIT 5" # query a CSV/TSV file directly
+    solite query "SELECT name FROM users WHERE id = $id" app.db -p id 42
+    solite q "SELECT 1"                             # 'q' alias, in-memory database
   
   '''
 # ---

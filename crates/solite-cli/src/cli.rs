@@ -539,13 +539,13 @@ pub enum Commands {
     Repl(ReplArgs),
 
     /// Run a read-only SQL query and output results to a file
-    #[command(alias = "q", after_long_help = QUERY_AFTER_HELP)]
+    #[command(visible_alias = "q", after_long_help = QUERY_AFTER_HELP)]
     Query(QueryArgs),
 
     /// Execute a write SQL statement on a database
     ///
     /// The write counterpart of `solite query`; prints a checkmark on success.
-    #[command(alias = "exec", after_long_help = EXECUTE_AFTER_HELP)]
+    #[command(visible_alias = "exec", after_long_help = EXECUTE_AFTER_HELP)]
     Execute(ExecuteArgs),
 
     /// Run SQL-based inline tests in a single file
@@ -571,7 +571,7 @@ pub enum Commands {
     Tui(TuiArgs),
 
     /// Format SQL files
-    #[command(alias = "fmt")]
+    #[command(visible_alias = "fmt")]
     Format(FmtArgs),
 
     /// Lint SQL files for potential issues
@@ -611,7 +611,10 @@ pub enum Commands {
     Stream(StreamNamespace),
 }
 
-const HELP_TEMPLATE: &str = "\
+// NOTE: subcommands are listed by hand to get the section grouping below.
+// When adding a command (or alias), add it here too or it won't appear in
+// `solite --help`.
+const HELP_TEMPLATE_BASE: &str = "\
 {name} {version}
 {about}
 
@@ -624,8 +627,8 @@ Options:
 Scripting and Query Execution:
   run              Run SQL scripts
   repl             Start a REPL on a SQLite database
-  query            Run a read-only SQL query and output results to a file
-  execute          Execute a write SQL statement on a database
+  query, q         Run a read-only SQL query and output results to a file
+  execute, exec    Execute a write SQL statement on a database
   schema           Print the schema of a database
 
 Tooling:
@@ -639,18 +642,25 @@ Tooling:
   docs             Tooling for documenting SQLite extensions
 
 SQL:
-  format           Format SQL files
+  format, fmt      Format SQL files
   lint             Lint SQL files for potential issues
   lsp              Start the Language Server Protocol (LSP) server
-
-Replication:
-  stream           Streaming replication (sync/restore)
-
+{replication}
 Compatibility:
   sqlite3          Run the sqlite3 shell directly
   diff             Output SQL to transform one database into another
   rsync            Efficiently replicate a SQLite database to a remote machine
 ";
+
+/// Render the top-level help, including feature-gated sections.
+fn help_template() -> String {
+    let replication = if cfg!(feature = "ritestream") {
+        "\nReplication:\n  stream           Streaming replication (sync/restore)\n"
+    } else {
+        ""
+    };
+    HELP_TEMPLATE_BASE.replace("{replication}", replication)
+}
 
 #[derive(Parser)]
 #[command(
@@ -661,7 +671,7 @@ Compatibility:
   version,
   subcommand_required = false,
   arg_required_else_help = false,
-  help_template = HELP_TEMPLATE,
+  help_template = help_template(),
 )]
 pub struct Cli {
     /// Allow connecting to ssh:// database URLs and custom --transport commands

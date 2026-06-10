@@ -67,10 +67,18 @@ pub struct SnapDirective {
 /// Returns an error message string if `@snap` is present but the name is missing or invalid.
 pub fn parse_snap_directive(epilogue: &str) -> Result<Option<SnapDirective>, String> {
     let trimmed = epilogue.trim();
-    if !trimmed.starts_with("@snap") {
+    let Some(rest) = trimmed.strip_prefix("@snap") else {
         return Ok(None);
+    };
+    // require a word boundary so "@snapshot" errors instead of silently
+    // creating a snapshot named "shot"
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return Err(format!(
+            "unrecognized directive '@snap{}': did you mean '@snap <name>'?",
+            rest
+        ));
     }
-    let rest = trimmed["@snap".len()..].trim();
+    let rest = rest.trim();
     if rest.is_empty() {
         return Err("@snap requires a name (e.g. @snap my-snapshot)".to_string());
     }
@@ -277,14 +285,14 @@ mod tests {
 
     #[test]
     fn test_parse_snap_not_prefix_match() {
-        // "@snapshot" should not be parsed as "@snap" + "shot"
-        // Because after "@snap", "shot" starts immediately without space
-        // Actually, trimmed["@snap".len()..] = "shot", which is valid
-        // This is intentional: @snapshot would parse as name "shot" if no space required
-        // But our parser trims, so "@snapshot" -> rest = "shot" -> valid name
-        // This is a known edge case; if undesirable, add word boundary check
+        // "@snapshot" must not be parsed as "@snap" + name "shot" — the
+        // directive requires a word boundary after "@snap"
         let result = parse_snap_directive("@snapshot");
-        assert!(result.is_ok()); // parses as @snap with name "shot"
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("did you mean"));
+
+        let result = parse_snap_directive("@snapshot foo");
+        assert!(result.is_err());
     }
 
     #[test]

@@ -90,6 +90,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     let mut handle = stdout.lock();
 
     let mut aborted = false;
+    let mut warned_multi_column = false;
 
     loop {
         match rt.next_stepx() {
@@ -224,6 +225,14 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                             }
                         }
                         Ok(Some(row)) => {
+                            if row.len() > 1 && !warned_multi_column {
+                                warned_multi_column = true;
+                                eprintln!(
+                                    "note: {} returns {} columns; inline assertions compare only the first (further notes suppressed)",
+                                    step.reference,
+                                    row.len()
+                                );
+                            }
                             let v = match row.first() {
                                 Some(v) => v,
                                 None => {

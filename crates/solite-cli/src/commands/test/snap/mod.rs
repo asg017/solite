@@ -225,19 +225,25 @@ fn handle_mismatch(
             print_decision();
 
             let term = Term::stdout();
-            match term.read_key() {
-                Ok(Key::Char('a') | Key::Char('A') | Key::Enter) => {
-                    if write_snapshot(snapshot_path, new_contents).is_ok() {
-                        state.updated += 1;
-                        print!("{}", Style::new().yellow().apply_to("u"));
-                    } else {
+            loop {
+                match term.read_key() {
+                    Ok(Key::Char('a') | Key::Char('A') | Key::Enter) => {
+                        if write_snapshot(snapshot_path, new_contents).is_ok() {
+                            state.updated += 1;
+                            print!("{}", Style::new().yellow().apply_to("u"));
+                        } else {
+                            state.rejected += 1;
+                            print!("{}", Style::new().red().apply_to("x"));
+                        }
+                        break;
+                    }
+                    // reject on a read error too (e.g. no tty) — never loop
+                    Ok(Key::Char('r') | Key::Char('R')) | Err(_) => {
                         state.rejected += 1;
                         print!("{}", Style::new().red().apply_to("x"));
+                        break;
                     }
-                }
-                _ => {
-                    state.rejected += 1;
-                    print!("{}", Style::new().red().apply_to("x"));
+                    Ok(_) => { /* unrecognized key: keep waiting */ }
                 }
             }
         }
@@ -269,19 +275,25 @@ fn handle_new_snapshot(state: &mut SnapState, snapshot_path: &Path, contents: &s
             print_decision();
 
             let term = Term::stdout();
-            match term.read_key() {
-                Ok(Key::Char('a') | Key::Char('A') | Key::Enter) => {
-                    if write_snapshot(snapshot_path, contents).is_ok() {
-                        state.new += 1;
-                        print!("{}", Style::new().green().apply_to("+"));
-                    } else {
+            loop {
+                match term.read_key() {
+                    Ok(Key::Char('a') | Key::Char('A') | Key::Enter) => {
+                        if write_snapshot(snapshot_path, contents).is_ok() {
+                            state.new += 1;
+                            print!("{}", Style::new().green().apply_to("+"));
+                        } else {
+                            state.rejected += 1;
+                            print!("{}", Style::new().red().apply_to("x"));
+                        }
+                        break;
+                    }
+                    // reject on a read error too (e.g. no tty) — never loop
+                    Ok(Key::Char('r') | Key::Char('R')) | Err(_) => {
                         state.rejected += 1;
                         print!("{}", Style::new().red().apply_to("x"));
+                        break;
                     }
-                }
-                _ => {
-                    state.rejected += 1;
-                    print!("{}", Style::new().red().apply_to("x"));
+                    Ok(_) => { /* unrecognized key: keep waiting */ }
                 }
             }
         }
@@ -338,16 +350,22 @@ pub fn handle_orphans(state: &mut SnapState, filestem: &str) {
                 println!("Remove {}? [y/n]", path.display());
 
                 let term = Term::stdout();
-                match term.read_key() {
-                    Ok(Key::Char('y') | Key::Char('Y')) => {
-                        if let Err(e) = std::fs::remove_file(&path) {
-                            eprintln!("Failed to remove {}: {}", path.display(), e);
-                        } else {
-                            state.removed += 1;
+                loop {
+                    match term.read_key() {
+                        Ok(Key::Char('y') | Key::Char('Y')) => {
+                            if let Err(e) = std::fs::remove_file(&path) {
+                                eprintln!("Failed to remove {}: {}", path.display(), e);
+                            } else {
+                                state.removed += 1;
+                            }
+                            break;
                         }
-                    }
-                    _ => {
-                        println!("Keeping {}", path.display());
+                        // keep on a read error too (e.g. no tty) — never loop
+                        Ok(Key::Char('n') | Key::Char('N')) | Err(_) => {
+                            println!("Keeping {}", path.display());
+                            break;
+                        }
+                        Ok(_) => { /* unrecognized key: keep waiting */ }
                     }
                 }
             }

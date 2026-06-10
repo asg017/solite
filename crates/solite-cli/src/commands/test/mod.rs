@@ -381,7 +381,12 @@ impl std::error::Error for TestError {}
 pub fn test(args: TestArgs) -> Result<(), ()> {
     match test_impl(args) {
         Ok(()) => Ok(()),
-        Err(_) => Err(()),
+        // failure diagnostics and summaries were already printed during the run
+        Err(TestError::TestsFailed { .. }) => Err(()),
+        Err(err) => {
+            eprintln!("Error: {err}");
+            Err(())
+        }
     }
 }
 

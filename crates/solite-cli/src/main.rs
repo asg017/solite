@@ -68,11 +68,10 @@ fn main() {
         #[cfg(feature = "ritestream")]
         cli::Commands::Stream(cmd) => commands::stream::stream(cmd),
     };
+    // Commands print their own diagnostics before returning Err(());
+    // main only translates the result into an exit code.
     match result {
-        Ok(_) => exit(0),
-        Err(_err) => {
-            //eprintln!("{}", _err);
-            exit(1);
-        }
+        Ok(()) => exit(0),
+        Err(()) => exit(1),
     }
 }

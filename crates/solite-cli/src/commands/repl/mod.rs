@@ -535,5 +535,5 @@ Enter \".help\" for usage hints.
     Ok(())
 }
 pub fn repl(args: ReplArgs) -> std::result::Result<(), ()> {
-    launch_repl(args).map_err(|_| ())
+    launch_repl(args).map_err(|err| eprintln!("Error: {err}"))
 }

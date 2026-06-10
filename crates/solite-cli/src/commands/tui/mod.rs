@@ -273,5 +273,5 @@ pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
             }
         }
     });
-    result.map_err(|_| ())
+    result.map_err(|err| eprintln!("Error: {err}"))
 }

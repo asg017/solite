@@ -197,16 +197,34 @@ pub struct ReplArgs {
     pub remote: RemoteArgs,
 }
 
+const BENCH_AFTER_HELP: &str = "\
+Each SQL argument is benchmarked over 10 iterations, reporting
+mean ± stddev, min … max, and the statement's bytecode steps.
+
+Examples:
+  solite bench --database app.db \"SELECT count(*) FROM users\"
+  solite bench \"SELECT 1\" \"SELECT 1 + 1\"        # compare two statements
+  solite bench --database a.db --database b.db query.sql query.sql
+
+Also available inside scripts and the REPL as the multi-line `.bench`
+dot command.";
+
 #[derive(Args, Debug)]
 pub struct BenchArgs {
+    /// SQL statements (or .sql file paths) to benchmark
     pub sql: Vec<String>,
+
+    /// Database for each SQL argument, paired by position
+    /// (default: in-memory)
     #[arg(long)]
     pub database: Option<Vec<PathBuf>>,
 
-    #[arg(long, num_args = 2, value_names = ["PATH", "NAME"])]
+    /// Reserved; currently ignored
+    #[arg(long, num_args = 2, value_names = ["PATH", "NAME"], hide = true)]
     pub attach: Option<Vec<PathBuf>>,
 
-    #[arg(long)]
+    /// Load SQLite extension(s) before benchmarking
+    #[arg(long, value_name = "PATH")]
     pub load_extension: Option<Vec<PathBuf>>,
 }
 const CODEGEN_AFTER_HELP: &str = "\
@@ -513,6 +531,7 @@ pub enum Commands {
     Docs(DocsNamespace),
 
     /// Run benchmarks on SQL statements
+    #[command(after_long_help = BENCH_AFTER_HELP)]
     Bench(BenchArgs),
 
     /// Generate a JSON IR from `-- name:` annotated SQL queries

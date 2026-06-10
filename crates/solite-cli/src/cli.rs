@@ -127,7 +127,8 @@ Examples:
   solite query \"SELECT * FROM users\" app.db -o users.csv.gz
   solite query \"SELECT * FROM 'data.csv' LIMIT 5\" # query a CSV/TSV file directly
   solite query \"SELECT name FROM users WHERE id = $id\" app.db -p id 42
-  solite q \"SELECT 1\"                             # 'q' alias, in-memory database";
+  solite q \"SELECT 1\"                             # 'q' alias, in-memory database
+  solite query --allow-ssh \"SELECT 1\" ssh://user@host/app.db";
 
 #[derive(Args, Debug)]
 pub struct QueryArgs {
@@ -189,8 +190,19 @@ pub struct ExecuteArgs {
     pub parameters: Vec<String>,
 }
 
+const REMOTE_HELP: &str = "\
+Remote databases:
+  solite repl --allow-ssh ssh://user@host/var/data/app.db
+  solite repl --allow-ssh user@host:app.db      # scp-style also works
+  solite tui --allow-ssh --transport \"fly ssh console -a my-app -C\" app.db
+
+Requires solite installed on the remote machine (override the path with
+--remote-bin; default: `solite` on the remote $PATH). --transport replaces
+ssh with a custom command that connects stdin/stdout to the remote shell.";
+
 #[derive(Args, Debug)]
 pub struct ReplArgs {
+    /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
     pub database: Option<PathBuf>,
 
     #[command(flatten)]
@@ -350,7 +362,9 @@ pub struct DocsInlineArgs {
 
 #[derive(Args, Debug)]
 pub struct TuiArgs {
+    /// Database file or ssh:// URL (with --allow-ssh)
     pub database: PathBuf,
+    /// Open directly on this table
     pub table: Option<String>,
 
     #[command(flatten)]
@@ -425,6 +439,7 @@ pub struct RsyncArgs {
 
 #[derive(Args, Debug)]
 pub struct SchemaArgs {
+    /// Database file to print CREATE statements for
     pub database: PathBuf,
 }
 
@@ -508,6 +523,7 @@ pub enum Commands {
     Run(RunArgs),
 
     /// Start a REPL on a SQLite database
+    #[command(after_long_help = REMOTE_HELP)]
     Repl(ReplArgs),
 
     /// Run a read-only SQL query and output results to a file
@@ -539,6 +555,7 @@ pub enum Commands {
     Codegen(CodegenArgs),
 
     /// Tui for exploring a database
+    #[command(after_long_help = REMOTE_HELP)]
     Tui(TuiArgs),
 
     /// Format SQL files
@@ -635,7 +652,7 @@ Compatibility:
   help_template = HELP_TEMPLATE,
 )]
 pub struct Cli {
-    /// Allow SSH and remote transport connections
+    /// Allow connecting to ssh:// database URLs and custom --transport commands
     #[arg(long, global = true)]
     pub allow_ssh: bool,
 

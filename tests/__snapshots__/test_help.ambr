@@ -8,7 +8,7 @@
          solite <file>.db        Open the REPL on a database (also .sqlite, .sqlite3)
   
   Options:
-        --allow-ssh  Allow SSH and remote transport connections
+        --allow-ssh  Allow connecting to ssh:// database URLs and custom --transport commands
     -h, --help       Print help
     -V, --version    Print version
   
@@ -58,7 +58,7 @@
   
   Options:
         --allow-ssh
-            Allow SSH and remote transport connections
+            Allow connecting to ssh:// database URLs and custom --transport commands
   
     -p, --parameters <NAME> <VALUE>
             Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
@@ -89,7 +89,7 @@
     help     Print this message or the help of the given subcommand(s)
   
   Options:
-        --allow-ssh  Allow SSH and remote transport connections
+        --allow-ssh  Allow connecting to ssh:// database URLs and custom --transport commands
     -h, --help       Print help
   
   '''
@@ -109,7 +109,7 @@
   
   Options:
         --allow-ssh
-            Allow SSH and remote transport connections
+            Allow connecting to ssh:// database URLs and custom --transport commands
   
     -o, --output <OUTPUT>
             Write results to a file; format inferred from extension (.csv, .tsv, .json, .ndjson; .gz/.zst compression supported)
@@ -147,6 +147,7 @@
     solite query "SELECT * FROM 'data.csv' LIMIT 5" # query a CSV/TSV file directly
     solite query "SELECT name FROM users WHERE id = $id" app.db -p id 42
     solite q "SELECT 1"                             # 'q' alias, in-memory database
+    solite query --allow-ssh "SELECT 1" ssh://user@host/app.db
   
   '''
 # ---
@@ -157,13 +158,30 @@
   Usage: solite repl [OPTIONS] [DATABASE]
   
   Arguments:
-    [DATABASE]  
+    [DATABASE]
+            Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
   
   Options:
-        --allow-ssh                Allow SSH and remote transport connections
-        --remote-bin <REMOTE_BIN>  Path to the solite binary on the remote machine (for ssh:// connections)
-        --transport <TRANSPORT>    Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
-    -h, --help                     Print help
+        --allow-ssh
+            Allow connecting to ssh:// database URLs and custom --transport commands
+  
+        --remote-bin <REMOTE_BIN>
+            Path to the solite binary on the remote machine (for ssh:// connections)
+  
+        --transport <TRANSPORT>
+            Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
+  
+    -h, --help
+            Print help (see a summary with '-h')
+  
+  Remote databases:
+    solite repl --allow-ssh ssh://user@host/var/data/app.db
+    solite repl --allow-ssh user@host:app.db      # scp-style also works
+    solite tui --allow-ssh --transport "fly ssh console -a my-app -C" app.db
+  
+  Requires solite installed on the remote machine (override the path with
+  --remote-bin; default: `solite` on the remote $PATH). --transport replaces
+  ssh with a custom command that connects stdin/stdout to the remote shell.
   
   '''
 # ---
@@ -179,7 +197,7 @@
   
   Options:
         --allow-ssh
-            Allow SSH and remote transport connections
+            Allow connecting to ssh:// database URLs and custom --transport commands
   
     -c, --command <COMMAND>
             Execute SQL/dot commands from the given string (instead of a .sql file)

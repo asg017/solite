@@ -242,9 +242,17 @@ pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
 }
 
 pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
-    color_eyre::install().unwrap();
+    // Failure means a hook is already installed; degraded panic reports are fine.
+    let _ = color_eyre::install();
+    let Some(database) = cmd.database.to_str() else {
+        eprintln!(
+            "Error: database path is not valid UTF-8: {}",
+            cmd.database.display()
+        );
+        return Err(());
+    };
     let mut runtime = Runtime::new_with_options(
-        Some(cmd.database.to_str().unwrap().to_owned()),
+        Some(database.to_owned()),
         cmd.remote.remote_bin.as_deref(),
         cmd.remote.transport.as_deref(),
         cmd.remote.allow_ssh,

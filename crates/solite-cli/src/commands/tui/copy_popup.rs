@@ -32,16 +32,6 @@ impl CopyOption {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn description(&self) -> &'static str {
-        match self {
-            CopyOption::Cell => "Copy the selected cell value",
-            CopyOption::Row => "Copy the current row as tab-separated values",
-            CopyOption::Table => "Copy all rows as tab-separated values",
-            CopyOption::SqlSelect => "Copy a SELECT statement for this table",
-            CopyOption::SqlInsert => "Copy INSERT statements for the data",
-        }
-    }
 }
 
 pub struct CopyPopup {
@@ -77,7 +67,7 @@ impl CopyPopup {
     }
 
     pub fn selected_option(&self) -> Option<CopyOption> {
-        self.state.selected().map(|i| self.options[i])
+        self.state.selected().and_then(|i| self.options.get(i).copied())
     }
 
     /// Handle key event. Returns Some(CopyOption) if an option was selected.
@@ -104,10 +94,9 @@ impl CopyPopup {
                 self.hide();
                 option
             }
-            KeyCode::Char('1'..='5') => {
-                let idx = (key.code.as_char().unwrap() as usize) - ('1' as usize);
-                if idx < self.options.len() {
-                    let option = self.options[idx];
+            KeyCode::Char(c @ '1'..='5') => {
+                let idx = (c as usize) - ('1' as usize);
+                if let Some(option) = self.options.get(idx).copied() {
                     self.hide();
                     Some(option)
                 } else {

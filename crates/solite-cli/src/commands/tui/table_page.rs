@@ -18,10 +18,6 @@ use solite_core::Runtime;
 
 pub(crate) struct Data {
     pub(crate) columns: Vec<String>,
-    #[allow(dead_code)]
-    column_widths: Vec<usize>,
-    #[allow(dead_code)]
-    max_row_widths: Vec<usize>,
     pub(crate) rows: Vec<Vec<OwnedValue>>,
 }
 
@@ -29,8 +25,6 @@ impl Data {
     fn empty() -> Self {
         Self {
             columns: vec![],
-            column_widths: vec![],
-            max_row_widths: vec![],
             rows: vec![],
         }
     }
@@ -218,8 +212,6 @@ fn load_table_data(
     };
 
     let columns = stmt.column_names().unwrap_or_default();
-    let max_row_widths = vec![100; columns.len()];
-    let column_widths = columns.iter().map(|c| ansi_width::ansi_width(c)).collect();
     let mut rows = vec![];
     let mut error = None;
 
@@ -241,12 +233,7 @@ fn load_table_data(
     }
 
     LoadResult {
-        data: Data {
-            columns,
-            column_widths,
-            rows,
-            max_row_widths,
-        },
+        data: Data { columns, rows },
         error,
     }
 }
@@ -567,7 +554,9 @@ impl TuiPage for TablePage<'_> {
                 let page_size = 20; // Approximate visible rows
                 if let Some(current) = self.state.selected() {
                     let absolute = self.window_to_absolute(current);
-                    let target = (absolute + page_size).min(self.row_count.known.saturating_sub(1));
+                    let target = absolute
+                        .saturating_add(page_size)
+                        .min(self.row_count.known.saturating_sub(1));
                     self.ensure_row_loaded(target);
                     if let Some(window_idx) = self.absolute_to_window(target) {
                         self.state.select(Some(window_idx));

@@ -70,15 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ansi-width"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219e3ce6f2611d83b51ec2098a12702112c29e57203a6b0a0929b2cddb486608"
-dependencies = [
- "unicode-width 0.1.14",
-]
-
-[[package]]
 name = "anstream"
 version = "0.6.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4318,7 +4309,6 @@ name = "solite-cli"
 version = "0.0.1-alpha.36"
 dependencies = [
  "ansi-to-html",
- "ansi-width",
  "anyhow",
  "arboard",
  "clap 4.5.41",

@@ -26,7 +26,7 @@
     tui              Tui for exploring a database
     test             Run SQL-based inline tests in a single file
     bench            Run benchmarks on SQL statements
-    codegen          Codegen SQL queries into an intermediate representation
+    codegen          Generate a JSON IR from annotated SQL queries
     docs             Tooling for documenting SQLite extensions
   
   SQL:

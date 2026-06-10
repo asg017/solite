@@ -209,11 +209,30 @@ pub struct BenchArgs {
     #[arg(long)]
     pub load_extension: Option<Vec<PathBuf>>,
 }
+const CODEGEN_AFTER_HELP: &str = "\
+Annotate queries with a name and result type:
+
+  -- name: getUserById :row
+  SELECT id, name FROM users WHERE id = $id::int;
+
+Result types: :rows (many), :row (one), :value (single value),
+:list (single column). Omit to auto-detect from the column count.
+Parameters: $name or :name, optionally typed ($name::int); a trailing
+`::` marks the parameter as optional ($name::int::).
+Unannotated statements are emitted in the report as `setup`.
+
+Example:
+  solite codegen queries.sql --schema schema.sql -o report.json";
+
 #[derive(Args, Debug)]
 pub struct CodegenArgs {
+    /// SQL file with `-- name: <proc> :<type>` annotated queries
     pub file: PathBuf,
+    /// Schema to validate queries against: a SQLite database file or a
+    /// .sql file of CREATE statements
     #[arg(long)]
     pub schema: Option<PathBuf>,
+    /// Write the JSON report here instead of stdout
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }
@@ -496,7 +515,8 @@ pub enum Commands {
     /// Run benchmarks on SQL statements
     Bench(BenchArgs),
 
-    /// Codegen SQL queries into an intermediate representation
+    /// Generate a JSON IR from `-- name:` annotated SQL queries
+    #[command(after_long_help = CODEGEN_AFTER_HELP)]
     Codegen(CodegenArgs),
 
     /// Tui for exploring a database
@@ -567,7 +587,7 @@ Tooling:
   tui              Tui for exploring a database
   test             Run SQL-based inline tests in a single file
   bench            Run benchmarks on SQL statements
-  codegen          Codegen SQL queries into an intermediate representation
+  codegen          Generate a JSON IR from annotated SQL queries
   docs             Tooling for documenting SQLite extensions
 
 SQL:

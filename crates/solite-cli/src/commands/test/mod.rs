@@ -89,6 +89,8 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
 
+    let mut aborted = false;
+
     loop {
         match rt.next_stepx() {
             None => break,
@@ -99,15 +101,32 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
             }
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => {
-                    handle_dot_command(&cmd, &mut rt);
+                    handle_dot_command(&cmd, &mut rt, &mut stats);
                 }
                 StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
                 StepResult::SqlStatement { stmt, .. } => {
                     let epilogue = match &step.epilogue {
                         Some(s) => parse_epilogue_comment(s),
                         None => {
-                            // No epilogue = setup statement, just execute silently
-                            let _ = stmt.execute();
+                            // No epilogue = setup statement. A failure here
+                            // invalidates every assertion after it, so abort
+                            // the file instead of testing against broken state.
+                            if let Err(err) = stmt.execute() {
+                                stats.record_failure();
+                                print!("{}", Style::new().red().apply_to("x"));
+                                let ref_display = format!("{}", step.reference);
+                                let maybe_offset =
+                                    compute_offset_from_reference(&content, &ref_display);
+                                crate::errors::report_error(
+                                    &source_path.to_string_lossy(),
+                                    &content,
+                                    &err,
+                                    maybe_offset,
+                                );
+                                eprintln!("Setup statement failed; aborting test file.");
+                                aborted = true;
+                                break;
+                            }
                             continue;
                         }
                     };
@@ -247,8 +266,11 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
         let _ = handle.flush();
     }
 
-    // Handle orphaned snapshots
-    handle_orphans(&mut snap_state, &filestem);
+    // Handle orphaned snapshots — skipped on abort, where unreached @snap
+    // directives would be misreported (and in update mode deleted) as orphans
+    if !aborted {
+        handle_orphans(&mut snap_state, &filestem);
+    }
 
     // Print results
     stats.print_summary();
@@ -273,8 +295,9 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     }
 }
 
-/// Handle a dot command during test execution.
-fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
+/// Handle a dot command during test execution. Execution errors in `.run`
+/// SQL are recorded as test failures.
+fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime, stats: &mut TestStats) {
     match cmd {
         DotCommand::Load(load_cmd) => {
             if let Err(e) = load_cmd.execute(&mut rt.connection) {
@@ -308,7 +331,15 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
                     }
                 };
                 match rt.prepare_with_parameters(&proc.sql) {
-                    Ok((_, Some(stmt))) => { let _ = stmt.execute(); }
+                    Ok((_, Some(stmt))) => {
+                        if let Err(e) = stmt.execute() {
+                            stats.record_failure();
+                            eprintln!(
+                                "Error executing procedure '{}': {}",
+                                proc_name, e.message
+                            );
+                        }
+                    }
                     Ok((_, None)) => {
                         eprintln!("Warning: Procedure '{}' prepared to empty statement", proc_name);
                     }
@@ -329,10 +360,16 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime) {
                         None => break,
                         Some(Ok(step)) => match step.result {
                             solite_core::StepResult::SqlStatement { stmt, .. } => {
-                                let _ = stmt.execute();
+                                if let Err(e) = stmt.execute() {
+                                    stats.record_failure();
+                                    eprintln!(
+                                        "Error executing statement in '{}': {}",
+                                        run_cmd.file, e.message
+                                    );
+                                }
                             }
                             solite_core::StepResult::DotCommand(ref cmd) => {
-                                handle_dot_command(cmd, rt);
+                                handle_dot_command(cmd, rt, stats);
                             }
                             solite_core::StepResult::ProcedureDefinition(_) => {}
                         },
@@ -472,6 +509,38 @@ INSERT INTO t VALUES (2);
 ");
         let result = test_impl(default_args(file));
         assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_setup_failure_fails_run() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "setup_fail.sql", "\
+CREATE TABLE t(id INTEGER UNIQUE);
+INSERT INTO t VALUES (1);
+INSERT INTO t VALUES (1);
+SELECT COUNT(*) FROM t; -- 2
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_setup_failure_aborts_before_later_assertions() {
+        let tmp = temp_dir();
+        // the later assertion would pass; the run must still fail with
+        // exactly the one setup failure
+        let file = write_sql(&tmp, "setup_abort.sql", "\
+CREATE TABLE t(id INTEGER UNIQUE);
+INSERT INTO t VALUES (1);
+INSERT INTO t VALUES (1);
+SELECT 1; -- 1
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
         cleanup(&tmp);
     }
 

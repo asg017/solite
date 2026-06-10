@@ -316,25 +316,32 @@ pub struct JupyterNamespace {
 }
 #[derive(Subcommand, Debug)]
 pub enum JupyterCommand {
+    /// Install the Solite kernelspec so Jupyter can find the kernel
     Install(JupyterInstallArgs),
     //Uninstall(JupyterUninstallArgs),
+    /// Start the kernel from a Jupyter connection file (invoked by Jupyter,
+    /// not directly by users)
     Up(JupyterUpArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct JupyterInstallArgs {
+    /// Kernelspec directory name [default: solite]
     #[arg(long)]
     pub name: Option<String>,
 
+    /// Kernel display name shown in the Jupyter UI [default: Solite]
     #[arg(long)]
     pub display: Option<String>,
 
+    /// Overwrite an existing kernelspec
     #[arg(long)]
     pub force: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct JupyterUpArgs {
+    /// Jupyter connection file (provided by Jupyter when launching the kernel)
     #[arg(long)]
     pub connection: PathBuf,
 }
@@ -346,16 +353,21 @@ pub struct DocsNamespace {
 }
 #[derive(Subcommand, Debug)]
 pub enum DocsCommand {
+    /// Execute SQL code blocks in a markdown file and inline their results
     Inline(DocsInlineArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct DocsInlineArgs {
+    /// Markdown file with ```sql code blocks to execute
     pub input: PathBuf,
 
+    /// SQLite extension to load before executing (also used to flag
+    /// undocumented extension functions)
     #[arg(long)]
     pub extension: Option<String>,
 
+    /// Write the resulting markdown here instead of stdout
     #[arg(long, short = 'o')]
     pub output: Option<PathBuf>,
 }

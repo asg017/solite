@@ -130,8 +130,13 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     // Extract documented functions from headings
     let documented_funcs = extract_documented_functions(&mut ast);
 
-    // Get loaded functions from extension
-    let loaded_funcs = get_loaded_functions(&rt)?;
+    // Get loaded functions from extension; the tracking tables only exist
+    // when an extension was loaded
+    let loaded_funcs = if args.extension.is_some() {
+        get_loaded_functions(&rt)?
+    } else {
+        Vec::new()
+    };
 
     // Find undocumented functions
     let mut undocumented_funcs: Vec<String> = loaded_funcs

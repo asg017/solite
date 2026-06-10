@@ -273,7 +273,7 @@ pub struct LintArgs {
 
 #[derive(Args, Debug)]
 pub struct LspArgs {
-    /// Path to config file
+    /// Communicate over stdin/stdout (the only supported transport)
     #[arg(long, default_value_t = true)]
     pub stdio: bool,
 }
@@ -421,6 +421,10 @@ pub enum Commands {
     Lint(LintArgs),
 
     /// Start the Language Server Protocol (LSP) server
+    ///
+    /// Meant to be launched by an editor/LSP client. Speaks LSP over
+    /// stdio and provides completions, hover, diagnostics, formatting,
+    /// semantic tokens, and inlay hints for SQL files.
     Lsp(LspArgs),
 
     /// Run the sqlite3 shell directly

@@ -6,8 +6,22 @@ def redact_version(s):
 
 
 def test_help(solite_cli, snapshot):
-    assert redact_version(solite_cli(["--help"]).stdout) == snapshot(name="--help")
-    assert solite_cli(["run", "--help"]).stdout == snapshot(name="run --help")
-    assert solite_cli(["query", "--help"]).stdout == snapshot(name="query --help")
-    assert solite_cli(["repl", "--help"]).stdout == snapshot(name="repl --help")
-    assert solite_cli(["jupyter", "--help"]).stdout == snapshot(name="jupyter --help")
+    result = solite_cli(["--help"])
+    assert result.success
+    assert redact_version(result.stdout) == snapshot(name="--help")
+
+    for command in ["run", "query", "repl", "jupyter"]:
+        result = solite_cli([command, "--help"])
+        assert result.success
+        assert result.stdout == snapshot(name=f"{command} --help")
+
+
+def test_version(solite_cli):
+    result = solite_cli(["--version"])
+    assert result.success
+    assert result.stdout.startswith("solite ")
+
+
+def test_usage_errors_exit_nonzero(solite_cli):
+    assert not solite_cli(["definitely-not-a-command"]).success
+    assert not solite_cli(["query", "--not-a-flag"]).success

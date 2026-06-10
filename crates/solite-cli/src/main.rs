@@ -30,14 +30,10 @@ fn main() {
                         remote: Default::default(),
                     })))
                 } else {
-                    err.print().unwrap();
-                    exit(1);
+                    err.exit();
                 }
             }
-            _ => {
-                err.print().unwrap();
-                exit(1);
-            }
+            _ => err.exit(),
         },
     };
     let mut x = x;

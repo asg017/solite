@@ -501,6 +501,10 @@ pub struct BackupArgs {
     /// Which attached database to back up
     #[arg(long, default_value = "main")]
     pub db: String,
+
+    /// Overwrite the destination file if it already exists
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]
@@ -515,6 +519,10 @@ pub struct VacuumArgs {
     /// Positional alias for --into
     #[arg(hide = true)]
     pub destination: Option<PathBuf>,
+
+    /// Overwrite the --into file if it already exists
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]

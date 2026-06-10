@@ -20,6 +20,19 @@ fn get_page_size(conn: &Connection) -> u64 {
     4096
 }
 
+/// Remove a destination file left behind by a failed backup. The file did
+/// not exist before the backup started, so deleting it cannot lose data.
+fn remove_failed_destination(path: &std::path::Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!(
+                "Warning: could not remove incomplete destination file {}: {e}. The file may be corrupt.",
+                path.display()
+            );
+        }
+    }
+}
+
 // TODO: make a safe(r) Rust wrapper around raw C API
 pub fn backup(args: BackupArgs) -> Result<(), ()> {
     let source_path = args.database.to_string_lossy();
@@ -28,6 +41,23 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
     })?;
 
     let page_size = get_page_size(&source);
+
+    if args.destination.exists() {
+        if args.force {
+            std::fs::remove_file(&args.destination).map_err(|e| {
+                eprintln!(
+                    "Error removing existing destination file {}: {e}",
+                    args.destination.display()
+                );
+            })?;
+        } else {
+            eprintln!(
+                "Error: destination file {} already exists. Use --force to overwrite.",
+                args.destination.display()
+            );
+            return Err(());
+        }
+    }
 
     let dest_path = CString::new(args.destination.to_string_lossy().as_ref()).map_err(|_| {
         eprintln!("Invalid destination path");
@@ -52,6 +82,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         };
         eprintln!("Error opening destination database: {msg}");
         unsafe { sqlite3_close(dest_db) };
+        remove_failed_destination(&args.destination);
         return Err(());
     }
 
@@ -74,6 +105,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         };
         eprintln!("Error initializing backup: {msg}");
         unsafe { sqlite3_close(dest_db) };
+        remove_failed_destination(&args.destination);
         return Err(());
     }
 
@@ -118,6 +150,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         };
         eprintln!("Backup failed (rc={finish_rc}): {msg}");
         unsafe { sqlite3_close(dest_db) };
+        remove_failed_destination(&args.destination);
         return Err(());
     }
 
@@ -135,6 +168,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
         };
         eprintln!("Backup finish failed: {msg}");
         unsafe { sqlite3_close(dest_db) };
+        remove_failed_destination(&args.destination);
         return Err(());
     }
 

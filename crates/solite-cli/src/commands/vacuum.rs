@@ -16,6 +16,14 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), ()> {
 
     let target = match args.into_path() {
         Some(into) => {
+            if args.force && into.exists() {
+                std::fs::remove_file(into).map_err(|e| {
+                    eprintln!(
+                        "Error removing existing destination file {}: {e}",
+                        into.display()
+                    );
+                })?;
+            }
             let (_, stmt) = conn.prepare("VACUUM INTO ?").map_err(|e| {
                 eprintln!("Vacuum failed: {}", e.message);
             })?;

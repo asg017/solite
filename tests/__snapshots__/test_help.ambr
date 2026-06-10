@@ -115,15 +115,40 @@
   Usage: solite run [OPTIONS] [ARGS]...
   
   Arguments:
-    [ARGS]...  Positional args: [database] [script.sql] [procedureName]
+    [ARGS]...
+            Positional args, in any order, classified by extension: .sql/.ipynb = script, .db/.sqlite/.sqlite3 = database (default: in-memory), anything else = procedure name to call
   
   Options:
-        --allow-ssh                  Allow SSH and remote transport connections
-    -c, --command <COMMAND>          Execute SQL/dot commands from the given string (instead of a .sql file)
-    -p, --parameters <NAME> <VALUE>  Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file` to bind the file's bytes as a BLOB
-        --trace <TRACE>              
-        --readonly                   
-    -h, --help                       Print help
+        --allow-ssh
+            Allow SSH and remote transport connections
+  
+    -c, --command <COMMAND>
+            Execute SQL/dot commands from the given string (instead of a .sql file)
+  
+    -p, --parameters <NAME> <VALUE>
+            Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file` to bind the file's bytes as a BLOB
+  
+        --trace <TRACE_DB>
+            Record an execution trace (statements + per-opcode bytecode stats) to a SQLite database at this path
+  
+        --readonly
+            Open the database read-only; statements that write will fail
+  
+    -h, --help
+            Print help (see a summary with '-h')
+  
+  Examples:
+    solite run script.sql                      # against an in-memory database
+    solite run app.db script.sql               # against app.db
+    solite run app.db queries.sql getUser      # run one named procedure
+    solite run notebook.ipynb                  # SQL cells of a notebook
+    cat script.sql | solite run app.db         # SQL from stdin
+    solite run app.db -c "SELECT count(*) FROM users"
+    solite run -c "SELECT * FROM 'data.csv'"   # query a CSV/TSV file directly
+  
+  Scripts may contain dot commands (.export, .param set, .run, .load, ...;
+  see `.help` in the REPL) and procedure definitions (`-- name: getUser :row`).
+  Not available in run mode: .ask, .tui, .clear, .vegalite, .bench.
   
   '''
 # ---

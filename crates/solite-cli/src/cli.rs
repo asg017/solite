@@ -30,7 +30,9 @@ pub struct RemoteArgs {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Positional args: [database] [script.sql] [procedureName]
+    /// Positional args, in any order, classified by extension:
+    /// .sql/.ipynb = script, .db/.sqlite/.sqlite3 = database
+    /// (default: in-memory), anything else = procedure name to call
     pub args: Vec<String>,
 
     /// Execute SQL/dot commands from the given string (instead of a .sql file)
@@ -42,12 +44,29 @@ pub struct RunArgs {
     #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"])]
     pub parameters: Vec<String>,
 
-    #[arg(long)]
+    /// Record an execution trace (statements + per-opcode bytecode stats)
+    /// to a SQLite database at this path
+    #[arg(long, value_name = "TRACE_DB")]
     pub trace: Option<PathBuf>,
 
+    /// Open the database read-only; statements that write will fail
     #[arg(long, alias = "read-only")]
     pub readonly: bool,
 }
+
+const RUN_AFTER_HELP: &str = "\
+Examples:
+  solite run script.sql                      # against an in-memory database
+  solite run app.db script.sql               # against app.db
+  solite run app.db queries.sql getUser      # run one named procedure
+  solite run notebook.ipynb                  # SQL cells of a notebook
+  cat script.sql | solite run app.db         # SQL from stdin
+  solite run app.db -c \"SELECT count(*) FROM users\"
+  solite run -c \"SELECT * FROM 'data.csv'\"   # query a CSV/TSV file directly
+
+Scripts may contain dot commands (.export, .param set, .run, .load, ...;
+see `.help` in the REPL) and procedure definitions (`-- name: getUser :row`).
+Not available in run mode: .ask, .tui, .clear, .vegalite, .bench.";
 
 impl RunArgs {
     #[allow(dead_code)]
@@ -391,6 +410,7 @@ pub struct StreamRestoreArgs {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
+    #[command(after_long_help = RUN_AFTER_HELP)]
     Run(RunArgs),
 
     /// Start a REPL on a SQLite database

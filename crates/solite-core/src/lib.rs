@@ -938,7 +938,13 @@ mod tests {
         );
         insta::assert_yaml_snapshot!(functions_of(&runtime.connection));
         insta::assert_yaml_snapshot!(modules_of(&runtime.connection));
-        insta::assert_yaml_snapshot!(version_functions_of(&runtime.connection));
+        // Redact the sqlite version so SQLite bumps don't churn this snapshot;
+        // the "sqlite_version" snapshot above is the canonical version assertion.
+        insta::with_settings!({filters => vec![
+            (r"sqlite_version == \d+\.\d+\.\d+", "sqlite_version == [SQLITE_VERSION]"),
+        ]}, {
+            insta::assert_yaml_snapshot!(version_functions_of(&runtime.connection));
+        });
         insta::assert_yaml_snapshot!(BUILTIN_FUNCTIONS);
     }
     

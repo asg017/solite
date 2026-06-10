@@ -35,7 +35,8 @@ mod tests {
             .connection
             .execute_script(
                 r#"
-              create table t as select 1 as a, 'asdf' as b, sqlite_version() as c;
+              -- fixed literal, not sqlite_version(): keeps snapshots stable across SQLite bumps
+              create table t as select 1 as a, 'asdf' as b, '9.9.9' as c;
 
               create table t2(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10);
               insert into t2 select 1,2,3,4,5,6,7,8,9,10;

@@ -161,10 +161,15 @@ mod tests {
     fn stdlib_basic() {
         let db = Connection::open_in_memory().unwrap();
 
-        insta::assert_snapshot!(
-            db.query_row("select sqlite_version();", [], |r| r
-                .get::<usize, String>(0))
-                .unwrap()
+        // Don't snapshot the version itself — it changes every SQLite bump.
+        // The canonical version assertion lives in solite-core's sqlite_version snapshot.
+        let version: String = db
+            .query_row("select sqlite_version();", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            version.split('.').count() == 3
+                && version.split('.').all(|p| p.parse::<u32>().is_ok()),
+            "unexpected sqlite_version: {version}"
         );
 
         let base_functions: Vec<String> = functions_of(db);

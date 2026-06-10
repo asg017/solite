@@ -200,6 +200,12 @@ Requires solite installed on the remote machine (override the path with
 --remote-bin; default: `solite` on the remote $PATH). --transport replaces
 ssh with a custom command that connects stdin/stdout to the remote shell.";
 
+const REPL_ENV_HELP: &str = "\
+Inside the REPL, `.help` lists all dot commands. Environment:
+  EDITOR              used by the \\e scratch-buffer command (default: vi)
+  OPENROUTER_API_KEY  required by .ask / ?<question>
+  ~/.solite_history   readline history";
+
 #[derive(Args, Debug)]
 pub struct ReplArgs {
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
@@ -564,7 +570,7 @@ pub enum Commands {
     Run(RunArgs),
 
     /// Start a REPL on a SQLite database
-    #[command(after_long_help = REMOTE_HELP)]
+    #[command(after_long_help = format!("{REPL_ENV_HELP}\n\n{REMOTE_HELP}"))]
     Repl(ReplArgs),
 
     /// Run a read-only SQL query and output results to a file

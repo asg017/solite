@@ -174,6 +174,11 @@
     -h, --help
             Print help (see a summary with '-h')
   
+  Inside the REPL, `.help` lists all dot commands. Environment:
+    EDITOR              used by the \e scratch-buffer command (default: vi)
+    OPENROUTER_API_KEY  required by .ask / ?<question>
+    ~/.solite_history   readline history
+  
   Remote databases:
     solite repl --allow-ssh ssh://user@host/var/data/app.db
     solite repl --allow-ssh user@host:app.db      # scp-style also works

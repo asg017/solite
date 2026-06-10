@@ -105,7 +105,14 @@ fn open_router_completions(
 ) -> Result<std::sync::mpsc::Receiver<anyhow::Result<String>>, DotError> {
     let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<String>>();
 
-    let api_key = std::env::var("OPENROUTER_API_KEY").map_err(DotError::Env)?;
+    let api_key = std::env::var("OPENROUTER_API_KEY").map_err(|_| {
+        DotError::InvalidData(
+            ".ask requires the OPENROUTER_API_KEY environment variable \
+             (get a key at https://openrouter.ai; export it before launching \
+             solite, or set it with `.env set OPENROUTER_API_KEY <key>`)"
+                .to_string(),
+        )
+    })?;
 
     let url = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -196,6 +203,9 @@ mod tests {
         let mut runtime = Runtime::new(None).unwrap();
         let result = cmd.execute(&mut runtime);
 
-        assert!(matches!(result, Err(DotError::Env(_))));
+        match result {
+            Err(DotError::InvalidData(msg)) => assert!(msg.contains("OPENROUTER_API_KEY")),
+            _ => panic!("expected InvalidData error naming the missing variable"),
+        }
     }
 }

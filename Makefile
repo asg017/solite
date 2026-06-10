@@ -16,7 +16,24 @@ test-snap:
 	cargo run --bin solite -- test --update tests/snaps/snap2.sql
 	cargo run --bin solite -- test --update tests/snaps/compile_options.sql
 
-.PHONY: test test-cargo test-pytest test-snap
+# Bump the vendored SQLite submodule to a release tag, regenerate the
+# amalgamation and version-bearing snapshots, and verify with the full suite.
+# Snapshot updates are blind accepts — review `git diff` before committing;
+# only the canonical sqlite_version snapshot should change. Never auto-commits.
+bump-sqlite:
+ifndef VERSION
+	$(error Usage: make bump-sqlite VERSION=3.54.0)
+endif
+	@command -v cargo-insta >/dev/null || { echo "cargo-insta not found; install with: cargo install cargo-insta"; exit 1; }
+	cd vendor/sqlite && git fetch --depth 1 origin tag version-$(VERSION) && git checkout version-$(VERSION)
+	-cd vendor/sqlite && make clean
+	cargo build
+	cargo insta test --accept
+	uv run --project tests pytest --snapshot-update
+	make test
+	@echo "SQLite bumped to $(VERSION). Review 'git diff' and 'git -C vendor/sqlite log -1', then commit."
+
+.PHONY: test test-cargo test-pytest test-snap bump-sqlite
 
 docs-dev:
 	npm -C site run dev

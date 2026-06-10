@@ -1,9 +1,15 @@
 
+# Run all sub-suites even if one fails, so a single failure (e.g. a stale
+# snapshot) doesn't hide failures in the later suites. Fails at the end if
+# any sub-suite failed. Kept sequential on purpose: test-pytest and
+# test-snap both need the built binary / cargo target-dir lock.
 test:
-	make test-cargo
-	make test-pytest
-	make test-snap
-	
+	@rc=0; \
+	$(MAKE) test-cargo  || rc=1; \
+	$(MAKE) test-pytest || rc=1; \
+	$(MAKE) test-snap   || rc=1; \
+	exit $$rc
+
 test-cargo:
 	cargo test
 

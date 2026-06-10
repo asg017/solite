@@ -159,18 +159,33 @@ pub struct QueryArgs {
     pub remote: RemoteArgs,
 }
 
+const EXECUTE_AFTER_HELP: &str = "\
+Examples:
+  solite execute app.db \"INSERT INTO users(name) VALUES ('alex')\"
+  solite execute \"CREATE TABLE t(a)\" app.db     # order doesn't matter
+  solite execute app.db \"DELETE FROM users WHERE id = $id\" -p id 42
+
+The database file must already exist: the argument that exists on disk is
+the database, the other is the SQL. With a single argument, the SQL runs
+against an in-memory database.";
+
 #[derive(Args, Debug)]
 pub struct ExecuteArgs {
+    /// SQL statement and optional database path, in any order; the
+    /// argument that exists as a file is the database
     #[arg(num_args = 1..=2)]
     pub args: Vec<String>,
 
-    #[arg(long, short = 'o')]
+    /// Reserved; currently ignored
+    #[arg(long, short = 'o', hide = true)]
     pub output: Option<PathBuf>,
 
-    #[arg(long, short = 'f', value_enum)]
+    /// Reserved; currently ignored
+    #[arg(long, short = 'f', value_enum, hide = true)]
     pub format: Option<QueryFormat>,
 
-    #[arg(long, short = 'p', num_args = 2)]
+    /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
+    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"])]
     pub parameters: Vec<String>,
 }
 
@@ -442,7 +457,9 @@ pub enum Commands {
     Query(QueryArgs),
 
     /// Execute a write SQL statement on a database
-    #[command(alias = "exec")]
+    ///
+    /// The write counterpart of `solite query`; prints a checkmark on success.
+    #[command(alias = "exec", after_long_help = EXECUTE_AFTER_HELP)]
     Execute(ExecuteArgs),
 
     /// Run SQL-based inline tests in a single file

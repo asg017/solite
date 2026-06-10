@@ -10,7 +10,7 @@ def test_help(solite_cli, snapshot):
     assert result.success
     assert redact_version(result.stdout) == snapshot(name="--help")
 
-    for command in ["run", "query", "repl", "jupyter"]:
+    for command in ["run", "query", "execute", "repl", "jupyter"]:
         result = solite_cli([command, "--help"])
         assert result.success
         assert result.stdout == snapshot(name=f"{command} --help")

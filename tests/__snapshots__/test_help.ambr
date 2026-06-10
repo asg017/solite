@@ -44,6 +44,39 @@
   
   '''
 # ---
+# name: test_help[execute --help]
+  '''
+  Execute a write SQL statement on a database
+  
+  The write counterpart of `solite query`; prints a checkmark on success.
+  
+  Usage: solite execute [OPTIONS] [ARGS]...
+  
+  Arguments:
+    [ARGS]...
+            SQL statement and optional database path, in any order; the argument that exists as a file is the database
+  
+  Options:
+        --allow-ssh
+            Allow SSH and remote transport connections
+  
+    -p, --parameters <NAME> <VALUE>
+            Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
+  
+    -h, --help
+            Print help (see a summary with '-h')
+  
+  Examples:
+    solite execute app.db "INSERT INTO users(name) VALUES ('alex')"
+    solite execute "CREATE TABLE t(a)" app.db     # order doesn't matter
+    solite execute app.db "DELETE FROM users WHERE id = $id" -p id 42
+  
+  The database file must already exist: the argument that exists on disk is
+  the database, the other is the SQL. With a single argument, the SQL runs
+  against an in-memory database.
+  
+  '''
+# ---
 # name: test_help[jupyter --help]
   '''
   Manage the Solite Jupyter kernel

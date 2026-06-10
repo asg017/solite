@@ -38,7 +38,7 @@ pub fn report_from_file(
     let mut report = Report::new();
 
     let mut rt = Runtime::new(None)?;
-    let conn = create_connection(&base_db_type, &mut report)?;
+    let conn = create_connection(&base_db_type)?;
     rt.connection = conn;
 
     rt.enqueue(
@@ -53,15 +53,12 @@ pub fn report_from_file(
 }
 
 /// Create a connection based on the database type.
-fn create_connection(
-    base_db_type: &BaseDatabaseType,
-    report: &mut Report,
-) -> Result<Connection> {
+fn create_connection(base_db_type: &BaseDatabaseType) -> Result<Connection> {
     match base_db_type {
         BaseDatabaseType::None => Connection::open_in_memory()
             .map_err(|e| anyhow!("Failed to open database: {:?}", e)),
         BaseDatabaseType::Database(path) => copy_schema_from_database(path),
-        BaseDatabaseType::SqlFile(path) => setup_from_sql_file(path, report),
+        BaseDatabaseType::SqlFile(path) => setup_from_sql_file(path),
     }
 }
 
@@ -117,8 +114,11 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
     Ok(db)
 }
 
-/// Set up database from a SQL file.
-fn setup_from_sql_file(path: &PathBuf, report: &mut Report) -> Result<Connection> {
+/// Set up the in-memory validation database from a SQL schema file.
+///
+/// The schema is only used for query validation; it is not part of the
+/// report's `setup`, which holds non-annotated statements from the input file.
+fn setup_from_sql_file(path: &PathBuf) -> Result<Connection> {
     let db =
         Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
 
@@ -128,7 +128,6 @@ fn setup_from_sql_file(path: &PathBuf, report: &mut Report) -> Result<Connection
     db.execute_script(&sql)
         .map_err(|e| anyhow!("Failed to execute schema: {:?}", e))?;
 
-    report.setup.push(sql);
     Ok(db)
 }
 

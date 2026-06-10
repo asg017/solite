@@ -252,6 +252,32 @@ mod tests {
     }
 
     #[test]
+    fn test_schema_sql_file_not_in_setup() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema_path = dir.path().join("schema.sql");
+        std::fs::write(&schema_path, "create table users(id int, name text);").unwrap();
+
+        let r = report_from_file(
+            r#"
+            create index users_name on users(name);
+
+            -- name: getUserById :row
+            select * from users where id = $id;
+            "#,
+            &PathBuf::from("[test]"),
+            BaseDatabaseType::SqlFile(schema_path),
+        )
+        .expect("report should succeed");
+
+        // The external schema validates queries but stays out of `setup`;
+        // only non-annotated statements from the input file belong there.
+        assert_eq!(r.setup.len(), 1);
+        assert!(r.setup[0].contains("users_name"));
+        assert_eq!(r.exports.len(), 1);
+        assert_eq!(r.exports[0].columns.len(), 2);
+    }
+
+    #[test]
     fn test_parameter_types() {
         let r = report(
             r#"

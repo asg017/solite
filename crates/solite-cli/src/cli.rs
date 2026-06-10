@@ -383,6 +383,21 @@ pub struct TuiArgs {
     pub remote: RemoteArgs,
 }
 
+const FMT_AFTER_HELP: &str = "\
+Configuration (solite-fmt.toml), keys with defaults:
+
+  keyword_case = \"lower\"               # lower | upper | preserve
+  indent_style = \"spaces\"              # spaces | tabs
+  indent_size = 2
+  line_width = 80
+  comma_position = \"trailing\"          # trailing | leading
+  logical_operator_position = \"before\" # before | after
+  statement_separator_lines = 2
+
+Ignore directives in SQL comments:
+  -- solite-fmt: off / -- solite-fmt: on   skip a region
+  -- solite-fmt-ignore                     skip the next statement";
+
 #[derive(Args, Debug)]
 pub struct FmtArgs {
     /// SQL files to format (reads from stdin if none provided)
@@ -400,23 +415,37 @@ pub struct FmtArgs {
     #[arg(long)]
     pub diff: bool,
 
-    /// Path to config file
+    /// Config file (default: solite-fmt.toml in current/parent dirs,
+    /// then ~/.config/solite/fmt.toml)
     #[arg(long)]
     pub config: Option<PathBuf>,
 }
+
+const LINT_AFTER_HELP: &str = "\
+Configuration (solite-lint.toml) sets per-rule severities:
+
+  [rules]
+  double-quoted-string = \"off\"   # off | warning | error
+
+Use --list-rules to see every rule with its description and fixability.";
 
 #[derive(Args, Debug)]
 pub struct LintArgs {
     /// SQL files to lint (reads from stdin if none provided)
     pub files: Vec<PathBuf>,
 
-    /// Path to config file
+    /// Config file (default: solite-lint.toml in current/parent dirs,
+    /// then ~/.config/solite/lint.toml)
     #[arg(long)]
     pub config: Option<PathBuf>,
 
     /// Apply auto-fixes where available
     #[arg(long)]
     pub fix: bool,
+
+    /// List all lint rules and exit
+    #[arg(long)]
+    pub list_rules: bool,
 }
 
 #[derive(Args, Debug)]
@@ -571,10 +600,11 @@ pub enum Commands {
     Tui(TuiArgs),
 
     /// Format SQL files
-    #[command(visible_alias = "fmt")]
+    #[command(visible_alias = "fmt", after_long_help = FMT_AFTER_HELP)]
     Format(FmtArgs),
 
     /// Lint SQL files for potential issues
+    #[command(after_long_help = LINT_AFTER_HELP)]
     Lint(LintArgs),
 
     /// Start the Language Server Protocol (LSP) server

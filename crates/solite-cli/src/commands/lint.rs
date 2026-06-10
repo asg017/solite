@@ -7,6 +7,10 @@ use std::fs;
 use std::io::{self, Read};
 
 pub fn lint(args: LintArgs) -> Result<(), ()> {
+    if args.list_rules {
+        list_rules();
+        return Ok(());
+    }
     match lint_impl(args) {
         Ok(has_errors) => {
             if has_errors {
@@ -19,6 +23,14 @@ pub fn lint(args: LintArgs) -> Result<(), ()> {
             eprintln!("Error: {e}");
             Err(())
         }
+    }
+}
+
+/// Print every registered lint rule with its description and fixability.
+fn list_rules() {
+    for rule in solite_analyzer::rules::get_all_rules() {
+        let fixable = if rule.is_fixable() { " (fixable)" } else { "" };
+        println!("{}{}\n    {}", rule.id(), fixable, rule.description());
     }
 }
 

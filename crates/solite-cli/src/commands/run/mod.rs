@@ -139,6 +139,31 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs> {
     })
 }
 
+/// Apply `-p name value` pairs to the runtime.
+///
+/// A value prefixed with `@` is treated as a path; the file's bytes are bound
+/// as a BLOB. Otherwise the value is bound as TEXT.
+fn apply_parameters(rt: &mut Runtime, parameters: &[String]) -> Result<()> {
+    for chunk in parameters.chunks(2) {
+        if chunk.len() != 2 {
+            continue;
+        }
+        let name = &chunk[0];
+        let raw = &chunk[1];
+        if let Some(path) = raw.strip_prefix('@') {
+            let bytes = std::fs::read(path).with_context(|| {
+                format!("Failed to read parameter file for '{name}': {path}")
+            })?;
+            rt.define_parameter_blob(name.clone(), bytes)
+                .map_err(|e| anyhow::anyhow!("Failed to set parameter '{name}': {e}"))?;
+        } else {
+            rt.define_parameter(name.clone(), raw.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to set parameter '{name}': {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Internal implementation of the run command.
 fn run_impl(flags: RunArgs) -> Result<()> {
     let parsed = parse_args(&flags.args)?;
@@ -170,12 +195,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
             setup_tracing(&rt)?;
         }
 
-        for chunk in flags.parameters.chunks(2) {
-            if chunk.len() == 2 {
-                rt.define_parameter(chunk[0].clone(), chunk[1].clone())
-                    .map_err(|e| anyhow::anyhow!("Failed to set parameter: {e}"))?;
-            }
-        }
+        apply_parameters(&mut rt, &flags.parameters)?;
 
         rt.enqueue("<command>", command, BlockSource::CommandFlag);
 
@@ -213,12 +233,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
             setup_tracing(&rt)?;
         }
 
-        for chunk in flags.parameters.chunks(2) {
-            if chunk.len() == 2 {
-                rt.define_parameter(chunk[0].clone(), chunk[1].clone())
-                    .map_err(|e| anyhow::anyhow!("Failed to set parameter: {e}"))?;
-            }
-        }
+        apply_parameters(&mut rt, &flags.parameters)?;
 
         rt.enqueue("<stdin>", &sql, BlockSource::Stdin);
 
@@ -262,12 +277,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
     }
 
     // Set parameters
-    for chunk in flags.parameters.chunks(2) {
-        if chunk.len() == 2 {
-            rt.define_parameter(chunk[0].clone(), chunk[1].clone())
-                .map_err(|e| anyhow::anyhow!("Failed to set parameter: {e}"))?;
-        }
-    }
+    apply_parameters(&mut rt, &flags.parameters)?;
 
     match procedure {
         Some(proc_name) => {

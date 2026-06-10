@@ -626,6 +626,20 @@ impl Runtime {
         Ok(())
     }
 
+    pub fn define_parameter_blob(&mut self, key: String, value: Vec<u8>) -> Result<(), String> {
+        self.init_sqlite_parameters_table();
+        let stmt = self
+            .connection
+            .prepare("INSERT OR REPLACE INTO temp.sqlite_parameters(key, value) VALUES (?1, ?2)")
+            .unwrap()
+            .1
+            .unwrap();
+        stmt.bind_text(1, key);
+        stmt.bind_blob(2, &value);
+        stmt.execute().unwrap();
+        Ok(())
+    }
+
     pub fn prepare_with_parameters(
         &self,
         sql: &str,
@@ -1377,6 +1391,34 @@ select not_exist();",
         let (_, errors) = collect_steps_with_errors(&mut rt);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("Failed to read"));
+    }
+
+    #[test]
+    fn test_define_parameter_blob_binds_as_blob() {
+        let mut rt = Runtime::new(None).unwrap();
+        rt.define_parameter_blob("x".to_string(), vec![0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+
+        let (_, stmt) = rt
+            .prepare_with_parameters("SELECT typeof(:x), length(:x), hex(:x)")
+            .unwrap();
+        let stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        let typeof_x = OwnedValue::from_value_ref(row.first().unwrap());
+        let length_x = OwnedValue::from_value_ref(row.get(1).unwrap());
+        let hex_x = OwnedValue::from_value_ref(row.get(2).unwrap());
+
+        match typeof_x {
+            OwnedValue::Text(s) => assert_eq!(std::str::from_utf8(&s).unwrap(), "blob"),
+            other => panic!("expected text, got {:?}", other),
+        }
+        match length_x {
+            OwnedValue::Integer(n) => assert_eq!(n, 4),
+            other => panic!("expected integer, got {:?}", other),
+        }
+        match hex_x {
+            OwnedValue::Text(s) => assert_eq!(std::str::from_utf8(&s).unwrap(), "DEADBEEF"),
+            other => panic!("expected text, got {:?}", other),
+        }
     }
 
     #[test]

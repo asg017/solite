@@ -28,7 +28,9 @@ pub struct RunArgs {
     #[arg(long, short = 'c')]
     pub command: Option<String>,
 
-    #[arg(long, short = 'p', num_args = 2)]
+    /// Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file`
+    /// to bind the file's bytes as a BLOB.
+    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"])]
     pub parameters: Vec<String>,
 
     #[arg(long)]

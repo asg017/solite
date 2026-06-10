@@ -207,7 +207,11 @@ impl ReplCompleter {
         _pos: usize,
         _ctx: &rustyline::Context<'_>,
     ) -> Result<(usize, Vec<Pair>)> {
-        let dots = ["load", "tables", "open", "schema", "timer", "help"];
+        let dots = [
+            "ask", "bench", "call", "clear", "dotenv", "env", "export", "graphviz", "help",
+            "load", "open", "param", "print", "run", "schema", "sh", "tables", "timer", "tui",
+            "vegalite",
+        ];
         if line.contains(' ') || !line.starts_with('.') {
             return Ok((0, vec![]));
         }

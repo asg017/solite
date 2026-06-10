@@ -62,6 +62,9 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
         DotCommand::Print(print_cmd) => {
             print_cmd.execute();
         }
+        DotCommand::Help(help_cmd) => {
+            println!("{}", help_cmd.execute());
+        }
         DotCommand::Load(load_cmd) => {
             match load_cmd.execute(&mut runtime.connection) {
                 Ok(_) => {

@@ -101,6 +101,9 @@ async fn handle_dot_command_inner(
         DotCommand::Print(print_cmd) => {
             sender.send_plain(print_cmd.message, parent).await?;
         }
+        DotCommand::Help(help_cmd) => {
+            sender.send_plain(help_cmd.execute(), parent).await?;
+        }
         DotCommand::Shell(shell_cmd) => match shell_cmd.execute() {
             Ok(ShellResult::Background(child)) => {
                 sender

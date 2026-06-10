@@ -27,3 +27,15 @@ def test_repl(solite_cli, snapshot):
 
 def test_err(solite_cli, snapshot):
     assert repl(solite_cli, ["select xxx();"]) == snapshot
+
+
+def test_help_lists_dot_commands(solite_cli):
+    output = solite_cli([], communicate=[b".help\n"], kill=True).stdout
+    assert "Unknown command" not in output
+    for needle in [".tables", ".export <path>", ".param set", "!<command>", "?<question>"]:
+        assert needle in output
+
+
+def test_help_topic(solite_cli):
+    output = solite_cli([], communicate=[b".help export\n"], kill=True).stdout
+    assert ".export <path>" in output

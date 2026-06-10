@@ -171,6 +171,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             }
         },
         DotCommand::Print(print_cmd) => print_cmd.execute(),
+        DotCommand::Help(help_cmd) => println!("{}", help_cmd.execute()),
         DotCommand::Open(open_cmd) => match open_cmd.execute(runtime) {
             Ok(()) => {
                 println!("✓ opened database");

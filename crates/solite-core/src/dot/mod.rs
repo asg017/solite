@@ -26,6 +26,10 @@
 //! - `.timer on/off` - Toggle query timing
 //! - `.clear` / `.c` - Clear screen
 //! - `.print <message>` - Print a message
+//! - `.help [command]` - List dot commands or show usage for one
+//!
+//! The canonical user-facing reference lives in [`help`]; update it when
+//! adding or changing a command.
 
 mod ask;
 pub mod bench;
@@ -35,6 +39,7 @@ mod dotenv;
 pub mod env;
 mod export;
 mod graphviz;
+mod help;
 mod load;
 mod open;
 pub mod param;
@@ -59,6 +64,7 @@ pub use crate::dot::{
     env::{EnvAction, EnvCommand},
     export::ExportCommand,
     graphviz::GraphvizCommand,
+    help::HelpCommand,
     load::LoadCommand,
     open::OpenCommand,
     param::ParameterCommand,
@@ -158,6 +164,8 @@ pub enum DotCommand {
     Print(PrintCommand),
     /// Ask AI assistant.
     Ask(AskCommand),
+    /// Show dot command reference.
+    Help(HelpCommand),
 
     /// Execute shell command.
     Shell(ShellCommand),
@@ -219,6 +227,12 @@ pub fn parse_dot<S: Into<String>>(
 
     match command.to_lowercase().as_str() {
         "ask" => Ok(DotCommand::Ask(AskCommand { message: args })),
+        "help" => Ok(DotCommand::Help(HelpCommand {
+            topic: match args.trim() {
+                "" => None,
+                topic => Some(topic.to_string()),
+            },
+        })),
         "print" => Ok(DotCommand::Print(PrintCommand { message: args })),
         "sh" => Ok(DotCommand::Shell(ShellCommand { command: args })),
         "tables" => Ok(DotCommand::Tables(TablesCommand {

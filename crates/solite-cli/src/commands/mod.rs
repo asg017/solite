@@ -18,6 +18,25 @@ pub(crate) fn read_sql_file(path: &Path) -> Result<String, std::io::Error> {
     std::fs::read_to_string(path).map(|contents| contents.trim().to_string())
 }
 
+/// Read SQL from piped stdin, trimmed. Errors (instead of hanging) when
+/// stdin is a terminal or unreadable.
+pub(crate) fn read_sql_from_stdin() -> Result<String, String> {
+    use std::io::{IsTerminal, Read};
+    let mut stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return Err(
+            "no SQL provided: pass a SQL statement argument, or pipe SQL via stdin \
+             (e.g. `echo 'select 1' | solite q -`)"
+                .to_string(),
+        );
+    }
+    let mut buffer = String::new();
+    stdin
+        .read_to_string(&mut buffer)
+        .map_err(|e| format!("failed to read SQL from stdin: {e}"))?;
+    Ok(buffer.trim().to_string())
+}
+
 pub mod repl;
 pub mod run;
 pub mod query;

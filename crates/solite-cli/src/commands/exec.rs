@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use solite_core::Runtime;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use super::{is_sql_file, read_sql_file};
@@ -16,7 +17,12 @@ pub(crate) fn exec(args: ExecuteArgs) -> Result<(), ()> {
 }
 
 fn exec_impl(args: ExecuteArgs) -> Result<()> {
-    let (db_path, sql) = parse_arguments(&args)?;
+    let stdin_piped = !std::io::stdin().is_terminal();
+    let (db_path, sql) = parse_arguments(&args, stdin_piped)?;
+    let sql = match sql {
+        Some(sql) => sql,
+        None => super::read_sql_from_stdin().map_err(|e| anyhow::anyhow!(e))?,
+    };
 
     let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()))?;
 
@@ -77,24 +83,51 @@ fn resolve_sql_arg(arg: &str) -> Result<String> {
 
 /// Parse arguments to determine database path and SQL string.
 ///
-/// Accepts 1 or 2 positional args in any order, classified by extension
+/// Accepts 0-2 positional args in any order, classified by extension
 /// first: `.db`/`.sqlite`/`.sqlite3` (or `:memory:`) is the database —
 /// whether or not it exists on disk, so new databases can be created —
 /// and `.sql` is a file whose contents are the SQL. Unclassified args fall
 /// back to the existence check (the arg that exists is the database).
-fn parse_arguments(args: &ExecuteArgs) -> Result<(Option<PathBuf>, String)> {
+///
+/// A returned SQL of `None` means "read the SQL from stdin" (`-`
+/// placeholder, no args at all, or a lone database arg with piped stdin).
+fn parse_arguments(args: &ExecuteArgs, stdin_piped: bool) -> Result<(Option<PathBuf>, Option<String>)> {
     match args.args.as_slice() {
+        [] => Ok((None, None)),
         [only] => {
+            if only == "-" {
+                return Ok((None, None));
+            }
             let p = PathBuf::from(only);
             if is_sql_file(&p) {
-                Ok((None, resolve_sql_arg(only)?))
+                Ok((None, Some(resolve_sql_arg(only)?)))
             } else if is_database_arg(only) || p.exists() {
-                Ok((Some(p), String::new()))
+                // A lone database arg: the SQL comes from stdin when piped
+                let sql = if stdin_piped { None } else { Some(String::new()) };
+                Ok((Some(p), sql))
             } else {
-                Ok((None, only.clone()))
+                Ok((None, Some(only.clone())))
             }
         }
         [first, second] => {
+            // `-` marks SQL-from-stdin; the other positional is the database
+            if first == "-" || second == "-" {
+                if first == "-" && second == "-" {
+                    bail!("only one `-` stdin placeholder is allowed");
+                }
+                let db_arg = if first == "-" { second } else { first };
+                let p = PathBuf::from(db_arg);
+                if is_sql_file(&p) {
+                    bail!("cannot combine a .sql file with `-` stdin input");
+                }
+                if !(is_database_arg(db_arg) || p.exists()) {
+                    bail!(
+                        "database '{db_arg}' does not exist. To create a new database, \
+                         give it a .db/.sqlite/.sqlite3 extension"
+                    );
+                }
+                return Ok((Some(p), None));
+            }
             let db0 = is_database_arg(first);
             let db1 = is_database_arg(second);
             let sql0 = is_sql_file(Path::new(first));
@@ -113,10 +146,10 @@ fn parse_arguments(args: &ExecuteArgs) -> Result<(Option<PathBuf>, String)> {
                 );
             }
             if db0 {
-                return Ok((Some(PathBuf::from(first)), resolve_sql_arg(second)?));
+                return Ok((Some(PathBuf::from(first)), Some(resolve_sql_arg(second)?)));
             }
             if db1 {
-                return Ok((Some(PathBuf::from(second)), resolve_sql_arg(first)?));
+                return Ok((Some(PathBuf::from(second)), Some(resolve_sql_arg(first)?)));
             }
 
             let p0 = PathBuf::from(first);
@@ -131,15 +164,15 @@ fn parse_arguments(args: &ExecuteArgs) -> Result<(Option<PathBuf>, String)> {
                          give it a .db/.sqlite/.sqlite3 extension"
                     );
                 }
-                return Ok((Some(db), resolve_sql_arg(sql_arg)?));
+                return Ok((Some(db), Some(resolve_sql_arg(sql_arg)?)));
             }
 
             // Neither arg is classified by extension: the one that exists on
             // disk is the database.
             if p0.exists() {
-                Ok((Some(p0), second.clone()))
+                Ok((Some(p0), Some(second.clone())))
             } else if p1.exists() {
-                Ok((Some(p1), first.clone()))
+                Ok((Some(p1), Some(first.clone())))
             } else {
                 bail!(
                     "cannot tell which argument is the database: neither '{first}' nor \
@@ -149,7 +182,7 @@ fn parse_arguments(args: &ExecuteArgs) -> Result<(Option<PathBuf>, String)> {
                 );
             }
         }
-        _ => bail!("expected 1 or 2 arguments: a SQL statement and an optional database"),
+        _ => bail!("expected at most 2 arguments: a SQL statement and an optional database"),
     }
 }
 
@@ -179,9 +212,9 @@ mod tests {
     #[test]
     fn parse_args_sql_only() {
         let args = make_args(vec!["INSERT INTO t VALUES (1)"]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert!(db.is_none());
-        assert_eq!(sql, "INSERT INTO t VALUES (1)");
+        assert_eq!(sql.as_deref(), Some("INSERT INTO t VALUES (1)"));
     }
 
     #[test]
@@ -191,9 +224,9 @@ mod tests {
         std::fs::write(&db_path, "").unwrap();
 
         let args = make_args(vec![db_path.to_str().unwrap(), "INSERT INTO t VALUES (1)"]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(db.unwrap(), db_path);
-        assert_eq!(sql, "INSERT INTO t VALUES (1)");
+        assert_eq!(sql.as_deref(), Some("INSERT INTO t VALUES (1)"));
     }
 
     #[test]
@@ -203,16 +236,16 @@ mod tests {
         std::fs::write(&db_path, "").unwrap();
 
         let args = make_args(vec!["INSERT INTO t VALUES (1)", db_path.to_str().unwrap()]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(db.unwrap(), db_path);
-        assert_eq!(sql, "INSERT INTO t VALUES (1)");
+        assert_eq!(sql.as_deref(), Some("INSERT INTO t VALUES (1)"));
     }
 
     #[test]
     fn parse_args_neither_is_file_errors() {
         // Nothing is silently ignored: two unclassifiable args are an error
         let args = make_args(vec!["CREATE TABLE t(a)", "INSERT INTO t VALUES (1)"]);
-        let err = parse_arguments(&args).unwrap_err();
+        let err = parse_arguments(&args, false).unwrap_err();
         assert!(err.to_string().contains("cannot tell"), "{err}");
     }
 
@@ -220,20 +253,20 @@ mod tests {
     fn parse_args_nonexistent_db_extension_is_database() {
         // A .db arg is the database even if it doesn't exist yet
         let args = make_args(vec!["/tmp/solite_brand_new_db_does_not_exist.db", "CREATE TABLE t(a)"]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(
             db.unwrap(),
             PathBuf::from("/tmp/solite_brand_new_db_does_not_exist.db")
         );
-        assert_eq!(sql, "CREATE TABLE t(a)");
+        assert_eq!(sql.as_deref(), Some("CREATE TABLE t(a)"));
     }
 
     #[test]
     fn parse_args_memory_is_database() {
         let args = make_args(vec![":memory:", "CREATE TABLE t(a)"]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
-        assert_eq!(sql, "CREATE TABLE t(a)");
+        assert_eq!(sql.as_deref(), Some("CREATE TABLE t(a)"));
     }
 
     #[test]
@@ -245,15 +278,15 @@ mod tests {
 
         // .sql file + .db database (db doesn't exist yet)
         let args = make_args(vec![script.to_str().unwrap(), db_path.to_str().unwrap()]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(db.unwrap(), db_path);
-        assert_eq!(sql, "CREATE TABLE t(a);");
+        assert_eq!(sql.as_deref(), Some("CREATE TABLE t(a);"));
 
         // single .sql file arg: contents are the SQL, in-memory database
         let args = make_args(vec![script.to_str().unwrap()]);
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert!(db.is_none());
-        assert_eq!(sql, "CREATE TABLE t(a);");
+        assert_eq!(sql.as_deref(), Some("CREATE TABLE t(a);"));
     }
 
     #[test]
@@ -263,22 +296,61 @@ mod tests {
         std::fs::write(&script, "CREATE TABLE t(a);\n").unwrap();
 
         let args = make_args(vec![script.to_str().unwrap(), "newdb_without_extension"]);
-        let err = parse_arguments(&args).unwrap_err();
+        let err = parse_arguments(&args, false).unwrap_err();
         assert!(err.to_string().contains("does not exist"), "{err}");
     }
 
     #[test]
     fn parse_args_two_databases_errors() {
         let args = make_args(vec!["a.db", "b.db"]);
-        let err = parse_arguments(&args).unwrap_err();
+        let err = parse_arguments(&args, false).unwrap_err();
         assert!(err.to_string().contains("two database arguments"), "{err}");
     }
 
     #[test]
     fn parse_args_two_sql_files_errors() {
         let args = make_args(vec!["a.sql", "b.sql"]);
-        let err = parse_arguments(&args).unwrap_err();
+        let err = parse_arguments(&args, false).unwrap_err();
         assert!(err.to_string().contains("two .sql file arguments"), "{err}");
+    }
+
+    #[test]
+    fn parse_args_dash_reads_stdin() {
+        let (db, sql) = parse_arguments(&make_args(vec!["-"]), true).unwrap();
+        assert!(db.is_none());
+        assert!(sql.is_none());
+
+        let (db, sql) = parse_arguments(&make_args(vec!["-", "new.db"]), true).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from("new.db"));
+        assert!(sql.is_none());
+
+        let (db, sql) = parse_arguments(&make_args(vec![":memory:", "-"]), true).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert!(sql.is_none());
+    }
+
+    #[test]
+    fn parse_args_no_args_reads_stdin() {
+        let (db, sql) = parse_arguments(&make_args(vec![]), true).unwrap();
+        assert!(db.is_none());
+        assert!(sql.is_none());
+    }
+
+    #[test]
+    fn parse_args_lone_db_with_piped_stdin() {
+        let (db, sql) = parse_arguments(&make_args(vec!["app.db"]), true).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from("app.db"));
+        assert!(sql.is_none());
+
+        // without piped stdin, a lone db arg means "no SQL" (errors later)
+        let (db, sql) = parse_arguments(&make_args(vec!["app.db"]), false).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from("app.db"));
+        assert_eq!(sql.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn parse_args_two_dashes_errors() {
+        assert!(parse_arguments(&make_args(vec!["-", "-"]), true).is_err());
     }
 
     #[test]

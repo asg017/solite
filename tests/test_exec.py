@@ -51,6 +51,30 @@ def test_exec_sql_file_input(solite_cli, tmp_path):
     assert json.loads(rows.stdout) == [{"a": 9}]
 
 
+def test_exec_stdin_input(solite_cli, tmp_path):
+    """`-` reads SQL from piped stdin; the other positional is the database."""
+    db = tmp_path / "new.db"
+    result = solite_cli(
+        ["exec", "-", str(db)],
+        communicate=[b"create table t(a); insert into t values (5);"],
+    )
+    assert result.success, result.stderr
+
+    rows = solite_cli(["q", "select a from t", str(db), "-f", "json"])
+    assert json.loads(rows.stdout) == [{"a": 5}]
+
+
+def test_exec_stdin_lone_database_arg(solite_cli, tmp_path):
+    """Piped stdin with only a database positional reads SQL from stdin."""
+    db = tmp_path / "new.db"
+    result = solite_cli(
+        ["exec", str(db)],
+        communicate=[b"create table t(a)"],
+    )
+    assert result.success, result.stderr
+    assert db.exists()
+
+
 def test_exec_two_unusable_args_error(solite_cli):
     """Nothing is silently ignored when neither arg can be classified."""
     result = solite_cli(["exec", "create table t(a)", "insert into t values (1)"])

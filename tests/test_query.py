@@ -52,6 +52,49 @@ def test_query_missing_database_blames_db_arg(solite_cli):
     assert "select 1" not in result.stderr
 
 
+def test_query_stdin(solite_cli, tmp_path):
+    # explicit `-` placeholder
+    result = solite_cli(["q", "-"], communicate=[b"select 42"])
+    assert result.success, result.stderr
+    assert result.stdout == '[{"42":42}]\n'
+
+    # no positional at all, piped stdin
+    result = solite_cli(["q"], communicate=[b"select 42"])
+    assert result.success, result.stderr
+    assert result.stdout == '[{"42":42}]\n'
+
+    # stdin combined with a format flag
+    result = solite_cli(["q", "-", "-f", "csv"], communicate=[b"select 1 as a"])
+    assert result.success, result.stderr
+    assert result.stdout == "a\n1\n"
+
+    # stdin combined with a database positional and -o
+    db = tmp_path / "data.db"
+    assert solite_cli(["exec", str(db), "create table t(a); insert into t values (3)"]).success
+    result = solite_cli(["q", str(db)], communicate=[b"select a from t"])
+    assert result.success, result.stderr
+    assert result.stdout == '[{"a":3}]\n'
+
+    out = tmp_path / "out.csv"
+    result = solite_cli(["q", str(db), "-", "-o", str(out)], communicate=[b"select a from t"])
+    assert result.success, result.stderr
+    assert out.read_text() == "a\n3\n"
+
+
+def test_query_stdin_never_creates_database(solite_cli, tmp_path):
+    """query is read-only: stdin paths must not create database files."""
+    missing = tmp_path / "nope.db"
+    result = solite_cli(["q", str(missing)], communicate=[b"select 1"])
+    assert not result.success
+    assert "nope.db" in result.stderr
+    assert not missing.exists()
+
+    # `solite q "select 1" -` must not create a file named "select 1"
+    result = solite_cli(["q", "select 1", "-"], communicate=[b"select 2"], cwd=tmp_path)
+    assert not result.success
+    assert not (tmp_path / "select 1").exists()
+
+
 def test_query_trailing_comment_ok(solite_cli):
     result = solite_cli(["q", "select 1; -- comment"])
     assert result.success

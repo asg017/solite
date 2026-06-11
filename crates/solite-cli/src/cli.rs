@@ -129,13 +129,16 @@ Examples:
   solite query \"SELECT name FROM users WHERE id = $id\" app.db -p id 42
   solite q \"SELECT 1\"                             # 'q' alias, in-memory database
   solite q \"SELECT 1\" :memory:                    # explicit in-memory database
+  echo \"SELECT 42\" | solite q -                   # SQL from stdin
+  pbpaste | solite q app.db -f csv                # piped stdin + database
   solite query --allow-ssh \"SELECT 1\" ssh://user@host/app.db";
 
 #[derive(Args, Debug)]
 pub struct QueryArgs {
-    /// SQL to run (read-only; use `solite execute` for writes), or a
-    /// path to a .sql file containing it
-    pub statement: String,
+    /// SQL to run (read-only; use `solite execute` for writes), a path
+    /// to a .sql file containing it, or `-` to read SQL from stdin
+    /// (also the default when stdin is piped)
+    pub statement: Option<String>,
 
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
     pub database: Option<PathBuf>,
@@ -168,18 +171,21 @@ Examples:
   solite execute new.db \"CREATE TABLE t(a)\"     # creates new.db if missing
   solite execute app.db migrate.sql             # SQL from a .sql file
   solite execute app.db \"DELETE FROM users WHERE id = $id\" -p id 42
+  echo \"CREATE TABLE t(a)\" | solite exec - new.db  # SQL from stdin
+  cat migrate.sql | solite exec app.db            # piped stdin + database
 
 Arguments are classified by extension: .db/.sqlite/.sqlite3 (or :memory:)
 is the database — created if it doesn't exist yet — and .sql is a file
 whose contents are the SQL. Otherwise the argument that exists on disk is
-the database and the other is the SQL. With a single SQL argument, the
+the database and the other is the SQL. `-` (or piped stdin with no SQL
+argument) reads the SQL from stdin. With a single SQL argument, the
 statements run against an in-memory database.";
 
 #[derive(Args, Debug)]
 pub struct ExecuteArgs {
-    /// SQL statement (or .sql file) and optional database path, in any
-    /// order; classified by extension, then by which one exists on disk
-    #[arg(num_args = 1..=2)]
+    /// SQL statement (.sql file, or `-` for stdin) and optional database
+    /// path, in any order; classified by extension, then by existence
+    #[arg(num_args = 0..=2)]
     pub args: Vec<String>,
 
     /// Reserved; currently ignored

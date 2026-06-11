@@ -34,6 +34,8 @@ pub enum QueryError {
     TrailingSql,
     /// Failed to read SQL file.
     FileReadError(PathBuf, std::io::Error),
+    /// No SQL provided or stdin could not be read.
+    Stdin(String),
 }
 
 impl fmt::Display for QueryError {
@@ -58,6 +60,7 @@ impl fmt::Display for QueryError {
             QueryError::FileReadError(path, err) => {
                 write!(f, "Failed to read SQL file '{}': {}", path.display(), err)
             }
+            QueryError::Stdin(msg) => write!(f, "{}", msg),
         }
     }
 }
@@ -89,10 +92,23 @@ fn resolve_sql(sql: String) -> Result<String, QueryError> {
     }
 }
 
+/// Where the SQL text comes from.
+#[derive(Debug, PartialEq)]
+enum SqlSource {
+    /// SQL given inline (or as a .sql file path).
+    Inline(String),
+    /// SQL is read from piped stdin (`-` placeholder or no statement arg).
+    Stdin,
+}
+
 /// Internal implementation of the query command.
 fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
-    let (db_path, sql) = parse_arguments(&args)?;
-    let sql = resolve_sql(sql)?;
+    let stdin_piped = !std::io::stdin().is_terminal();
+    let (db_path, source) = parse_arguments(&args, stdin_piped)?;
+    let sql = match source {
+        SqlSource::Inline(sql) => resolve_sql(sql)?,
+        SqlSource::Stdin => super::read_sql_from_stdin().map_err(QueryError::Stdin)?,
+    };
 
     let mut runtime = Runtime::new_with_options(
         db_path.map(|p| p.to_string_lossy().to_string()),
@@ -167,44 +183,92 @@ fn is_remote_url(s: &str) -> bool {
     solite_core::sqlite::is_remote_path(s)
 }
 
+/// Validate a positional that the stdin paths classify as the database.
+/// `query` is read-only and must never create a database file (the
+/// underlying open uses SQLITE_OPEN_CREATE), so anything that isn't
+/// `:memory:`, a remote URL, or an existing file is rejected.
+fn validate_stdin_database(arg: &str) -> Result<PathBuf, QueryError> {
+    let p = PathBuf::from(arg);
+    if arg == ":memory:" || is_remote_url(arg) || p.exists() {
+        Ok(p)
+    } else {
+        Err(QueryError::DatabaseNotFound(p))
+    }
+}
+
 use super::is_sql_file;
 
-fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryError> {
-    match &args.database {
-        None => {
+fn parse_arguments(
+    args: &QueryArgs,
+    stdin_piped: bool,
+) -> Result<(Option<PathBuf>, SqlSource), QueryError> {
+    match (&args.statement, &args.database) {
+        // No positionals at all: SQL must come from piped stdin
+        (None, _) => Ok((args.database.clone(), SqlSource::Stdin)),
+        (Some(arg0), None) => {
+            if arg0 == "-" {
+                return Ok((None, SqlSource::Stdin));
+            }
+            // A lone database-looking positional with piped stdin: it's the
+            // database, and the SQL comes from stdin. A db-extension arg
+            // that doesn't exist is an error, not a file to create.
+            let p = Path::new(arg0);
+            if stdin_piped
+                && (arg0 == ":memory:"
+                    || is_remote_url(arg0)
+                    || crate::cli::is_database_path(p)
+                    || (p.exists() && !is_sql_file(p)))
+            {
+                return validate_stdin_database(arg0).map(|db| (Some(db), SqlSource::Stdin));
+            }
             // Check if the statement arg is actually an ssh:// URL (user put db first)
-            if is_remote_url(&args.statement) {
+            if is_remote_url(arg0) {
                 return Err(QueryError::ExecutionFailed(
                     "Usage: solite query <sql> <database>".to_string(),
                 ));
             }
-            Ok((None, args.statement.clone()))
+            Ok((None, SqlSource::Inline(arg0.clone())))
         }
-        Some(arg1) => {
-            let arg0 = &args.statement;
+        (Some(arg0), Some(arg1)) => {
             let arg1_str = arg1.to_string_lossy();
+
+            // `-` marks SQL-from-stdin; the other positional is the database
+            if arg0 == "-" && arg1_str == "-" {
+                return Err(QueryError::Stdin(
+                    "only one `-` stdin placeholder is allowed".to_string(),
+                ));
+            }
+            if arg0 == "-" {
+                return validate_stdin_database(&arg1_str).map(|db| (Some(db), SqlSource::Stdin));
+            }
+            if arg1_str == "-" {
+                return validate_stdin_database(arg0).map(|db| (Some(db), SqlSource::Stdin));
+            }
 
             // If either arg looks like an ssh:// URL, treat it as the database
             if is_remote_url(&arg1_str) {
-                Ok((Some(arg1.clone()), arg0.clone()))
+                Ok((Some(arg1.clone()), SqlSource::Inline(arg0.clone())))
             } else if is_remote_url(arg0) {
                 let sql = arg1_str.to_string();
-                Ok((Some(PathBuf::from(arg0)), sql))
+                Ok((Some(PathBuf::from(arg0)), SqlSource::Inline(sql)))
             } else if is_sql_file(arg1) {
                 // .sql file as second arg is SQL, first arg is database
                 let p = PathBuf::from(arg0);
-                Ok((Some(p), arg1_str.to_string()))
+                Ok((Some(p), SqlSource::Inline(arg1_str.to_string())))
             } else if is_sql_file(Path::new(arg0)) {
                 // .sql file as first arg is SQL, second arg is database
-                Ok((Some(arg1.clone()), arg0.clone()))
+                Ok((Some(arg1.clone()), SqlSource::Inline(arg0.clone())))
             } else if arg1_str == ":memory:" {
                 // SQLite opens `:memory:` natively as an in-memory database;
                 // it never exists on disk, so check before Path::exists()
-                Ok((Some(arg1.clone()), arg0.clone()))
+                Ok((Some(arg1.clone()), SqlSource::Inline(arg0.clone())))
             } else if arg0 == ":memory:" {
-                Ok((Some(PathBuf::from(arg0)), arg1_str.to_string()))
+                Ok((
+                    Some(PathBuf::from(arg0)),
+                    SqlSource::Inline(arg1_str.to_string()),
+                ))
             } else if arg1.exists() {
-                Ok((Some(arg1.clone()), arg0.clone()))
+                Ok((Some(arg1.clone()), SqlSource::Inline(arg0.clone())))
             } else {
                 let p = PathBuf::from(arg0);
                 if !p.exists() {
@@ -225,7 +289,7 @@ fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryE
                     .to_str()
                     .ok_or_else(|| QueryError::InvalidPath(arg1.clone()))?
                     .to_string();
-                Ok((Some(p), sql))
+                Ok((Some(p), SqlSource::Inline(sql)))
             }
         }
     }
@@ -303,7 +367,7 @@ mod tests {
     #[test]
     fn test_determine_format_explicit() {
         let args = QueryArgs {
-            statement: "SELECT 1".to_string(),
+            statement: Some("SELECT 1".to_string()),
             database: None,
             format: Some(crate::cli::QueryFormat::Csv),
             output: None,
@@ -318,7 +382,7 @@ mod tests {
     #[test]
     fn test_determine_format_from_path() {
         let args = QueryArgs {
-            statement: "SELECT 1".to_string(),
+            statement: Some("SELECT 1".to_string()),
             database: None,
             format: None,
             output: Some(PathBuf::from("output.csv")),
@@ -333,7 +397,7 @@ mod tests {
     #[test]
     fn test_determine_format_default() {
         let args = QueryArgs {
-            statement: "SELECT 1".to_string(),
+            statement: Some("SELECT 1".to_string()),
             database: None,
             format: None,
             output: None,
@@ -384,7 +448,7 @@ mod tests {
     #[test]
     fn test_parse_arguments_sql_file_only() {
         let args = QueryArgs {
-            statement: "test.sql".to_string(),
+            statement: Some("test.sql".to_string()),
             database: None,
             format: None,
             output: None,
@@ -392,15 +456,15 @@ mod tests {
             parameters: vec![],
             remote: Default::default(),
         };
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert!(db.is_none());
-        assert_eq!(sql, "test.sql");
+        assert_eq!(sql, SqlSource::Inline("test.sql".to_string()));
     }
 
     #[test]
     fn test_parse_arguments_sql_file_then_db() {
         let args = QueryArgs {
-            statement: "query.sql".to_string(),
+            statement: Some("query.sql".to_string()),
             database: Some(PathBuf::from("data.db")),
             format: None,
             output: None,
@@ -408,15 +472,15 @@ mod tests {
             parameters: vec![],
             remote: Default::default(),
         };
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from("data.db"));
-        assert_eq!(sql, "query.sql");
+        assert_eq!(sql, SqlSource::Inline("query.sql".to_string()));
     }
 
     #[test]
     fn test_parse_arguments_db_then_sql_file() {
         let args = QueryArgs {
-            statement: ":memory:".to_string(),
+            statement: Some(":memory:".to_string()),
             database: Some(PathBuf::from("query.sql")),
             format: None,
             output: None,
@@ -424,14 +488,14 @@ mod tests {
             parameters: vec![],
             remote: Default::default(),
         };
-        let (db, sql) = parse_arguments(&args).unwrap();
+        let (db, sql) = parse_arguments(&args, false).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
-        assert_eq!(sql, "query.sql");
+        assert_eq!(sql, SqlSource::Inline("query.sql".to_string()));
     }
 
     fn query_args(statement: &str, database: Option<&str>) -> QueryArgs {
         QueryArgs {
-            statement: statement.to_string(),
+            statement: Some(statement.to_string()),
             database: database.map(PathBuf::from),
             format: None,
             output: None,
@@ -441,24 +505,31 @@ mod tests {
         }
     }
 
+    /// parse_arguments with stdin treated as a terminal (not piped).
+    fn parse_arguments_no_stdin(
+        args: &QueryArgs,
+    ) -> Result<(Option<PathBuf>, SqlSource), QueryError> {
+        parse_arguments(args, false)
+    }
+
     #[test]
     fn test_parse_arguments_memory_as_second_arg() {
-        let (db, sql) = parse_arguments(&query_args("select 1", Some(":memory:"))).unwrap();
+        let (db, sql) = parse_arguments_no_stdin(&query_args("select 1", Some(":memory:"))).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
-        assert_eq!(sql, "select 1");
+        assert_eq!(sql, SqlSource::Inline("select 1".to_string()));
     }
 
     #[test]
     fn test_parse_arguments_memory_as_first_arg() {
-        let (db, sql) = parse_arguments(&query_args(":memory:", Some("select 1"))).unwrap();
+        let (db, sql) = parse_arguments_no_stdin(&query_args(":memory:", Some("select 1"))).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
-        assert_eq!(sql, "select 1");
+        assert_eq!(sql, SqlSource::Inline("select 1".to_string()));
     }
 
     #[test]
     fn test_parse_arguments_missing_db_blames_db_arg() {
         // The error must name the database-looking argument, not the SQL text
-        let err = parse_arguments(&query_args("select 1", Some("/tmp/solite_definitely_nonexistent.db")))
+        let err = parse_arguments_no_stdin(&query_args("select 1", Some("/tmp/solite_definitely_nonexistent.db")))
             .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("solite_definitely_nonexistent.db"), "{msg}");
@@ -468,7 +539,7 @@ mod tests {
     #[test]
     fn test_parse_arguments_missing_db_first_arg_blamed() {
         // db-ish extension on the first arg, plain SQL second: blame the db arg
-        let err = parse_arguments(&query_args(
+        let err = parse_arguments_no_stdin(&query_args(
             "/tmp/solite_definitely_nonexistent.db",
             Some("select 1"),
         ))
@@ -476,6 +547,101 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("solite_definitely_nonexistent.db"), "{msg}");
         assert!(!msg.contains("select 1"), "{msg}");
+    }
+
+    #[test]
+    fn test_parse_arguments_dash_reads_stdin() {
+        let (db, sql) = parse_arguments(&query_args("-", None), true).unwrap();
+        assert!(db.is_none());
+        assert_eq!(sql, SqlSource::Stdin);
+    }
+
+    #[test]
+    fn test_parse_arguments_dash_with_database() {
+        let dir = std::env::temp_dir().join("solite_test_dash_db");
+        let _ = fs::create_dir_all(&dir);
+        let db_file = dir.join("data.db");
+        fs::write(&db_file, "").unwrap();
+        let db_str = db_file.to_str().unwrap();
+
+        let (db, sql) = parse_arguments(&query_args("-", Some(db_str)), true).unwrap();
+        assert_eq!(db.unwrap(), db_file);
+        assert_eq!(sql, SqlSource::Stdin);
+
+        // database-first order also works
+        let (db, sql) = parse_arguments(&query_args(db_str, Some("-")), true).unwrap();
+        assert_eq!(db.unwrap(), db_file);
+        assert_eq!(sql, SqlSource::Stdin);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_parse_arguments_dash_with_missing_database_errors() {
+        // query is read-only: `-` must never silently create a database
+        // file from the other positional
+        let err =
+            parse_arguments(&query_args("-", Some("nope_does_not_exist.db")), true).unwrap_err();
+        assert!(matches!(err, QueryError::DatabaseNotFound(_)), "{err}");
+
+        // ...even when the other positional doesn't look like a database
+        // (e.g. `solite q "select 1" -` with the args swapped by mistake)
+        let err = parse_arguments(&query_args("select 1", Some("-")), true).unwrap_err();
+        assert!(matches!(err, QueryError::DatabaseNotFound(_)), "{err}");
+
+        // :memory: needs no existence check
+        let (db, sql) = parse_arguments(&query_args(":memory:", Some("-")), true).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert_eq!(sql, SqlSource::Stdin);
+    }
+
+    #[test]
+    fn test_parse_arguments_no_statement_uses_stdin() {
+        let args = QueryArgs {
+            statement: None,
+            database: None,
+            format: None,
+            output: None,
+            load_extension: None,
+            parameters: vec![],
+            remote: Default::default(),
+        };
+        let (db, sql) = parse_arguments(&args, true).unwrap();
+        assert!(db.is_none());
+        assert_eq!(sql, SqlSource::Stdin);
+    }
+
+    #[test]
+    fn test_parse_arguments_lone_database_with_piped_stdin() {
+        // With piped stdin, a lone database-looking positional is the database
+        let (db, sql) = parse_arguments(&query_args(":memory:", None), true).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert_eq!(sql, SqlSource::Stdin);
+
+        let dir = std::env::temp_dir().join("solite_test_lone_db");
+        let _ = fs::create_dir_all(&dir);
+        let db_file = dir.join("app.db");
+        fs::write(&db_file, "").unwrap();
+        let (db, sql) =
+            parse_arguments(&query_args(db_file.to_str().unwrap(), None), true).unwrap();
+        assert_eq!(db.unwrap(), db_file);
+        assert_eq!(sql, SqlSource::Stdin);
+        let _ = fs::remove_dir_all(&dir);
+
+        // A db-extension positional that doesn't exist errors instead of
+        // being silently created (query is read-only)
+        let err = parse_arguments(&query_args("nope_does_not_exist.db", None), true).unwrap_err();
+        assert!(matches!(err, QueryError::DatabaseNotFound(_)), "{err}");
+
+        // A plain SQL positional stays SQL even when stdin is piped
+        let (db, sql) = parse_arguments(&query_args("select 1", None), true).unwrap();
+        assert!(db.is_none());
+        assert_eq!(sql, SqlSource::Inline("select 1".to_string()));
+    }
+
+    #[test]
+    fn test_parse_arguments_two_dashes_error() {
+        assert!(parse_arguments(&query_args("-", Some("-")), true).is_err());
     }
 
     #[test]

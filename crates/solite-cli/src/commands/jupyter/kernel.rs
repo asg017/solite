@@ -6,9 +6,9 @@
 use anyhow::{Context as _, Result};
 use jupyter_protocol::{
     CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput, ExecuteReply,
-    ExecutionCount, HelpLink, HistoryReply, InspectReply, IsCompleteReply, IsCompleteReplyStatus,
-    JupyterMessage, JupyterMessageContent, KernelInfoReply, LanguageInfo, Media, MediaType,
-    ReplyError, ReplyStatus, Status,
+    ExecutionCount, HelpLink, HistoryReply, InspectReply, InterruptReply, IsCompleteReply,
+    IsCompleteReplyStatus, JupyterMessage, JupyterMessageContent, KernelInfoReply, LanguageInfo,
+    Media, MediaType, ReplyError, ReplyStatus, ShutdownReply, Status,
 };
 
 /// Messages sent from the runtime task back to the shell handler.
@@ -20,8 +20,10 @@ pub enum ExecutionMessage {
     Error { ename: String, evalue: String },
 }
 use runtimelib::{KernelIoPubConnection, KernelShellConnection};
+use solite_core::sqlite::InterruptHandle;
 use solite_core::{Runtime, StepError, StepResult};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -56,7 +58,23 @@ impl SoliteKernel {
         let (tx, mut rx) =
             mpsc::channel::<(String, JupyterMessage, mpsc::Sender<ExecutionMessage>)>(10);
 
+        // Shared handle for interrupting the in-flight statement from outside
+        // the runtime task. Refreshed by the runtime task whenever the
+        // connection may have changed (e.g. `.open`).
+        let interrupt_handle = Arc::new(Mutex::new(runtime.connection.interrupt_handle()));
+
+        // Interrupt the running statement on SIGINT. The kernelspec declares
+        // `"interrupt_mode": "signal"`, so Jupyter frontends deliver interrupts
+        // as SIGINT to this process; without a handler the whole kernel dies.
+        let sigint_handle = Arc::clone(&interrupt_handle);
+        tokio::spawn(async move {
+            while tokio::signal::ctrl_c().await.is_ok() {
+                sigint_handle.lock().unwrap().interrupt();
+            }
+        });
+
         // Spawn the runtime handler task
+        let runtime_interrupt = Arc::clone(&interrupt_handle);
         tokio::spawn(async move {
             let mut rt = runtime;
             while let Some((code, parent, response)) = rx.recv().await {
@@ -77,7 +95,8 @@ impl SoliteKernel {
                     code.as_str(),
                     solite_core::BlockSource::JupyterCell,
                 );
-                if let Err(e) = handle_code(&mut rt, &response, &parent).await {
+                if let Err(e) = handle_code(&mut rt, &response, &parent, &runtime_interrupt).await
+                {
                     eprintln!("Error handling code: {}", e);
                 }
             }
@@ -93,17 +112,48 @@ impl SoliteKernel {
             async move { while let Ok(()) = heartbeat.single_heartbeat().await {} }
         });
 
+        let control_interrupt = Arc::clone(&interrupt_handle);
         let control_handle = tokio::spawn({
             async move {
                 while let Ok(message) = control_connection.read().await {
-                    if let JupyterMessageContent::KernelInfoRequest(_) = message.content {
-                        let sent = control_connection
-                            .send(Self::kernel_info().as_child_of(&message))
-                            .await;
+                    match &message.content {
+                        JupyterMessageContent::KernelInfoRequest(_) => {
+                            let sent = control_connection
+                                .send(Self::kernel_info().as_child_of(&message))
+                                .await;
 
-                        if let Err(err) = sent {
-                            eprintln!("Error on control: {}", err);
+                            if let Err(err) = sent {
+                                eprintln!("Error on control: {}", err);
+                            }
                         }
+                        // Sent when the kernelspec uses `"interrupt_mode": "message"`;
+                        // ours uses "signal" (SIGINT, handled above), but support
+                        // both so either kernelspec works.
+                        JupyterMessageContent::InterruptRequest(_) => {
+                            control_interrupt.lock().unwrap().interrupt();
+                            let sent = control_connection
+                                .send(InterruptReply::default().as_child_of(&message))
+                                .await;
+                            if let Err(err) = sent {
+                                eprintln!("Error on control: {}", err);
+                            }
+                        }
+                        JupyterMessageContent::ShutdownRequest(req) => {
+                            let reply = ShutdownReply {
+                                restart: req.restart,
+                                status: ReplyStatus::Ok,
+                                error: None,
+                            };
+                            if let Err(err) =
+                                control_connection.send(reply.as_child_of(&message)).await
+                            {
+                                eprintln!("Error on control: {}", err);
+                            }
+                            // The frontend owns restarting; either way this
+                            // process is done.
+                            std::process::exit(0);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -340,8 +390,12 @@ async fn handle_code(
     runtime: &mut Runtime,
     response: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
+    interrupt_handle: &Mutex<InterruptHandle>,
 ) -> Result<()> {
     loop {
+        // Re-fetch before every step: a previous step (e.g. `.open`) may have
+        // swapped the connection, and interrupts must target the live one.
+        *interrupt_handle.lock().unwrap() = runtime.connection.interrupt_handle();
         match runtime.next_stepx() {
             Some(Ok(step)) => match step.result {
                 StepResult::SqlStatement { stmt, .. } => match render_statement(&stmt) {

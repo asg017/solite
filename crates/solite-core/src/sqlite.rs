@@ -3,6 +3,7 @@ use libsqlite3_sys::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::ffi::{c_int, c_void, CStr};
 use std::ptr::{self};
 use std::str::Utf8Error;
@@ -642,12 +643,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
     let mut steps = vec![];
     unsafe {
         let db: *mut sqlite3 = sqlite3_db_handle(pstmt);
-        let db = Connection {
-            inner: ConnectionInner::Local {
-                connection: db,
-                _owned: false,
-            },
-        };
+        let db = Connection::from_local(db, false);
 
         let stmt = db
             .prepare(
@@ -728,6 +724,10 @@ impl RemoteTransport {
 /// https://www.sqlite.org/c3ref/sqlite3.html
 pub struct Connection {
     inner: ConnectionInner,
+    /// Shared with [`InterruptHandle`]s handed out by [`Connection::interrupt_handle`].
+    /// Nulled (under the lock) before the database is closed so a handle can
+    /// never interrupt a freed connection.
+    interrupt_db: Arc<StdMutex<*mut sqlite3>>,
 }
 
 enum ConnectionInner {
@@ -744,6 +744,30 @@ enum ConnectionInner {
 unsafe impl std::marker::Send for Connection {}
 unsafe impl std::marker::Send for Statement {}
 
+/// A handle for interrupting an in-flight statement on a [`Connection`] from
+/// another thread, via `sqlite3_interrupt` (which is documented as safe to
+/// call from any thread on a live connection).
+///
+/// The handle outliving its `Connection` is safe: dropping the connection
+/// nulls the shared pointer, turning `interrupt()` into a no-op.
+#[derive(Clone)]
+pub struct InterruptHandle {
+    db: Arc<StdMutex<*mut sqlite3>>,
+}
+
+unsafe impl std::marker::Send for InterruptHandle {}
+unsafe impl std::marker::Sync for InterruptHandle {}
+
+impl InterruptHandle {
+    /// https://www.sqlite.org/c3ref/interrupt.html
+    pub fn interrupt(&self) {
+        let db = self.db.lock().unwrap();
+        if !db.is_null() {
+            unsafe { sqlite3_interrupt(*db) };
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PrepareError {
     pub code: i32,
@@ -752,6 +776,33 @@ pub struct PrepareError {
 }
 
 impl Connection {
+    fn from_local(connection: *mut sqlite3, owned: bool) -> Self {
+        Connection {
+            inner: ConnectionInner::Local {
+                connection,
+                _owned: owned,
+            },
+            interrupt_db: Arc::new(StdMutex::new(connection)),
+        }
+    }
+
+    fn from_remote(transport: RemoteTransport) -> Self {
+        Connection {
+            inner: ConnectionInner::Remote {
+                transport: RefCell::new(transport),
+            },
+            interrupt_db: Arc::new(StdMutex::new(ptr::null_mut())),
+        }
+    }
+
+    /// Get a thread-safe handle that can interrupt statements running on this
+    /// connection. No-op for remote connections.
+    pub fn interrupt_handle(&self) -> InterruptHandle {
+        InterruptHandle {
+            db: Arc::clone(&self.interrupt_db),
+        }
+    }
+
     pub fn open(path: &str) -> Result<Self, SQLiteError> {
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI;
         Self::open_with_flags(path, flags)
@@ -771,12 +822,7 @@ impl Connection {
             unsafe {
                 sqlite3_enable_load_extension(connection, 1);
             }
-            Ok(Connection {
-                inner: ConnectionInner::Local {
-                    connection,
-                    _owned: true,
-                },
-            })
+            Ok(Connection::from_local(connection, true))
         } else {
             let err = unsafe { SQLiteError::from_latest(connection, rc) };
             unsafe {
@@ -798,12 +844,7 @@ impl Connection {
                 sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, &v);
                 sqlite3_db_config(connection, 1018, 1, &v);
             }
-            Ok(Connection {
-                inner: ConnectionInner::Local {
-                    connection,
-                    _owned: true,
-                },
-            })
+            Ok(Connection::from_local(connection, true))
         } else {
             let err = unsafe { SQLiteError::from_latest(connection, rc) };
             unsafe {
@@ -891,11 +932,7 @@ impl Connection {
             }
         }
 
-        Ok(Connection {
-            inner: ConnectionInner::Remote {
-                transport: RefCell::new(transport),
-            },
-        })
+        Ok(Connection::from_remote(transport))
     }
 
     /// Open a remote database via a custom transport command.
@@ -952,11 +989,7 @@ impl Connection {
             }
         }
 
-        Ok(Connection {
-            inner: ConnectionInner::Remote {
-                transport: RefCell::new(transport),
-            },
-        })
+        Ok(Connection::from_remote(transport))
     }
 
     /// Returns true if this is a remote (SSH) connection.
@@ -1290,6 +1323,10 @@ impl Drop for Connection {
     fn drop(&mut self) {
         match &mut self.inner {
             ConnectionInner::Local { connection, _owned } => {
+                // Hold the lock across close so an InterruptHandle on another
+                // thread can't interrupt mid-close; afterwards handles see null.
+                let mut interrupt_db = self.interrupt_db.lock().unwrap();
+                *interrupt_db = ptr::null_mut();
                 if *_owned {
                     unsafe { sqlite3_close(*connection) };
                 }

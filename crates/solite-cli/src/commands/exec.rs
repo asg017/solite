@@ -10,10 +10,28 @@ pub(crate) fn exec(args: ExecuteArgs) -> Result<(), ()> {
     match exec_impl(args) {
         Ok(()) => Ok(()),
         Err(e) => {
-            eprintln!("Error: {e:?}");
+            // "SQL error" means the diagnostic was already reported with
+            // source context by report_error(); don't print it twice.
+            if e.to_string() != "SQL error" {
+                eprintln!("Error: {e:#}");
+            }
             Err(())
         }
     }
+}
+
+/// The cumulative number of rows inserted/updated/deleted on this connection.
+fn total_changes(runtime: &Runtime) -> Result<i64> {
+    let (_, stmt) = runtime
+        .connection
+        .prepare("select total_changes()")
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut stmt = stmt.ok_or_else(|| anyhow::anyhow!("failed to query total_changes()"))?;
+    let row = stmt
+        .next()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .ok_or_else(|| anyhow::anyhow!("failed to query total_changes()"))?;
+    Ok(row.first().map(|v| v.as_int64()).unwrap_or(0))
 }
 
 fn exec_impl(args: ExecuteArgs) -> Result<()> {
@@ -38,6 +56,8 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
         }
     }
 
+    let changes_before = total_changes(&runtime)?;
+
     // Execute every statement in the input, not just the first: keep
     // preparing the remaining SQL until it is exhausted (comment-only or
     // whitespace-only remainders prepare to `(_, None)` and stop the loop).
@@ -46,7 +66,26 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
     loop {
         match runtime.prepare_with_parameters(remaining) {
             Ok((rest, Some(stmt))) => {
-                stmt.execute().map_err(|e| anyhow::anyhow!("{e}"))?;
+                let mut stmt = stmt;
+                // Statements with result columns (RETURNING clauses, or bare
+                // SELECTs) have their rows rendered instead of swallowed.
+                let has_columns = stmt.column_names().map(|c| !c.is_empty()).unwrap_or(false);
+                if has_columns {
+                    if std::io::stdout().is_terminal() {
+                        let config = solite_table::TableConfig::terminal();
+                        solite_table::print_statement(&mut stmt, &config)
+                            .map_err(|e| anyhow::anyhow!("{e}"))?;
+                    } else {
+                        solite_core::exporter::write_output(
+                            &mut stmt,
+                            Box::new(std::io::stdout()),
+                            solite_core::exporter::ExportFormat::Json,
+                        )
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                    }
+                } else {
+                    stmt.execute().map_err(|e| anyhow::anyhow!("{e}"))?;
+                }
                 executed_any = true;
                 match rest {
                     Some(offset) => remaining = &remaining[offset..],
@@ -64,7 +103,13 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
         bail!("No SQL statement to execute");
     }
 
-    println!("✔︎");
+    let affected = total_changes(&runtime)? - changes_before;
+    let row_word = if affected == 1 { "row" } else { "rows" };
+    if std::io::stdout().is_terminal() {
+        println!("✔︎ {affected} {row_word} affected");
+    } else {
+        println!("{affected} {row_word} affected");
+    }
     Ok(())
 }
 
@@ -449,6 +494,18 @@ mod tests {
             "CREATE TABLE t(a); INSERT INTO nonexistent VALUES (1)",
         ]);
         assert!(exec_impl(args).is_err());
+    }
+
+    #[test]
+    fn total_changes_counts_writes() {
+        let rt = Runtime::new(None).unwrap();
+        assert_eq!(total_changes(&rt).unwrap(), 0);
+        rt.connection
+            .execute_script("CREATE TABLE t(a); INSERT INTO t VALUES (1),(2),(3)")
+            .unwrap();
+        assert_eq!(total_changes(&rt).unwrap(), 3);
+        rt.connection.execute_script("DELETE FROM t WHERE a = 1").unwrap();
+        assert_eq!(total_changes(&rt).unwrap(), 4);
     }
 
     #[test]

@@ -620,7 +620,8 @@ pub enum Commands {
 
     /// Execute a write SQL statement on a database
     ///
-    /// The write counterpart of `solite query`; prints a checkmark on success.
+    /// The write counterpart of `solite query`; reports the number of
+    /// affected rows on success and prints RETURNING rows.
     #[command(visible_alias = "exec", after_long_help = EXECUTE_AFTER_HELP)]
     Execute(ExecuteArgs),
 

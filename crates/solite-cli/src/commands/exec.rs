@@ -26,11 +26,14 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
 
     let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()))?;
 
-    // Set parameters
+    // Set parameters, inferring integer/real types from the value
     for chunk in args.parameters.chunks(2) {
         if chunk.len() == 2 {
             runtime
-                .define_parameter(chunk[0].clone(), chunk[1].clone())
+                .define_parameter_value(
+                    chunk[0].clone(),
+                    solite_core::infer_parameter_value(&chunk[1]),
+                )
                 .map_err(|e| anyhow::anyhow!("Failed to set parameter: {e}"))?;
         }
     }

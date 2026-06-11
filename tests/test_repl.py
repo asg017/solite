@@ -69,8 +69,9 @@ def test_param_set_binds_all_placeholder_prefixes(solite_cli):
             "select $x as dollar, :x as colon, @x as at;",
         ],
     )["stdout"]
-    # All three placeholder styles bind the bare key
-    row = [line for line in out.splitlines() if "│ 1" in line]
+    # All three placeholder styles bind the bare key. `.param set x 1` now
+    # binds INTEGER (typed inference), so the values render right-aligned.
+    row = [line for line in out.splitlines() if "1 │" in line]
     assert row, out
     assert row[0].count("1") == 3, out
 

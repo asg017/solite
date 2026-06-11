@@ -152,8 +152,10 @@ pub struct QueryArgs {
     #[arg(long, short = 'f', value_enum)]
     pub format: Option<QueryFormat>,
 
-    /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
-    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"])]
+    /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
+    /// Integer/decimal values bind as numbers; single-quote to force
+    /// text, e.g. -p id "'42'"
+    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"], allow_negative_numbers = true)]
     pub parameters: Vec<String>,
 
     /// Load SQLite extension(s) before running the query
@@ -196,8 +198,10 @@ pub struct ExecuteArgs {
     #[arg(long, short = 'f', value_enum, hide = true)]
     pub format: Option<QueryFormat>,
 
-    /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
-    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"])]
+    /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
+    /// Integer/decimal values bind as numbers; single-quote to force
+    /// text, e.g. -p id "'42'"
+    #[arg(long, short = 'p', num_args = 2, value_names = ["NAME", "VALUE"], allow_negative_numbers = true)]
     pub parameters: Vec<String>,
 }
 

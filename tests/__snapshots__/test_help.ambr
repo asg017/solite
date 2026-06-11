@@ -61,7 +61,7 @@
             Allow connecting to ssh:// database URLs and custom --transport commands
   
     -p, --parameters <NAME> <VALUE>
-            Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
+            Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`. Integer/decimal values bind as numbers; single-quote to force text, e.g. -p id "'42'"
   
     -h, --help
             Print help (see a summary with '-h')
@@ -135,7 +135,7 @@
             - clipboard: Copy results to the system clipboard
   
     -p, --parameters <NAME> <VALUE>
-            Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`
+            Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`. Integer/decimal values bind as numbers; single-quote to force text, e.g. -p id "'42'"
   
         --load-extension <PATH>
             Load SQLite extension(s) before running the query

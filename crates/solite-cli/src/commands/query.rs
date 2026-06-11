@@ -129,11 +129,14 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
         }
     }
 
-    // Set parameters
+    // Set parameters, inferring integer/real types from the value
     for chunk in args.parameters.chunks(2) {
         if chunk.len() == 2 {
             runtime
-                .define_parameter(chunk[0].clone(), chunk[1].clone())
+                .define_parameter_value(
+                    chunk[0].clone(),
+                    solite_core::infer_parameter_value(&chunk[1]),
+                )
                 .map_err(|e| QueryError::ParameterSet(e.to_string()))?;
         }
     }

@@ -163,7 +163,9 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Timer(enabled) => *timer = enabled,
         DotCommand::Parameter(param_cmd) => match param_cmd {
             solite_core::dot::ParameterCommand::Set { key, value } => {
-                match runtime.define_parameter(key.clone(), value) {
+                // Same integer/real inference as the CLI `-p` flag
+                let value = solite_core::infer_parameter_value(&value);
+                match runtime.define_parameter_value(key.clone(), value) {
                     Ok(()) => println!("✓ set '{key}' parameter"),
                     Err(e) => eprintln!("✗ failed to set parameter '{key}': {}", e),
                 }

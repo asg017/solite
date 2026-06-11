@@ -631,6 +631,33 @@ impl Runtime {
         Ok(())
     }
 
+    /// Define a parameter with an explicit SQLite value type (unlike
+    /// `define_parameter`, which always stores TEXT).
+    pub fn define_parameter_value(&mut self, key: String, value: OwnedValue) -> Result<(), String> {
+        self.init_sqlite_parameters_table();
+        let stmt = self
+            .connection
+            .prepare("INSERT OR REPLACE INTO temp.sqlite_parameters(key, value) VALUES (?1, ?2)")
+            .unwrap()
+            .1
+            .unwrap();
+        stmt.bind_text(1, key).map_err(|e| e.to_string())?;
+        match &value {
+            OwnedValue::Null => stmt.bind_null(2),
+            OwnedValue::Integer(v) => stmt.bind_int64(2, *v),
+            OwnedValue::Double(v) => stmt.bind_double(2, *v),
+            OwnedValue::Text(s) => {
+                let text = std::str::from_utf8(s)
+                    .map_err(|_| "parameter value is not valid UTF-8".to_string())?;
+                stmt.bind_text(2, text)
+            }
+            OwnedValue::Blob(b) => stmt.bind_blob(2, b),
+        }
+        .map_err(|e| e.to_string())?;
+        stmt.execute().unwrap();
+        Ok(())
+    }
+
     pub fn define_parameter_blob(&mut self, key: String, value: Vec<u8>) -> Result<(), String> {
         self.init_sqlite_parameters_table();
         let stmt = self
@@ -794,6 +821,33 @@ impl Runtime {
             }
         }
     }
+}
+
+/// Infer a SQLite value from a CLI-provided parameter string, in the spirit
+/// of sqlite3's `.parameter set` expression evaluation:
+///
+/// - values that parse as an `i64` bind as INTEGER (`42`)
+/// - values containing a digit that parse as a finite `f64` bind as
+///   REAL (`4.2`, `1e5`) — `inf`/`nan` stay TEXT
+/// - single-quoted values bind as TEXT with the quotes stripped and `''`
+///   unescaped (`'42'` binds the text "42")
+/// - everything else binds as TEXT
+pub fn infer_parameter_value(value: &str) -> OwnedValue {
+    if let Ok(v) = value.parse::<i64>() {
+        return OwnedValue::Integer(v);
+    }
+    if value.bytes().any(|b| b.is_ascii_digit()) {
+        if let Ok(v) = value.parse::<f64>() {
+            if v.is_finite() {
+                return OwnedValue::Double(v);
+            }
+        }
+    }
+    if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        let inner = &value[1..value.len() - 1];
+        return OwnedValue::Text(inner.replace("''", "'").into_bytes());
+    }
+    OwnedValue::Text(value.as_bytes().to_vec())
 }
 
 pub fn advance_through_ignorable(contents: &str) -> &str {
@@ -1468,6 +1522,69 @@ select not_exist();",
         rt.define_parameter("$x".to_string(), "exact".to_string()).unwrap();
         assert_eq!(select_one(&rt, "select $x;"), Some("exact".to_string()));
         assert_eq!(select_one(&rt, "select :x;"), Some("bare".to_string()));
+    }
+
+    #[test]
+    fn test_infer_parameter_value() {
+        // integers
+        assert!(matches!(infer_parameter_value("42"), OwnedValue::Integer(42)));
+        assert!(matches!(infer_parameter_value("-7"), OwnedValue::Integer(-7)));
+        assert!(matches!(infer_parameter_value("0"), OwnedValue::Integer(0)));
+        // reals
+        assert!(matches!(infer_parameter_value("4.2"), OwnedValue::Double(v) if v == 4.2));
+        assert!(matches!(infer_parameter_value("-0.5"), OwnedValue::Double(v) if v == -0.5));
+        assert!(matches!(infer_parameter_value("1e3"), OwnedValue::Double(v) if v == 1000.0));
+        // inf/nan stay text (no digits / non-finite)
+        assert!(matches!(infer_parameter_value("inf"), OwnedValue::Text(_)));
+        assert!(matches!(infer_parameter_value("nan"), OwnedValue::Text(_)));
+        // plain text
+        match infer_parameter_value("abc") {
+            OwnedValue::Text(s) => assert_eq!(s, b"abc"),
+            other => panic!("expected text, got {:?}", other),
+        }
+        // quoted text strips quotes and unescapes ''
+        match infer_parameter_value("'42'") {
+            OwnedValue::Text(s) => assert_eq!(s, b"42"),
+            other => panic!("expected text, got {:?}", other),
+        }
+        match infer_parameter_value("'it''s'") {
+            OwnedValue::Text(s) => assert_eq!(s, b"it's"),
+            other => panic!("expected text, got {:?}", other),
+        }
+        // edge cases stay text as-is
+        match infer_parameter_value("") {
+            OwnedValue::Text(s) => assert_eq!(s, b""),
+            other => panic!("expected text, got {:?}", other),
+        }
+        match infer_parameter_value("'") {
+            OwnedValue::Text(s) => assert_eq!(s, b"'"),
+            other => panic!("expected text, got {:?}", other),
+        }
+        match infer_parameter_value("42 ") {
+            OwnedValue::Text(s) => assert_eq!(s, b"42 "),
+            other => panic!("expected text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_define_parameter_value_binds_types() {
+        let mut rt = Runtime::new(None).unwrap();
+        rt.define_parameter_value("i".to_string(), OwnedValue::Integer(42)).unwrap();
+        rt.define_parameter_value("r".to_string(), OwnedValue::Double(4.2)).unwrap();
+        rt.define_parameter_value("t".to_string(), OwnedValue::Text(b"abc".to_vec())).unwrap();
+
+        let (_, stmt) = rt
+            .prepare_with_parameters("SELECT typeof(:i), typeof(:r), typeof(:t)")
+            .unwrap();
+        let mut stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        let types: Vec<String> = (0..3)
+            .map(|i| match OwnedValue::from_value_ref(row.get(i).unwrap()) {
+                OwnedValue::Text(s) => std::str::from_utf8(&s).unwrap().to_string(),
+                other => panic!("expected text, got {:?}", other),
+            })
+            .collect();
+        assert_eq!(types, vec!["integer", "real", "text"]);
     }
 
     #[test]

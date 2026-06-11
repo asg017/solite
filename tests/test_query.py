@@ -127,3 +127,27 @@ def test_query_parameters(solite_cli):
 
     assert add(1, 2).stdout == '[{":a + :b":3}]\n'
     assert add(1, 1).stdout == '[{":a + :b":2}]\n'
+
+
+def test_query_parameter_types(solite_cli):
+    """-p values bind with inferred types, like sqlite3's .parameter set."""
+
+    def typeof(value):
+        result = solite_cli(
+            ["q", "select typeof(:a) as t", "-p", "a", value, "-f", "value"]
+        )
+        assert result.success, result.stderr
+        return result.stdout
+
+    assert typeof("42") == "integer"
+    assert typeof("-7") == "integer"
+    assert typeof("4.2") == "real"
+    assert typeof("1e3") == "real"
+    assert typeof("abc") == "text"
+    assert typeof("'42'") == "text"  # quoting forces text
+    assert typeof("inf") == "text"
+    assert typeof("") == "text"
+
+    # quoted values strip the quotes
+    result = solite_cli(["q", "select :a as a", "-p", "a", "'42'", "-f", "value"])
+    assert result.stdout == "42"

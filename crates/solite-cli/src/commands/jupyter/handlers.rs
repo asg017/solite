@@ -143,7 +143,9 @@ async fn handle_dot_command_inner(
         }
         DotCommand::Parameter(param_cmd) => match param_cmd {
             solite_core::dot::ParameterCommand::Set { key, value } => {
-                match runtime.define_parameter(key.clone(), value) {
+                // Same integer/real inference as the CLI `-p` flag and the REPL
+                let value = solite_core::infer_parameter_value(&value);
+                match runtime.define_parameter_value(key.clone(), value) {
                     Ok(()) => {
                         sender
                             .send_plain(format!("Set parameter: {}", key), parent)

@@ -239,6 +239,32 @@ def test_editor_command_abort_executes_nothing(solite_cli, tmp_path):
     assert "editor command failed" in result.stderr
 
 
+def test_history_dedups_consecutive_entries(solite_cli, tmp_path):
+    solite_cli(
+        [],
+        communicate=[b"select 'dup-me';\nselect 'dup-me';\nselect 'dup-me';\n"],
+        kill=True,
+        env={"HOME": str(tmp_path)},
+    )
+    history = (tmp_path / ".solite_history").read_text()
+    assert history.count("dup-me") == 1
+
+
+def test_history_solite_history_override(solite_cli, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    history_file = tmp_path / "custom-history"
+    solite_cli(
+        [],
+        communicate=[b"select 'overridden';\n"],
+        kill=True,
+        env={"HOME": str(home), "SOLITE_HISTORY": str(history_file)},
+    )
+    assert "overridden" in history_file.read_text()
+    # The default location is not written when the override is set
+    assert not (home / ".solite_history").exists()
+
+
 def test_sigint_interrupts_query_without_exiting():
     """SIGINT (Ctrl-C) during a long-running query aborts the statement but
     keeps the REPL alive; a subsequent statement still executes."""

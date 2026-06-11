@@ -438,6 +438,10 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .edit_mode(EditMode::Emacs)
+        // Skip consecutive duplicate entries and cap in-memory history so
+        // the history file doesn't grow per repeated command.
+        .history_ignore_dups(true)?
+        .max_history_size(10_000)?
         .build();
     let mut rl = Editor::with_config(config)?;
     let helper = ReplHelper {
@@ -465,12 +469,23 @@ Enter \".help\" for usage hints.
     );
     println!("{prelude}");
 
-    let solite_history_path = std::env::var("HOME")
-        .map(|home| std::path::PathBuf::from(home).join(".solite_history"))
-        .unwrap_or_else(|_| std::path::PathBuf::from(".solite_history"));
+    // History lives at $SOLITE_HISTORY if set, else $HOME/.solite_history.
+    // With neither set, skip persistence entirely rather than silently
+    // littering the current directory.
+    let solite_history_path = std::env::var("SOLITE_HISTORY")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .map(|home| std::path::PathBuf::from(home).join(".solite_history"))
+                .ok()
+        });
 
-    let _ = std::fs::File::create_new(&solite_history_path);
-    let _ = rl.load_history(&solite_history_path);
+    if let Some(path) = &solite_history_path {
+        // Create iff missing; ignore errors (e.g. read-only home)
+        let _ = std::fs::File::create_new(path);
+        let _ = rl.load_history(path);
+    }
 
     // Ctrl-C while a statement is running raises SIGINT (rustyline is not
     // reading, so the terminal is in its normal mode). The handler just sets
@@ -517,9 +532,13 @@ Enter \".help\" for usage hints.
                 };
                 // Record what actually ran (for `\e`, the editor buffer's
                 // SQL rather than the literal `\e`) so up-arrow recalls it.
+                // Failed statements are intentionally kept: recalling and
+                // fixing a typo'd query is the main use of history.
                 if let Some(code) = executed {
                     let _ = rl.add_history_entry(code.as_str());
-                    let _ = rl.append_history(&solite_history_path);
+                    if let Some(path) = &solite_history_path {
+                        let _ = rl.append_history(path);
+                    }
                     last_input = code;
                 }
             }

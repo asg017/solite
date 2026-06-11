@@ -179,7 +179,7 @@
   Inside the REPL, `.help` lists all dot commands. Environment:
     EDITOR              used by the \e scratch-buffer command (default: vi)
     OPENROUTER_API_KEY  required by .ask / ?<question>
-    ~/.solite_history   readline history
+    SOLITE_HISTORY      readline history file (default: ~/.solite_history)
   
   Remote databases:
     solite repl --allow-ssh ssh://user@host/var/data/app.db

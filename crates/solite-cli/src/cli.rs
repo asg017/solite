@@ -204,7 +204,7 @@ const REPL_ENV_HELP: &str = "\
 Inside the REPL, `.help` lists all dot commands. Environment:
   EDITOR              used by the \\e scratch-buffer command (default: vi)
   OPENROUTER_API_KEY  required by .ask / ?<question>
-  ~/.solite_history   readline history";
+  SOLITE_HISTORY      readline history file (default: ~/.solite_history)";
 
 #[derive(Args, Debug)]
 pub struct ReplArgs {

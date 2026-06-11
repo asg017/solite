@@ -284,29 +284,28 @@ impl Statement {
             StatementInner::Local { statement } => unsafe {
                 let z = sqlite3_sql(*statement);
                 let s = CStr::from_ptr(z);
-                s.to_str().unwrap().to_string()
+                s.to_string_lossy().to_string()
             },
             StatementInner::Buffered { result, .. } => result.sql.clone(),
         }
     }
 
-    #[allow(clippy::result_unit_err)]
-    pub fn expanded_sql(&self) -> Result<String, ()> {
+    /// Returns `None` only if `sqlite3_expanded_sql` fails (out of memory).
+    pub fn expanded_sql(&self) -> Option<String> {
         match &self.inner {
             StatementInner::Local { statement } => {
                 let result = unsafe { sqlite3_expanded_sql(*statement) };
                 if result.is_null() {
-                    Err(())
+                    None
                 } else {
                     unsafe {
-                        let s = CStr::from_ptr(result);
-                        let expanded = s.to_str().unwrap().to_string();
+                        let expanded = CStr::from_ptr(result).to_string_lossy().into_owned();
                         sqlite3_free(result.cast());
-                        Ok(expanded)
+                        Some(expanded)
                     }
                 }
             }
-            StatementInner::Buffered { result, .. } => Ok(result.sql.clone()),
+            StatementInner::Buffered { result, .. } => Some(result.sql.clone()),
         }
     }
 
@@ -1074,10 +1073,12 @@ impl Connection {
         }
     }
 
-    #[allow(clippy::result_unit_err)]
-    pub fn execute(&self, sql: &str) -> Result<usize, ()> {
-        let stmt = self.prepare(sql).unwrap().1.unwrap();
-        Ok(stmt.execute().unwrap())
+    pub fn execute(&self, sql: &str) -> Result<usize, SQLiteError> {
+        match self.prepare(sql)? {
+            (_, Some(stmt)) => stmt.execute(),
+            // comment-only or empty SQL: nothing to execute
+            (_, None) => Ok(0),
+        }
     }
 
     pub fn execute_script(&self, sql: &str) -> Result<(), SQLiteError> {
@@ -1539,6 +1540,16 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_execute_propagates_errors() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(conn.execute("select * from nope").is_err()); // prepare error
+        assert_eq!(conn.execute("-- just a comment").unwrap(), 0); // no statement
+        conn.execute_script("CREATE TABLE t(a UNIQUE)").unwrap();
+        conn.execute("INSERT INTO t VALUES (1)").unwrap();
+        assert!(conn.execute("INSERT INTO t VALUES (1)").is_err()); // step error
+    }
+
     #[test]
     fn test_execute_row_count() {
         let conn = Connection::open_in_memory().unwrap();

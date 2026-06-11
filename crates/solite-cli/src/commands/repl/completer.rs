@@ -189,14 +189,31 @@ pub(crate) const DOT_COMMAND_NAMES: &[&str] = &[
 
 /// Find the start position for completion replacement.
 /// Returns the byte position of the start of the current word being typed.
+/// `.` is a word boundary so a qualified reference like `t.na` completes
+/// only the column part, preserving the `t.` qualifier.
 pub(crate) fn find_completion_start(line: &str, pos: usize) -> usize {
     let line_before_cursor = &line[..pos];
 
     // Find the last whitespace or operator before cursor
     line_before_cursor
-        .rfind(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ')')
+        .rfind(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ')' || c == '.')
         .map(|idx| idx + 1)
         .unwrap_or(0)
+}
+
+/// Case-insensitive prefix filter for completion items. The completion
+/// engine returns unfiltered candidate lists for most contexts (the LSP
+/// client filters on its side), so REPL/Jupyter frontends filter here.
+pub(crate) fn item_matches_prefix(item: &CompletionItem, prefix: &str) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    let prefix = prefix.to_lowercase();
+    item.label.to_lowercase().starts_with(&prefix)
+        || item
+            .insert_text
+            .as_deref()
+            .is_some_and(|text| text.to_lowercase().starts_with(&prefix))
 }
 
 pub(crate) struct ReplCompleter {
@@ -254,11 +271,16 @@ impl ReplCompleter {
         let prefix = &line[start..pos];
         let prefix_opt = if prefix.is_empty() { None } else { Some(prefix) };
 
-        // Get completions from the shared engine
+        // Get completions from the shared engine, keeping only candidates
+        // that match what has been typed so far.
         let items = get_completions(&context, Some(&schema), prefix_opt);
 
         // Convert to rustyline Pairs
-        let pairs: Vec<Pair> = items.into_iter().map(to_pair).collect();
+        let pairs: Vec<Pair> = items
+            .into_iter()
+            .filter(|item| item_matches_prefix(item, prefix))
+            .map(to_pair)
+            .collect();
 
         Ok((start, pairs))
     }
@@ -278,5 +300,51 @@ impl Completer for ReplCompleter {
         } else {
             self.complete_sql(line, pos, ctx)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_completion_start_plain_word() {
+        let line = "select na";
+        assert_eq!(find_completion_start(line, line.len()), "select ".len());
+    }
+
+    #[test]
+    fn test_find_completion_start_line_start() {
+        assert_eq!(find_completion_start("sel", 3), 0);
+    }
+
+    #[test]
+    fn test_find_completion_start_after_comma_and_paren() {
+        let line = "select a,b";
+        assert_eq!(find_completion_start(line, line.len()), "select a,".len());
+        let line = "select count(x";
+        assert_eq!(find_completion_start(line, line.len()), "select count(".len());
+    }
+
+    #[test]
+    fn test_find_completion_start_qualified_column() {
+        // `t.na` completes only `na`, preserving the `t.` qualifier
+        let line = "select t.na";
+        assert_eq!(find_completion_start(line, line.len()), "select t.".len());
+    }
+
+    #[test]
+    fn test_item_matches_prefix() {
+        let name = CompletionItem::new("name", CompletionKind::Column);
+        assert!(item_matches_prefix(&name, ""));
+        assert!(item_matches_prefix(&name, "na"));
+        assert!(item_matches_prefix(&name, "NA")); // case-insensitive
+        assert!(!item_matches_prefix(&name, "id"));
+
+        // insert_text is matched too (quoted identifiers)
+        let quoted = CompletionItem::new("my table", CompletionKind::Table)
+            .with_insert_text("\"my table\"");
+        assert!(item_matches_prefix(&quoted, "my"));
+        assert!(item_matches_prefix(&quoted, "\"my"));
     }
 }

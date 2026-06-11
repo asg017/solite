@@ -492,7 +492,7 @@ impl SoliteKernel {
 /// which owns the connection used for live schema lookups.
 fn completions(runtime: &Runtime, code: &str, cursor_pos: usize) -> CompleteReply {
     use crate::commands::repl::completer::{
-        find_completion_start, LiveSchemaSource, DOT_COMMAND_NAMES,
+        find_completion_start, item_matches_prefix, LiveSchemaSource, DOT_COMMAND_NAMES,
     };
     use solite_completion::{detect_context, get_completions};
 
@@ -530,8 +530,11 @@ fn completions(runtime: &Runtime, code: &str, cursor_pos: usize) -> CompleteRepl
     let prefix_opt = if prefix.is_empty() { None } else { Some(prefix) };
 
     let schema = LiveSchemaSource::new(runtime);
+    // The engine leaves most contexts unfiltered; apply the same typed-prefix
+    // filter the REPL uses.
     let matches: Vec<String> = get_completions(&context, Some(&schema), prefix_opt)
         .into_iter()
+        .filter(|item| item_matches_prefix(item, prefix))
         .map(|item| item.insert_text.unwrap_or(item.label))
         .collect();
 

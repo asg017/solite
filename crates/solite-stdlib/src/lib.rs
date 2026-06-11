@@ -5,144 +5,187 @@ use sqlite_http::sqlite3_http_init;
 use sqlite_loadable::ext::{sqlite3, sqlite3_api_routines};
 use sqlite_path::sqlite3_path_init;
 use sqlite_regex::sqlite3_regex_init;
+use sqlite_str::sqlite3_str_init;
 use sqlite_ulid::sqlite3_ulid_init;
 use sqlite_url::sqlite3_url_init;
-use sqlite_vec::sqlite3_vec_init;
-use std::ffi::{c_char, c_uint};
-//use sqlite_fastrand::sqlite3_fastrand_init;
-use sqlite_str::sqlite3_str_init;
+// sqlite-vec declares its own `sqlite3_vec_init` as a zero-arg fn; the true
+// extern is declared below. This import keeps the crate (and its compiled C
+// library) linked.
+use sqlite_vec as _;
 use sqlite_xsv::sqlite3_xsv_init;
+use std::ffi::{c_char, c_int, c_uint};
 
 include!(concat!(env!("OUT_DIR"), "/builtins.rs"));
 
+// C extension entry points, compiled by build.rs from vendor/sqlite/ext/misc/
+// (usleep.c is local, sqlite-vec.c comes from the sqlite-vec crate). All share
+// the standard SQLite extension signature:
+//   int sqlite3_X_init(sqlite3*, char**, const sqlite3_api_routines*)
 #[link(name = "base64")]
 extern "C" {
-    fn sqlite3_base64_init();
+    fn sqlite3_base64_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
-//#[link(name = "base85")]
-//extern "C" {
-//    fn sqlite3_base85_init();
-//}
 #[link(name = "decimal")]
 extern "C" {
-    fn sqlite3_decimal_init();
+    fn sqlite3_decimal_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "ieee754")]
 extern "C" {
-    fn sqlite3_ieee_init();
+    fn sqlite3_ieee_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "fileio")]
 extern "C" {
-    fn sqlite3_fileio_init();
+    fn sqlite3_fileio_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "uint")]
 extern "C" {
-    fn sqlite3_uint_init();
+    fn sqlite3_uint_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "series")]
 extern "C" {
-    fn sqlite3_series_init();
+    fn sqlite3_series_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "sha1")]
 extern "C" {
-    fn sqlite3_sha_init();
+    fn sqlite3_sha_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "shathree")]
 extern "C" {
-    fn sqlite3_shathree_init();
+    fn sqlite3_shathree_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
 #[link(name = "spellfix")]
 extern "C" {
-    fn sqlite3_spellfix_init();
-}
-
-/*
-#[link(name = "sqlar")]
-extern "C" {
-    fn sqlite3_sqlar_init();
-}
-#[link(name = "compress")]
-extern "C" {
-    fn sqlite3_compress_init();
-}
-*/
-#[link(name = "uuid")]
-extern "C" {
-    fn sqlite3_uuid_init();
-}
-
-/*
-#[link(name = "zipfile")]
-extern "C" {
-    fn sqlite3_zipfile_init();
-}
-*/
-
-#[link(name = "usleep")]
-extern "C" {
-    fn sqlite3_usleep_init();
-}
-
-#[link(name = "completion")]
-extern "C" {
-    fn sqlite3_completion_init();
-}
-
-unsafe fn init_arg0(
-    func: unsafe extern "C" fn(),
-    db: *mut sqlite3,
-    pz_err_msg: *mut *mut c_char,
-    p_api: *mut sqlite3_api_routines,
-) {
-    let x: unsafe extern "C" fn(
+    fn sqlite3_spellfix_init(
         db: *mut sqlite3,
         pz_err_msg: *mut *mut c_char,
-        p_api: *mut sqlite3_api_routines,
-    ) -> c_uint = std::mem::transmute(func as *const ());
-    x(db, pz_err_msg, p_api);
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
 }
+#[link(name = "uuid")]
+extern "C" {
+    fn sqlite3_uuid_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
+#[link(name = "usleep")]
+extern "C" {
+    fn sqlite3_usleep_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
+#[link(name = "completion")]
+extern "C" {
+    fn sqlite3_completion_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
+extern "C" {
+    // linked via the sqlite-vec crate's build script, not #[link]
+    fn sqlite3_vec_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
+
+// Intentionally not bundled: base85 (niche encoding), sqlar/compress/zipfile
+// (need zlib), fastrand (unmaintained). A future "safe mode" build could also
+// exclude the filesystem/network/sleep extensions (http, fileio, usleep).
+
+/// Returns early with the rc as `c_uint` if an init call failed. Accepts both
+/// the `c_int` C extensions and the `c_uint` sqlite-loadable entry points.
+macro_rules! try_init {
+    ($call:expr) => {
+        let rc = $call;
+        if rc != 0 {
+            return rc as c_uint;
+        }
+    };
+}
+
+/// Registers every bundled extension on `db`. Returns `SQLITE_OK` (0) on
+/// success, or the first non-OK result code from an extension's init function
+/// (remaining extensions are skipped).
+///
 /// # Safety
-/// lol
+///
+/// - `db` must be a valid, open `sqlite3` connection handle.
+/// - `pz_err_msg` may be null; if non-null it must be a valid place for an
+///   extension to store an error-message pointer (standard SQLite extension
+///   contract — the caller frees it with `sqlite3_free`).
+/// - `p_api` may be null: extensions here are compiled with `SQLITE_CORE`, so
+///   they call SQLite directly rather than through the api-routines table.
+/// - Calling more than once on the same connection is safe: functions and
+///   modules are re-registered, replacing the previous registration.
 #[no_mangle]
 pub unsafe extern "C" fn solite_stdlib_init(
     db: *mut sqlite3,
     pz_err_msg: *mut *mut c_char,
     p_api: *mut sqlite3_api_routines,
 ) -> c_uint {
-    sqlite3_ulid_init(db, pz_err_msg, p_api);
-    sqlite3_regex_init(db, pz_err_msg, p_api);
-    sqlite3_http_init(db, pz_err_msg, p_api);
-    sqlite3_path_init(db, pz_err_msg, p_api);
-    sqlite3_url_init(db, pz_err_msg, p_api);
-    sqlite3_xsv_init(db, pz_err_msg, p_api);
-    sqlite3_str_init(db, pz_err_msg, p_api);
+    try_init!(sqlite3_ulid_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_regex_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_http_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_path_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_url_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_xsv_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_str_init(db, pz_err_msg, p_api));
 
-    sqlite3_solite_stdlib_init(db, pz_err_msg, p_api);
+    try_init!(sqlite3_solite_stdlib_init(db, pz_err_msg, p_api));
 
-    init_arg0(sqlite3_base64_init, db, pz_err_msg, p_api);
-
-    //sqlite3_fastrand_init(db, pz_err_msg, p_api);
-    init_arg0(sqlite3_vec_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_completion_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_decimal_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_ieee_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_fileio_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_uint_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_series_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_sha_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_shathree_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_spellfix_init, db, pz_err_msg, p_api);
-    //init_arg0(sqlite3_sqlar_init, db, pz_err_msg, p_api);
-    //init_arg0(sqlite3_compress_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_uuid_init, db, pz_err_msg, p_api);
-    init_arg0(sqlite3_usleep_init, db, pz_err_msg, p_api);
-    //init_arg0(sqlite3_zipfile_init, db, pz_err_msg, p_api);
-    //init_arg0(sqlite3_base85_init, db, pz_err_msg, p_api);
+    try_init!(sqlite3_base64_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_vec_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_completion_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_decimal_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_ieee_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_fileio_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_uint_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_series_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_sha_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_shathree_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_spellfix_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_uuid_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_usleep_init(db, pz_err_msg, p_api));
     0
 }
-
-// TODO different modes
-// safe mode: HTTP, usleep, zipfile, fileio
 
 #[cfg(test)]
 mod tests {
@@ -167,8 +210,7 @@ mod tests {
             .query_row("select sqlite_version();", [], |r| r.get(0))
             .unwrap();
         assert!(
-            version.split('.').count() == 3
-                && version.split('.').all(|p| p.parse::<u32>().is_ok()),
+            version.split('.').count() == 3 && version.split('.').all(|p| p.parse::<u32>().is_ok()),
             "unexpected sqlite_version: {version}"
         );
 
@@ -192,5 +234,25 @@ mod tests {
         insta::assert_yaml_snapshot!(solite_only_functions);
 
         insta::assert_yaml_snapshot!(BUILTIN_FUNCTIONS);
+    }
+
+    #[test]
+    fn stdlib_double_init() {
+        let db = Connection::open_in_memory().unwrap();
+        unsafe {
+            assert_eq!(
+                solite_stdlib_init(db.handle(), std::ptr::null_mut(), std::ptr::null_mut()),
+                0
+            );
+            // re-init on the same connection re-registers everything and still succeeds
+            assert_eq!(
+                solite_stdlib_init(db.handle(), std::ptr::null_mut(), std::ptr::null_mut()),
+                0
+            );
+        }
+        let v: String = db
+            .query_row("select solite_stdlib_version();", [], |r| r.get(0))
+            .unwrap();
+        assert!(!v.is_empty());
     }
 }

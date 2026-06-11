@@ -27,10 +27,10 @@ cargo build
 Common breakage:
 
 - **Renamed extension init functions.** SQLite occasionally renames the `sqlite3_*_init` entry point for bundled extensions (e.g. 3.53 renamed `sqlite3_base_init` to `sqlite3_base64_init`). Fix in two places:
-  - `src/lib.rs` — the `extern "C"` declaration and the `init_arg0(...)` call.
+  - `src/lib.rs` — the `extern "C"` declaration and the `try_init!(...)` call in `solite_stdlib_init`.
   - `build.rs` — the shell.c symbol renames (`.define("sqlite3_old_init", Some("_shell_old_init"))`). Any extension we compile separately *and* that shell.c also calls needs a rename to avoid duplicate symbols. To check which extensions shell.c embeds, grep for `sqlite3_*_init` calls in `vendor/sqlite/src/shell.c.in`.
 
-- **Removed or added extensions.** If an extension in `vendor/sqlite/ext/misc/` is removed, delete it from the `extensions` vec in `build.rs` and remove the corresponding `extern "C"` block and `init_arg0` call in `src/lib.rs`. New extensions require the reverse.
+- **Removed or added extensions.** If an extension in `vendor/sqlite/ext/misc/` is removed, delete it from the `extensions` vec in `build.rs` and remove the corresponding `extern "C"` block and `try_init!` call in `src/lib.rs`. New extensions require the reverse (verify the init signature against the C source — it should be the standard `int sqlite3_X_init(sqlite3*, char**, const sqlite3_api_routines*)`).
 
 ## 4. Run the full test suite and update snapshots
 

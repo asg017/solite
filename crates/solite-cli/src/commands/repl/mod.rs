@@ -246,12 +246,22 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                 e
             ),
         },
-        DotCommand::Vegalite(_) => {
-            eprintln!("Vega-Lite command is not supported in the REPL yet.");
-        }
-        DotCommand::Bench(_) => {
-            eprintln!("Bench command is not supported in the REPL yet.");
-        }
+        DotCommand::Vegalite(mut cmd) => match cmd.execute() {
+            Ok(spec) => match crate::commands::write_vegalite_spec(&spec) {
+                Ok(path) => println!("✓ wrote Vega-Lite spec to {}", path.display()),
+                Err(e) => eprintln!("✗ failed to write Vega-Lite spec: {}", e),
+            },
+            Err(e) => eprintln!("✗ vegalite command failed: {}", e),
+        },
+        DotCommand::Bench(mut cmd) => match cmd.execute(None) {
+            Ok(result) => {
+                println!("{}", result.report());
+                if !result.report.is_empty() {
+                    println!("{}", result.report);
+                }
+            }
+            Err(e) => eprintln!("✗ bench failed: {}", e),
+        },
         #[cfg(feature = "ritestream")]
         DotCommand::Stream(stream_cmd) => match stream_cmd.execute(runtime) {
             Ok(Some(result)) => {

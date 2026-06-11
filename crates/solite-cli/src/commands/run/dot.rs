@@ -136,12 +136,26 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                 eprintln!("Error executing shell command: {}", e);
             }
         },
-        DotCommand::Vegalite(_) => {
-            eprintln!("Warning: .vegalite command not supported in run mode");
-        }
-        DotCommand::Bench(_) => {
-            eprintln!("Warning: .bench command not supported in run mode");
-        }
+        DotCommand::Vegalite(cmd) => match cmd.execute() {
+            Ok(spec) => match crate::commands::write_vegalite_spec(&spec) {
+                Ok(path) => println!(
+                    "{} wrote Vega-Lite spec to {}",
+                    colors::green("✓"),
+                    path.display()
+                ),
+                Err(e) => eprintln!("Error writing Vega-Lite spec: {}", e),
+            },
+            Err(e) => eprintln!("Error executing vegalite command: {}", e),
+        },
+        DotCommand::Bench(cmd) => match cmd.execute(None) {
+            Ok(result) => {
+                println!("{}", result.report());
+                if !result.report.is_empty() {
+                    println!("{}", result.report);
+                }
+            }
+            Err(e) => eprintln!("Error running benchmark: {}", e),
+        },
         #[cfg(feature = "ritestream")]
         DotCommand::Stream(stream_cmd) => match stream_cmd.execute(runtime) {
             Ok(Some(result)) => {

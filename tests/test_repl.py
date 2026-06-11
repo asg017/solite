@@ -128,6 +128,35 @@ def test_run_mode_param_subcommands(solite_cli, tmp_path):
     assert "cleared 0 parameter(s)" in result.stdout
 
 
+def test_repl_bench(solite_cli):
+    out = repl(solite_cli, [".timer off", ".bench", "select 1;"])
+    combined = out["stdout"] + out["stderr"]
+    assert "not supported" not in combined
+    assert "Benchmark" in out["stdout"]
+    assert "iterations" in out["stdout"]
+    assert "Range (min ... max)" in out["stdout"]
+
+
+def test_repl_vegalite_writes_spec(solite_cli):
+    out = repl(
+        solite_cli,
+        [".timer off", ".vegalite bar", "select 1 as x, 2 as y;"],
+    )
+    combined = out["stdout"] + out["stderr"]
+    assert "not supported" not in combined
+    assert "Vega-Lite spec" in out["stdout"]
+    # The printed path points at a real JSON spec
+    m = re.search(r"wrote Vega-Lite spec to (\S+\.vl\.json)", out["stdout"])
+    assert m, out["stdout"]
+    import json
+    from pathlib import Path
+
+    spec_path = Path(m.group(1))
+    spec = json.loads(spec_path.read_text())
+    assert "mark" in spec
+    spec_path.unlink()
+
+
 def test_repl_run_procedure_params_scoped(solite_cli, tmp_path):
     # `.run file proc --k=v` in the REPL must not leak parameters
     (tmp_path / "procs.sql").write_text(

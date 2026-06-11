@@ -20,3 +20,21 @@ pub mod vacuum;
 pub mod serve;
 #[cfg(feature = "ritestream")]
 pub mod stream;
+
+/// Write a Vega-Lite JSON spec to a unique temp file and return its path.
+/// Terminal frontends (REPL, run mode) can't render charts, so `.vegalite`
+/// writes the spec to disk and prints where it went.
+pub fn write_vegalite_spec(
+    spec: &serde_json::Map<String, serde_json::Value>,
+) -> std::io::Result<std::path::PathBuf> {
+    let file = tempfile::Builder::new()
+        .prefix("solite-vegalite-")
+        .suffix(".vl.json")
+        .tempfile()?;
+    std::fs::write(
+        file.path(),
+        serde_json::Value::Object(spec.clone()).to_string(),
+    )?;
+    let (_, path) = file.keep().map_err(|e| e.error)?;
+    Ok(path)
+}

@@ -31,6 +31,8 @@ pub enum QueryError {
     ExecutionFailed(String),
     /// SQL syntax or preparation error (already reported).
     SqlError,
+    /// More than one SQL statement was provided.
+    TrailingSql,
     /// Failed to read SQL file.
     FileReadError(PathBuf, std::io::Error),
 }
@@ -49,6 +51,11 @@ impl fmt::Display for QueryError {
             QueryError::ReplacementScanFailed => write!(f, "Replacement scan failed"),
             QueryError::ExecutionFailed(msg) => write!(f, "Execution failed: {}", msg),
             QueryError::SqlError => write!(f, "SQL error"),
+            QueryError::TrailingSql => write!(
+                f,
+                "Only a single SQL statement is allowed in `solite query`. \
+                 Use `solite run` for multi-statement scripts."
+            ),
             QueryError::FileReadError(path, err) => {
                 write!(f, "Failed to read SQL file '{}': {}", path.display(), err)
             }
@@ -225,7 +232,19 @@ fn prepare_statement(
 ) -> Result<solite_core::sqlite::Statement, QueryError> {
     loop {
         match runtime.prepare_with_parameters(sql) {
-            Ok((_, Some(stmt))) => return Ok(stmt),
+            Ok((rest, Some(stmt))) => {
+                // `query` can only print a single result set; reject input
+                // that contains a second statement instead of silently
+                // dropping it. Trailing comments/whitespace are fine: they
+                // re-prepare to `(_, None)`.
+                if let Some(offset) = rest {
+                    match runtime.prepare_with_parameters(&sql[offset..]) {
+                        Ok((_, None)) => {}
+                        _ => return Err(QueryError::TrailingSql),
+                    }
+                }
+                return Ok(stmt);
+            }
             Ok((_, None)) => return Err(QueryError::EmptyPrepare),
             Err(err) => {
                 // Try replacement scan
@@ -401,6 +420,27 @@ mod tests {
         let (db, sql) = parse_arguments(&args).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
         assert_eq!(sql, "query.sql");
+    }
+
+    #[test]
+    fn test_prepare_statement_rejects_trailing_sql() {
+        let mut runtime = Runtime::new(None).unwrap();
+        let result = prepare_statement(&mut runtime, "select 1; select 2");
+        assert!(matches!(result, Err(QueryError::TrailingSql)));
+    }
+
+    #[test]
+    fn test_prepare_statement_allows_trailing_comment() {
+        let mut runtime = Runtime::new(None).unwrap();
+        assert!(prepare_statement(&mut runtime, "select 1; -- done").is_ok());
+        assert!(prepare_statement(&mut runtime, "select 1;   ").is_ok());
+        assert!(prepare_statement(&mut runtime, "select 1").is_ok());
+    }
+
+    #[test]
+    fn test_trailing_sql_display_mentions_run() {
+        let msg = QueryError::TrailingSql.to_string();
+        assert!(msg.contains("solite run"));
     }
 
     #[test]

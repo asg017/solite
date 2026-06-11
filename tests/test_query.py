@@ -33,6 +33,17 @@ def test_query_fails(solite_cli, snapshot):
         name="column DNE"
     )
 
+    # multiple statements are rejected, pointing the user at `solite run`
+    multi = solite_cli(["q", "select 1; select 2"])
+    assert not multi.success
+    assert multi.stderr == snapshot(name="trailing SQL")
+
+
+def test_query_trailing_comment_ok(solite_cli):
+    result = solite_cli(["q", "select 1; -- comment"])
+    assert result.success
+    assert result.stdout == '[{"1":1}]\n'
+
 
 def test_query_value(solite_cli):
     assert solite_cli(["q", "select 1", "-f", "value"]).stdout == "1"

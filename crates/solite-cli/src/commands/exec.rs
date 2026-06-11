@@ -28,18 +28,30 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
         }
     }
 
-    match runtime.prepare_with_parameters(&sql) {
-        Ok((_, Some(stmt))) => {
-            stmt.execute()
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Execute every statement in the input, not just the first: keep
+    // preparing the remaining SQL until it is exhausted (comment-only or
+    // whitespace-only remainders prepare to `(_, None)` and stop the loop).
+    let mut remaining: &str = &sql;
+    let mut executed_any = false;
+    loop {
+        match runtime.prepare_with_parameters(remaining) {
+            Ok((rest, Some(stmt))) => {
+                stmt.execute().map_err(|e| anyhow::anyhow!("{e}"))?;
+                executed_any = true;
+                match rest {
+                    Some(offset) => remaining = &remaining[offset..],
+                    None => break,
+                }
+            }
+            Ok((_, None)) => break,
+            Err(err) => {
+                crate::errors::report_error("[input]", remaining, &err, None);
+                bail!("SQL error");
+            }
         }
-        Ok((_, None)) => {
-            bail!("No SQL statement to execute");
-        }
-        Err(err) => {
-            crate::errors::report_error("[input]", &sql, &err, None);
-            bail!("SQL error");
-        }
+    }
+    if !executed_any {
+        bail!("No SQL statement to execute");
     }
 
     println!("✔︎");
@@ -169,6 +181,54 @@ mod tests {
 
         let rt = Runtime::new(Some(db_str.to_string())).unwrap();
         assert_eq!(query_val(&rt, "SELECT a FROM t"), "42");
+    }
+
+    #[test]
+    fn exec_multi_statement() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
+        std::fs::write(&db_path, "").unwrap();
+
+        let args = make_args(vec![
+            db_str,
+            "CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1); INSERT INTO t VALUES (2)",
+        ]);
+        exec_impl(args).unwrap();
+
+        let rt = Runtime::new(Some(db_str.to_string())).unwrap();
+        assert_eq!(query_val(&rt, "SELECT count(*) FROM t"), "2");
+    }
+
+    #[test]
+    fn exec_multi_statement_trailing_comment() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
+        std::fs::write(&db_path, "").unwrap();
+
+        let args = make_args(vec![
+            db_str,
+            "CREATE TABLE t(a); INSERT INTO t VALUES (1); -- done",
+        ]);
+        exec_impl(args).unwrap();
+
+        let rt = Runtime::new(Some(db_str.to_string())).unwrap();
+        assert_eq!(query_val(&rt, "SELECT count(*) FROM t"), "1");
+    }
+
+    #[test]
+    fn exec_multi_statement_error_in_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db_str = db_path.to_str().unwrap();
+        std::fs::write(&db_path, "").unwrap();
+
+        let args = make_args(vec![
+            db_str,
+            "CREATE TABLE t(a); INSERT INTO nonexistent VALUES (1)",
+        ]);
+        assert!(exec_impl(args).is_err());
     }
 
     #[test]

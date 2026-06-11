@@ -32,6 +32,12 @@
   
   '''
 # ---
+# name: test_query_fails[trailing SQL]
+  '''
+  Error: Only a single SQL statement is allowed in `solite query`. Use `solite run` for multi-statement scripts.
+  
+  '''
+# ---
 # name: test_query_fails[write fails]
   '''
   Error: Execution failed: Only read-only statements are allowed in `solite query`. Use `solite exec` instead to modify the database.

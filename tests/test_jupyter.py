@@ -275,8 +275,138 @@ def test_interrupt(solite_kernel):
     assert "2" in output_msgs[0]["content"]["data"]["text/html"]
 
 
-# TODO
-# - test JSON, numbers, null, etc.
-# - error messages
-# - test is_complete() messages
-# - test banner?
+def html_of(msgs):
+    return msgs[0]["content"]["data"]["text/html"]
+
+
+def plain_of(msgs):
+    return escape_ansi_codes(msgs[0]["content"]["data"]["text/plain"])
+
+
+def test_value_rendering(solite_kernel, snapshot):
+    k = solite_kernel
+
+    for name, code in [
+        ("null", "select null"),
+        ("integer", "select 1"),
+        ("float", "select 1.5"),
+        ("blob", "select x'01ff'"),
+        ("multi-row", "select * from (values (1), (2), (3))"),
+        ("zero-rows", "select 1 as x where 0"),
+    ]:
+        reply, msgs = k.execute(code)
+        assert reply["content"]["status"] == "ok", code
+        assert plain_of(msgs) == snapshot(name=f"{name} plain")
+
+    # HTML special characters are escaped end-to-end
+    reply, msgs = k.execute("select 'a < b & c' as v")
+    assert "a &lt; b &amp; c" in html_of(msgs)
+    assert "a < b & c" in plain_of(msgs)
+
+
+def test_reply_semantics(solite_kernel):
+    k = solite_kernel
+
+    reply, _ = k.execute("select 1")
+    first_count = reply["content"]["execution_count"]
+    assert reply["content"]["status"] == "ok"
+
+    reply, _ = k.execute("select 2")
+    assert reply["content"]["execution_count"] == first_count + 1
+
+    # SQL errors carry the SQLError ename and error status
+    reply, msgs = k.execute("select substr();")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in msgs if m["msg_type"] == "error"]
+    assert errors[0]["content"]["ename"] == "SQLError"
+
+
+def test_simple_dot_commands(solite_kernel, tmp_path):
+    k = solite_kernel
+
+    reply, msgs = k.execute(".print hello world")
+    assert plain_of(msgs) == "hello world"
+
+    reply, msgs = k.execute(".help")
+    assert reply["content"]["status"] == "ok"
+    assert ".tables" in plain_of(msgs)
+
+    reply, msgs = k.execute(".env set SOLITE_TEST_VAR 1")
+    assert plain_of(msgs) == "Set environment variable: SOLITE_TEST_VAR"
+
+    reply, msgs = k.execute(f".open {tmp_path}/fresh.db")
+    assert reply["content"]["status"] == "ok"
+    assert plain_of(msgs).startswith("Opened database at ")
+
+
+def test_shell_dot_command(solite_kernel):
+    reply, msgs = solite_kernel.execute(".sh echo hi")
+    assert reply["content"]["status"] == "ok"
+    streams = [m for m in msgs if m["msg_type"] == "stream"]
+    assert any("hi" in m["content"]["text"] for m in streams)
+
+
+def test_schema_dot_commands(solite_kernel):
+    k = solite_kernel
+    k.execute("create table pets(name text, owner_id int);")
+
+    # cross-cell state: the table is visible to later cells
+    reply, msgs = k.execute(".tables")
+    assert "pets" in plain_of(msgs)
+
+    # .schema output is syntax-highlighted HTML, one span per token
+    reply, msgs = k.execute(".schema")
+    schema_html = html_of(msgs)
+    assert "CREATE" in schema_html and "pets" in schema_html
+
+    reply, msgs = k.execute(".graphviz")
+    assert "digraph" in plain_of(msgs)
+
+
+def test_export_dot_command(solite_kernel, tmp_path):
+    out = tmp_path / "out.csv"
+    reply, msgs = solite_kernel.execute(f".export {out}\nselect 1 as a;")
+    assert reply["content"]["status"] == "ok"
+    assert plain_of(msgs).startswith("Export successfully to ")
+    assert out.read_text().strip().splitlines() == ["a", "1"]
+
+
+def test_vegalite_dot_command(solite_kernel):
+    reply, msgs = solite_kernel.execute(".vegalite bar\nselect 'a' as x, 1 as y;")
+    assert reply["content"]["status"] == "ok"
+    datas = [
+        m["content"]["data"] for m in msgs if m["msg_type"] == "display_data"
+    ]
+    assert any(
+        any(mime.startswith("application/vnd.vegalite") for mime in data)
+        for data in datas
+    )
+
+
+def test_bench_dot_command(solite_kernel):
+    reply, msgs = solite_kernel.execute(".bench\nselect 1;")
+    assert reply["content"]["status"] == "ok"
+
+
+def test_procedures(solite_kernel):
+    k = solite_kernel
+
+    # defining a procedure produces no output but registers it
+    reply, msgs = k.execute("-- name: double :value\nselect 2 * 21 as answer;")
+    assert reply["content"]["status"] == "ok"
+
+    # .call in a later cell runs it
+    reply, msgs = k.execute(".call double")
+    assert reply["content"]["status"] == "ok"
+    assert ">42<" in html_of(msgs)
+
+
+def test_kernel_info(solite_kernel):
+    client = solite_kernel.client
+    client.kernel_info()
+    reply = client.get_shell_msg(timeout=5)
+    assert reply["header"]["msg_type"] == "kernel_info_reply"
+    content = reply["content"]
+    assert content["banner"] == "Solite Kernel"
+    assert content["language_info"]["name"] == "sqlite"
+    assert content["language_info"]["file_extension"] == ".sql"

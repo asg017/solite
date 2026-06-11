@@ -73,6 +73,61 @@ def test_complete(solite_kernel):
     assert content["status"] == "ok"
 
 
+def test_param_dot_commands(solite_kernel):
+    k = solite_kernel
+
+    reply, msgs = k.execute(".param set name alex")
+    assert reply["content"]["status"] == "ok"
+
+    # the parameter binds in later cells
+    reply, msgs = k.execute("select :name as n")
+    assert "alex" in msgs[0]["content"]["data"]["text/html"]
+
+    # .param list renders a table of key/value pairs
+    reply, msgs = k.execute(".param list")
+    assert reply["content"]["status"] == "ok"
+    html = msgs[0]["content"]["data"]["text/html"]
+    assert "name" in html and "alex" in html
+
+    # .param unset removes it
+    reply, msgs = k.execute(".param unset name")
+    assert reply["content"]["status"] == "ok"
+    reply, msgs = k.execute(".param list")
+    assert "alex" not in str(msgs[0]["content"]["data"])
+
+    # .param clear deletes everything
+    k.execute(".param set a 1")
+    k.execute(".param set b 2")
+    reply, msgs = k.execute(".param clear")
+    assert "Cleared 2 parameter(s)" in msgs[0]["content"]["data"]["text/plain"]
+
+
+def test_timer_dot_command(solite_kernel):
+    k = solite_kernel
+
+    def plain_outputs(msgs):
+        return [
+            m["content"]["data"].get("text/plain", "")
+            for m in msgs
+            if m["msg_type"] == "display_data"
+        ]
+
+    reply, msgs = k.execute(".timer on")
+    assert reply["content"]["status"] == "ok"
+    reply, msgs = k.execute("select 1")
+    assert any(p.startswith("Took ") for p in plain_outputs(msgs))
+
+    reply, msgs = k.execute(".timer off")
+    reply, msgs = k.execute("select 1")
+    assert not any(p.startswith("Took ") for p in plain_outputs(msgs))
+
+
+def test_clear_dot_command(solite_kernel):
+    reply, msgs = solite_kernel.execute(".clear")
+    assert reply["content"]["status"] == "ok"
+    assert any(m["msg_type"] == "clear_output" for m in msgs)
+
+
 def test_dot_command_errors_fail_cell(solite_kernel):
     # failing .open: parent directory doesn't exist
     reply, output_msgs = solite_kernel.execute(".open /nonexistent/dir/db.db")

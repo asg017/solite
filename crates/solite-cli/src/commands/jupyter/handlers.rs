@@ -25,6 +25,7 @@ pub fn handle_dot_command<'a>(
     sender: &'a mpsc::Sender<ExecutionMessage>,
     parent: &'a JupyterMessage,
     interrupt_handle: &'a Mutex<InterruptHandle>,
+    timer: &'a mut bool,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
     Box::pin(handle_dot_command_inner(
         cmd,
@@ -32,6 +33,7 @@ pub fn handle_dot_command<'a>(
         sender,
         parent,
         interrupt_handle,
+        timer,
     ))
 }
 
@@ -41,6 +43,7 @@ async fn handle_dot_command_inner(
     sender: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
     interrupt_handle: &Mutex<InterruptHandle>,
+    timer: &mut bool,
 ) -> Result<()> {
     match cmd {
         DotCommand::Ask(_) => {
@@ -102,9 +105,7 @@ async fn handle_dot_command_inner(
                 .await?;
         }
         DotCommand::Clear(_) => {
-            sender
-                .send_plain("Clear command not yet implemented in Jupyter", parent)
-                .await?;
+            sender.send_clear(false, parent).await?;
         }
         DotCommand::Print(print_cmd) => {
             sender.send_plain(print_cmd.message, parent).await?;
@@ -131,39 +132,83 @@ async fn handle_dot_command_inner(
                     .send_error("ShellError", &format!("{}", e)).await?;
             }
         },
-        DotCommand::Timer(_) => {
+        DotCommand::Timer(enabled) => {
+            *timer = enabled;
             sender
-                .send_plain("Timer command not yet implemented", parent)
+                .send_plain(
+                    if enabled { "Timer on" } else { "Timer off" },
+                    parent,
+                )
                 .await?;
         }
-        DotCommand::Parameter(param_cmd) => {
-            let msg = match param_cmd {
-                solite_core::dot::ParameterCommand::Set { key, value } => {
-                    match runtime.define_parameter(key.clone(), value) {
-                        Ok(()) => format!("Set parameter: {}", key),
-                        Err(e) => {
-                            sender
-                                .send_error(
-                                    "ParameterError",
-                                    &format!("Failed to set parameter {}: {}", key, e),
-                                )
-                                .await?;
-                            return Ok(());
-                        }
+        DotCommand::Parameter(param_cmd) => match param_cmd {
+            solite_core::dot::ParameterCommand::Set { key, value } => {
+                match runtime.define_parameter(key.clone(), value) {
+                    Ok(()) => {
+                        sender
+                            .send_plain(format!("Set parameter: {}", key), parent)
+                            .await?;
+                    }
+                    Err(e) => {
+                        sender
+                            .send_error(
+                                "ParameterError",
+                                &format!("Failed to set parameter {}: {}", key, e),
+                            )
+                            .await?;
                     }
                 }
-                solite_core::dot::ParameterCommand::Unset(key) => {
-                    format!("Unset parameter not yet implemented: {}", key)
+            }
+            solite_core::dot::ParameterCommand::Unset(key) => {
+                runtime.delete_parameter(&key);
+                sender
+                    .send_plain(format!("Unset parameter: {}", key), parent)
+                    .await?;
+            }
+            solite_core::dot::ParameterCommand::List => {
+                // The temp.sqlite_parameters table only exists once a
+                // parameter has been set; treat a missing table as empty.
+                let stmt = runtime
+                    .connection
+                    .prepare("SELECT key, value FROM temp.sqlite_parameters ORDER BY key")
+                    .ok()
+                    .and_then(|(_, stmt)| stmt);
+                match stmt {
+                    Some(stmt) => {
+                        send_statement_result(stmt, sender, parent, false).await?;
+                    }
+                    None => {
+                        sender.send_plain("No parameters set", parent).await?;
+                    }
                 }
-                solite_core::dot::ParameterCommand::List => {
-                    "List parameters not yet implemented".to_string()
+            }
+            solite_core::dot::ParameterCommand::Clear => {
+                // Statement::execute() counts steps, not changed rows, so
+                // count before deleting.
+                let cleared = runtime
+                    .connection
+                    .prepare("SELECT count(*) FROM temp.sqlite_parameters")
+                    .ok()
+                    .and_then(|(_, stmt)| stmt)
+                    .and_then(|stmt| {
+                        stmt.next()
+                            .ok()
+                            .flatten()
+                            .and_then(|row| row.first().map(|v| v.as_int64()))
+                    })
+                    .unwrap_or(0);
+                if cleared > 0 {
+                    if let Ok((_, Some(stmt))) =
+                        runtime.connection.prepare("DELETE FROM temp.sqlite_parameters")
+                    {
+                        stmt.execute().ok();
+                    }
                 }
-                solite_core::dot::ParameterCommand::Clear => {
-                    "Clear parameters not yet implemented".to_string()
-                }
-            };
-            sender.send_plain(msg, parent).await?;
-        }
+                sender
+                    .send_plain(format!("Cleared {} parameter(s)", cleared), parent)
+                    .await?;
+            }
+        },
         DotCommand::Env(env_cmd) => {
             let action = env_cmd.execute();
             let msg = match action {
@@ -323,7 +368,7 @@ async fn handle_dot_command_inner(
                 };
                 match runtime.prepare_with_parameters(&proc.sql) {
                     Ok((_, Some(stmt))) => {
-                        send_statement_result(stmt, sender, parent).await?;
+                        send_statement_result(stmt, sender, parent, *timer).await?;
                     }
                     Ok((_, None)) => {
                         sender
@@ -346,7 +391,7 @@ async fn handle_dot_command_inner(
                 };
                 // run_file_begin swapped in a stack containing only the run
                 // file's block, so the shared stepping loop drains exactly it.
-                let result = handle_code(runtime, sender, parent, interrupt_handle).await;
+                let result = handle_code(runtime, sender, parent, interrupt_handle, timer).await;
                 runtime.run_file_end(saved);
                 result?;
             }

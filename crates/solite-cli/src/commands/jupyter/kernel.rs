@@ -100,6 +100,8 @@ impl SoliteKernel {
         let runtime_interrupt = Arc::clone(&interrupt_handle);
         tokio::spawn(async move {
             let mut rt = runtime;
+            // Per-session `.timer on/off` state, like the REPL's.
+            let mut timer = false;
             while let Some(request) = rx.recv().await {
                 let (code, parent, response) = match request {
                     RuntimeRequest::Complete {
@@ -142,7 +144,8 @@ impl SoliteKernel {
                     code.as_str(),
                     solite_core::BlockSource::JupyterCell,
                 );
-                if let Err(e) = handle_code(&mut rt, &response, &parent, &runtime_interrupt).await
+                if let Err(e) =
+                    handle_code(&mut rt, &response, &parent, &runtime_interrupt, &mut timer).await
                 {
                     eprintln!("Error handling code: {}", e);
                 }
@@ -605,9 +608,12 @@ pub(super) async fn send_statement_result(
     stmt: solite_core::sqlite::Statement,
     response: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
+    timer: bool,
 ) -> Result<bool> {
+    let started_at = std::time::Instant::now();
     match render_statement(&stmt) {
         Ok(tbl) => {
+            let elapsed = started_at.elapsed();
             response
                 .send_display(
                     DisplayData::new(
@@ -616,6 +622,17 @@ pub(super) async fn send_statement_result(
                     parent,
                 )
                 .await?;
+            if timer {
+                response
+                    .send_plain(
+                        format!(
+                            "Took {}",
+                            crate::commands::run::format_duration(elapsed)
+                        ),
+                        parent,
+                    )
+                    .await?;
+            }
             Ok(true)
         }
         Err(err) => {
@@ -634,6 +651,7 @@ pub(super) async fn handle_code(
     response: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
     interrupt_handle: &Mutex<InterruptHandle>,
+    timer: &mut bool,
 ) -> Result<()> {
     loop {
         // Re-fetch before every step: a previous step (e.g. `.open`) may have
@@ -642,12 +660,13 @@ pub(super) async fn handle_code(
         match runtime.next_stepx() {
             Some(Ok(step)) => match step.result {
                 StepResult::SqlStatement { stmt, .. } => {
-                    if !send_statement_result(stmt, response, parent).await? {
+                    if !send_statement_result(stmt, response, parent, *timer).await? {
                         return Ok(());
                     }
                 }
                 StepResult::DotCommand(cmd) => {
-                    handle_dot_command(cmd, runtime, response, parent, interrupt_handle).await?;
+                    handle_dot_command(cmd, runtime, response, parent, interrupt_handle, timer)
+                        .await?;
                 }
                 StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
             },

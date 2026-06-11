@@ -153,13 +153,6 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
         ));
     }
 
-    // Set up output
-    let output: Box<dyn Write> = match &args.output {
-        Some(output) => solite_core::exporter::output_from_path(output)
-            .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?,
-        None => Box::new(stdout()),
-    };
-
     // If stdout is a TTY and no explicit format/output specified, use pretty table
     let use_table = args.format.is_none() && args.output.is_none() && stdout().is_terminal();
 
@@ -172,11 +165,33 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
         // Determine output format
         let format = determine_format(&args);
 
+        // The clipboard is its own destination; combining it with `-o`
+        // would silently produce an empty file
+        if matches!(format, ExportFormat::Clipboard) && args.output.is_some() {
+            return Err(QueryError::ExecutionFailed(
+                "-f clipboard cannot be combined with -o: the clipboard is the output \
+                 destination"
+                    .to_string(),
+            ));
+        }
+
+        // Set up output (created only once the format is known to use it)
+        let output: Box<dyn Write> = match &args.output {
+            Some(output) => solite_core::exporter::output_from_path(output)
+                .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?,
+            None => Box::new(stdout()),
+        };
+
         // Write output
         let mut stmt = stmt;
         let blob_limit = args.blob_limit.unwrap_or_default();
-        solite_core::exporter::write_output(&mut stmt, output, format, blob_limit)
-            .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
+        let clipboard_rows =
+            solite_core::exporter::write_output(&mut stmt, output, format, blob_limit)
+                .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
+        if let Some(num_rows) = clipboard_rows {
+            let row_word = if num_rows == 1 { "row" } else { "rows" };
+            println!("\u{2713} Wrote {} {} to clipboard", num_rows, row_word);
+        }
     }
 
     Ok(())

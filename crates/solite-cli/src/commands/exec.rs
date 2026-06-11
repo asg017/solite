@@ -76,10 +76,12 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
                         solite_table::print_statement(&mut stmt, &config)
                             .map_err(|e| anyhow::anyhow!("{e}"))?;
                     } else {
-                        solite_core::exporter::write_output(
+                        // returns Some(row_count) only for clipboard exports
+                        let _ = solite_core::exporter::write_output(
                             &mut stmt,
                             Box::new(std::io::stdout()),
                             solite_core::exporter::ExportFormat::Json,
+                            solite_core::exporter::BlobLimit::Default,
                         )
                         .map_err(|e| anyhow::anyhow!("{e}"))?;
                     }

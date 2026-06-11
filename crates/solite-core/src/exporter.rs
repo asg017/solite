@@ -29,7 +29,7 @@ use std::{
     io::{BufWriter, Write},
 };
 
-use crate::sqlite::{Statement, ValueRefX, ValueRefXValue};
+use crate::sqlite::{OwnedValue, Statement, ValueRefX, ValueRefXValue};
 
 /// Errors that can occur during export operations.
 #[derive(Debug)]
@@ -460,7 +460,9 @@ fn write_ndjson<W: Write>(
 }
 
 /// Write statement results to clipboard as HTML table.
-fn write_clipboard(stmt: &mut Statement, blob_limit: Option<u64>) -> Result<(), ExportError> {
+/// Returns the number of rows written; the caller is responsible for any
+/// user-facing confirmation message.
+fn write_clipboard(stmt: &mut Statement, blob_limit: Option<u64>) -> Result<usize, ExportError> {
     let mut html = String::from("<table><thead><tr>");
     let mut num_rows = 0;
 
@@ -502,13 +504,13 @@ fn write_clipboard(stmt: &mut Statement, blob_limit: Option<u64>) -> Result<(), 
         .set_html(&html, Some(&alt_text))
         .map_err(|e| ExportError::Clipboard(e.to_string()))?;
 
-    let row_word = if num_rows == 1 { "row" } else { "rows" };
-    println!("✓ Wrote {} {} to clipboard", num_rows, row_word);
-
-    Ok(())
+    Ok(num_rows)
 }
 
 /// Write a single value from statement results.
+///
+/// The single-row requirement is checked *before* anything is written, so
+/// a failing query never leaves a partial value on stdout or in `-o` files.
 fn write_value<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), ExportError> {
     // Get first row
     let row = match stmt.next() {
@@ -517,28 +519,37 @@ fn write_value<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), Expo
         Err(e) => return Err(ExportError::Sql(e.to_string())),
     };
 
-    // Get first value
+    // Copy the first value out of the row: stepping to the next row
+    // invalidates the borrowed ValueRefX values.
     let value = row.first().ok_or(ExportError::ColumnIndexOutOfBounds {
         index: 0,
         count: row.len(),
     })?;
+    let value = OwnedValue::from_value_ref(value);
+
+    // Ensure no more rows before writing anything
+    match stmt.next() {
+        Ok(None) => {}
+        Ok(Some(_)) => return Err(ExportError::TooManyRows),
+        Err(e) => {
+            return Err(ExportError::Sql(format!(
+                "Error stepping through next row: {}",
+                e
+            )))
+        }
+    }
 
     // Write value
-    match &value.value {
-        ValueRefXValue::Null => {}
-        ValueRefXValue::Int(v) => write!(output, "{}", v)?,
-        ValueRefXValue::Double(v) => write!(output, "{}", v)?,
-        ValueRefXValue::Text(bytes) | ValueRefXValue::Blob(bytes) => {
+    match &value {
+        OwnedValue::Null => {}
+        OwnedValue::Integer(v) => write!(output, "{}", v)?,
+        OwnedValue::Double(v) => write!(output, "{}", v)?,
+        OwnedValue::Text(bytes) | OwnedValue::Blob(bytes) => {
             output.write_all(bytes)?;
         }
     }
 
-    // Ensure no more rows
-    match stmt.next() {
-        Ok(None) => Ok(()),
-        Ok(Some(_)) => Err(ExportError::TooManyRows),
-        Err(e) => Err(ExportError::Sql(format!("Error stepping through next row: {}", e))),
-    }
+    Ok(())
 }
 
 /// Escape HTML special characters.
@@ -578,20 +589,23 @@ pub fn output_from_path(path: &Path) -> Result<Box<dyn Write>, ExportError> {
 ///
 /// `blob_limit` bounds the raw size of any BLOB cell (see [`BlobLimit`]);
 /// the `Value` format is never limited.
+///
+/// Returns `Some(row_count)` for clipboard exports (which ignore `output`
+/// and need a caller-printed confirmation), `None` for stream formats.
 pub fn write_output(
     stmt: &mut Statement,
     output: Box<dyn Write>,
     format: ExportFormat,
     blob_limit: BlobLimit,
-) -> Result<(), ExportError> {
+) -> Result<Option<usize>, ExportError> {
     let limit = blob_limit.resolve(&format);
     match format {
-        ExportFormat::Csv => write_csv(stmt, output, limit),
-        ExportFormat::Tsv => write_tsv(stmt, output, limit),
-        ExportFormat::Json => write_json(stmt, output, limit),
-        ExportFormat::Ndjson => write_ndjson(stmt, output, limit),
-        ExportFormat::Clipboard => write_clipboard(stmt, limit),
-        ExportFormat::Value => write_value(stmt, output),
+        ExportFormat::Csv => write_csv(stmt, output, limit).map(|()| None),
+        ExportFormat::Tsv => write_tsv(stmt, output, limit).map(|()| None),
+        ExportFormat::Json => write_json(stmt, output, limit).map(|()| None),
+        ExportFormat::Ndjson => write_ndjson(stmt, output, limit).map(|()| None),
+        ExportFormat::Clipboard => write_clipboard(stmt, limit).map(Some),
+        ExportFormat::Value => write_value(stmt, output).map(|()| None),
     }
 }
 
@@ -943,6 +957,34 @@ mod tests {
         let mut buf = Vec::new();
         write_value(&mut stmt, &mut buf).unwrap();
         assert_eq!(buf, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn test_write_value_single_row() {
+        let mut stmt = first_value_of("select 42");
+        let mut buf = Vec::new();
+        write_value(&mut stmt, &mut buf).unwrap();
+        assert_eq!(buf, b"42");
+    }
+
+    #[test]
+    fn test_write_value_multi_row_writes_nothing() {
+        // The error must surface *before* any partial value lands in the
+        // output (stdout or a half-written -o file)
+        let mut stmt = first_value_of("select column1 from (values (1), (2))");
+        let mut buf = Vec::new();
+        let result = write_value(&mut stmt, &mut buf);
+        assert!(matches!(result, Err(ExportError::TooManyRows)));
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_write_value_no_rows_writes_nothing() {
+        let mut stmt = first_value_of("select 1 limit 0");
+        let mut buf = Vec::new();
+        let result = write_value(&mut stmt, &mut buf);
+        assert!(matches!(result, Err(ExportError::NoRows)));
+        assert!(buf.is_empty());
     }
 
     #[test]

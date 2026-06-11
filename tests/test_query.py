@@ -112,16 +112,36 @@ def test_query_value(solite_cli):
         == "\x00\x00\x00\x00\x00"
     )
 
+    no_rows = solite_cli(["q", "select 1 limit 0", "-f", "value"])
+    assert no_rows.stderr == "Error: Execution failed: No rows returned in query\n"
+    assert no_rows.stdout == ""
+    assert not no_rows.success
+
+    multi = solite_cli(["q", "select column1 from (values (1), (2));", "-f", "value"])
     assert (
-        solite_cli(["q", "select 1 limit 0", "-f", "value"]).stderr
-        == "Error: Execution failed: No rows returned in query\n"
-    )
-    assert (
-        solite_cli(
-            ["q", "select column1 from (values (1), (2));", "-f", "value"]
-        ).stderr
+        multi.stderr
         == "Error: Execution failed: More than 1 row returned, expected a single row. Try a `LIMIT 1`\n"
     )
+    # nothing is written before the error is discovered
+    assert multi.stdout == ""
+    assert not multi.success
+
+
+def test_query_value_multi_row_output_file_empty(solite_cli, tmp_path):
+    out = tmp_path / "out.txt"
+    result = solite_cli(
+        ["q", "select column1 from (values (1), (2))", "-f", "value", "-o", str(out)]
+    )
+    assert not result.success
+    assert out.read_text() == ""
+
+
+def test_query_clipboard_with_output_file_errors(solite_cli, tmp_path):
+    out = tmp_path / "clip_out.json"
+    result = solite_cli(["q", "select 1", "-f", "clipboard", "-o", str(out)])
+    assert not result.success
+    assert "clipboard" in result.stderr
+    assert not out.exists()
 
 
 def test_query_parameters(solite_cli):

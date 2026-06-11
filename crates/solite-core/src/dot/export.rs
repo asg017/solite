@@ -111,8 +111,10 @@ impl ExportCommand {
 
         let output = output_from_path(&self.target)
             .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
-        // .export has no override flag (yet); it uses the file default limit
-        write_output(&mut self.statement, output, format, BlobLimit::Default)
+        // .export has no override flag (yet); it uses the file default limit.
+        // row-count is only returned for clipboard exports, which
+        // format_from_path never produces
+        let _ = write_output(&mut self.statement, output, format, BlobLimit::Default)
             .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
 
         Ok(())

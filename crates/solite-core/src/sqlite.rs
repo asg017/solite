@@ -53,6 +53,26 @@ impl SQLiteError {
             offset,
         }
     }
+
+    /// An error synthesized by this crate rather than reported by a SQLite API
+    /// call (e.g. input that cannot cross the FFI boundary).
+    pub(crate) fn custom(result_code: i32, message: String) -> Self {
+        let code_description = unsafe {
+            CStr::from_ptr(sqlite3_errstr(result_code))
+                .to_string_lossy()
+                .to_string()
+        };
+        Self {
+            result_code,
+            code_description,
+            message,
+            offset: None,
+        }
+    }
+
+    pub(crate) fn interior_nul(what: &str) -> Self {
+        Self::custom(SQLITE_MISUSE, format!("{what} contains an interior NUL byte"))
+    }
 }
 
 impl fmt::Display for SQLiteError {
@@ -67,13 +87,22 @@ impl fmt::Display for SQLiteError {
 
 impl std::error::Error for SQLiteError {}
 
-// Use the SQLite printf '%Q' conversion to escape a string as a SQL string literal, surrounded by single quotes.
+/// Use the SQLite printf '%Q' conversion to escape a string as a SQL string
+/// literal, surrounded by single quotes. Lossy: interior NUL bytes are replaced
+/// with U+FFFD, since the value must cross a NUL-terminated FFI boundary.
 pub fn escape_string(value: &str) -> String {
-    let s = CString::new(value).unwrap();
+    let s = match CString::new(value) {
+        Ok(s) => s,
+        Err(_) => CString::new(value.replace('\0', "\u{FFFD}")).unwrap(),
+    };
     unsafe {
         let x = sqlite3_str_new(ptr::null_mut());
         sqlite3_str_appendf(x, c"%Q".as_ptr(), s.as_ptr());
         let s = sqlite3_str_finish(x);
+        // NULL on out-of-memory
+        if s.is_null() {
+            return "''".to_string();
+        }
         let cpy = CStr::from_ptr(s).to_string_lossy().into_owned();
         sqlite3_free(s.cast());
         cpy
@@ -508,51 +537,85 @@ impl Statement {
         }
     }
 
-    pub fn bind_int64(&self, i: i32, value: i64) {
+    pub fn bind_int64(&self, i: i32, value: i64) -> Result<(), SQLiteError> {
+        // Binding on a Buffered statement is a no-op for every bind_* method:
+        // remote statements already have their parameters bound on the server.
         if let StatementInner::Local { statement } = &self.inner {
-            unsafe { sqlite3_bind_int64(*statement, i, value) };
-        }
-        // Buffered statements have params already bound on the server
-    }
-    pub fn bind_double(&self, i: i32, value: f64) {
-        if let StatementInner::Local { statement } = &self.inner {
-            unsafe { sqlite3_bind_double(*statement, i, value) };
-        }
-    }
-    pub fn bind_null(&self, i: i32) {
-        if let StatementInner::Local { statement } = &self.inner {
-            unsafe { sqlite3_bind_null(*statement, i) };
+            let rc = unsafe { sqlite3_bind_int64(*statement, i, value) };
+            Self::bind_result(*statement, rc)
+        } else {
+            Ok(())
         }
     }
-    pub fn bind_blob(&self, i: i32, value: &[u8]) {
+    pub fn bind_double(&self, i: i32, value: f64) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
-            unsafe {
-                sqlite3_bind_blob(
+            let rc = unsafe { sqlite3_bind_double(*statement, i, value) };
+            Self::bind_result(*statement, rc)
+        } else {
+            Ok(())
+        }
+    }
+    pub fn bind_null(&self, i: i32) -> Result<(), SQLiteError> {
+        if let StatementInner::Local { statement } = &self.inner {
+            let rc = unsafe { sqlite3_bind_null(*statement, i) };
+            Self::bind_result(*statement, rc)
+        } else {
+            Ok(())
+        }
+    }
+    pub fn bind_blob(&self, i: i32, value: &[u8]) -> Result<(), SQLiteError> {
+        if let StatementInner::Local { statement } = &self.inner {
+            let rc = unsafe {
+                sqlite3_bind_blob64(
                     *statement,
                     i,
                     value.as_ptr().cast(),
-                    value.len().try_into().unwrap(),
+                    value.len() as u64,
                     SQLITE_TRANSIENT(),
                 )
             };
+            Self::bind_result(*statement, rc)
+        } else {
+            Ok(())
         }
     }
 
     /// # Safety
     /// `p` must be a valid pointer for the given pointer type `name`.
-    pub unsafe fn bind_pointer(&self, i: i32, p: *mut c_void, name: &CStr) {
+    pub unsafe fn bind_pointer(&self, i: i32, p: *mut c_void, name: &CStr) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
-            unsafe { sqlite3_bind_pointer(*statement, i, p, name.as_ptr(), None) };
+            let rc = unsafe { sqlite3_bind_pointer(*statement, i, p, name.as_ptr(), None) };
+            Self::bind_result(*statement, rc)
+        } else {
+            Ok(())
         }
     }
 
-    pub fn bind_text<S: AsRef<str>>(&self, i: i32, value: S) {
+    pub fn bind_text<S: AsRef<str>>(&self, i: i32, value: S) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
-            let n = value.as_ref().len();
-            let s = CString::new(value.as_ref()).unwrap();
-            let _rc = unsafe {
-                sqlite3_bind_text(*statement, i, s.as_ptr(), n as i32, SQLITE_TRANSIENT())
+            // Explicit-length form: interior NUL bytes round-trip correctly.
+            let v = value.as_ref();
+            let rc = unsafe {
+                sqlite3_bind_text64(
+                    *statement,
+                    i,
+                    v.as_ptr().cast(),
+                    v.len() as u64,
+                    SQLITE_TRANSIENT(),
+                    SQLITE_UTF8 as u8,
+                )
             };
+            Self::bind_result(*statement, rc)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn bind_result(statement: *mut sqlite3_stmt, rc: i32) -> Result<(), SQLiteError> {
+        if rc == SQLITE_OK {
+            Ok(())
+        } else {
+            Err(unsafe { SQLiteError::from_latest(sqlite3_db_handle(statement), rc) })
         }
     }
 
@@ -657,7 +720,8 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
             .unwrap()
             .1
             .unwrap();
-        stmt.bind_pointer(1, pstmt.cast(), c"stmt-pointer");
+        stmt.bind_pointer(1, pstmt.cast(), c"stmt-pointer")
+            .expect("bind stmt-pointer within range");
         loop {
             let rc = stmt.nextx();
             match rc {
@@ -818,7 +882,8 @@ impl Connection {
 
     fn open_with_flags(path: &str, flags: i32) -> Result<Self, SQLiteError> {
         let mut connection: *mut sqlite3 = ptr::null_mut();
-        let filename = CString::new(path).unwrap();
+        let filename = CString::new(path)
+            .map_err(|_| SQLiteError::custom(SQLITE_CANTOPEN, format!("database path contains an interior NUL byte: {path:?}")))?;
         let rc =
             unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };
         if rc == SQLITE_OK {
@@ -1084,7 +1149,7 @@ impl Connection {
     pub fn execute_script(&self, sql: &str) -> Result<(), SQLiteError> {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
-                let z_sql = CString::new(sql).unwrap();
+                let z_sql = CString::new(sql).map_err(|_| SQLiteError::interior_nul("SQL"))?;
                 let rc = unsafe {
                     sqlite3_exec(*connection, z_sql.as_ptr(), None, ptr::null_mut(), ptr::null_mut())
                 };
@@ -1182,7 +1247,7 @@ impl Connection {
     pub fn prepare(&self, sql: &str) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
-                let z_sql = CString::new(sql).unwrap();
+                let z_sql = CString::new(sql).map_err(|_| SQLiteError::interior_nul("SQL"))?;
                 let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
                 let head = z_sql.as_ptr();
                 let mut tail: *const c_char = ptr::null_mut();
@@ -1446,8 +1511,12 @@ fn parse_remote_path(input: &str) -> Result<(Option<String>, String, Option<u16>
 }
 
 /// https://www.sqlite.org/c3ref/complete.html
+///
+/// Input containing an interior NUL byte is never a complete SQL statement.
 pub fn complete(sql: &str) -> bool {
-    let sql = CString::new(sql).unwrap();
+    let Ok(sql) = CString::new(sql) else {
+        return false;
+    };
     unsafe { sqlite3_complete(sql.as_ptr()) != 0 }
 }
 
@@ -1533,13 +1602,51 @@ mod tests {
         ));*/
 
         stmt.reset();
-        stmt.bind_int64(1, 100);
+        stmt.bind_int64(1, 100).unwrap();
         assert_eq!(stmt.expanded_sql().unwrap(), "select 100");
         /*assert!(matches!(
             stmt.next().unwrap().unwrap().get(0).unwrap(),
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_interior_nul_bytes() {
+        // SQL with interior NUL errors instead of panicking
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(conn.prepare("select 1 \0 nonsense").is_err());
+        assert!(conn.execute_script("select 1 \0 nonsense").is_err());
+
+        // a path with NUL can't exist
+        assert!(Connection::open("bad\0path").is_err());
+
+        // escape_string is lossy on NUL
+        assert_eq!(escape_string("a\0b"), "'a\u{FFFD}b'");
+        assert_eq!(escape_string("it's"), "'it''s'");
+
+        // NUL-containing text values bind and round-trip intact
+        let (_, stmt) = conn.prepare("select ?").unwrap();
+        let stmt = stmt.unwrap();
+        stmt.bind_text(1, "a\0b").unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        match &row.first().unwrap().value {
+            ValueRefXValue::Text(bytes) => assert_eq!(*bytes, b"a\0b"),
+            _ => panic!("expected text value"),
+        }
+    }
+
+    #[test]
+    fn test_bind_out_of_range() {
+        let conn = Connection::open_in_memory().unwrap();
+        let (_, stmt) = conn.prepare("select ?1").unwrap();
+        let stmt = stmt.unwrap();
+        assert!(stmt.bind_int64(5, 1).is_err()); // SQLITE_RANGE
+        assert!(stmt.bind_text(5, "x").is_err());
+        assert!(stmt.bind_blob(5, b"x").is_err());
+        assert!(stmt.bind_null(5).is_err());
+        assert!(stmt.bind_double(5, 1.0).is_err());
+        stmt.bind_int64(1, 1).unwrap();
+    }
+
     #[test]
     fn test_execute_propagates_errors() {
         let conn = Connection::open_in_memory().unwrap();
@@ -1597,8 +1704,7 @@ mod tests {
     fn test_complete() {
         assert!(complete("select 1;"));
         assert!(!complete("select 1"));
-        // TODO handle
-        //assert!(!complete("select '\0'"));
+        assert!(!complete("select '\0'"));
     }
 
     #[test]

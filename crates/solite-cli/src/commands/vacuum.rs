@@ -28,7 +28,9 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), ()> {
                 eprintln!("Vacuum failed preparing VACUUM INTO: {}", e.message);
             })?;
             let stmt = stmt.expect("VACUUM INTO ? always yields a statement");
-            stmt.bind_text(1, into.to_string_lossy());
+            stmt.bind_text(1, into.to_string_lossy()).map_err(|e| {
+                eprintln!("Vacuum failed binding output path: {}", e.message);
+            })?;
             stmt.execute().map_err(|e| {
                 eprintln!("Vacuum failed executing VACUUM INTO: {}", e.message);
             })?;

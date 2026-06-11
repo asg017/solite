@@ -620,8 +620,8 @@ impl Runtime {
             .unwrap()
             .1
             .unwrap();
-        stmt.bind_text(1, key);
-        stmt.bind_text(2, value);
+        stmt.bind_text(1, key).map_err(|e| e.to_string())?;
+        stmt.bind_text(2, value).map_err(|e| e.to_string())?;
         stmt.execute().unwrap();
         Ok(())
     }
@@ -634,8 +634,8 @@ impl Runtime {
             .unwrap()
             .1
             .unwrap();
-        stmt.bind_text(1, key);
-        stmt.bind_blob(2, &value);
+        stmt.bind_text(1, key).map_err(|e| e.to_string())?;
+        stmt.bind_blob(2, &value).map_err(|e| e.to_string())?;
         stmt.execute().unwrap();
         Ok(())
     }
@@ -657,12 +657,12 @@ impl Runtime {
                 };
                 match self.lookup_parameter(param) {
                     Some(OwnedValue::Text(s)) => {
-                        stmt.bind_text((idx + 1) as i32, std::str::from_utf8(&s).unwrap())
+                        stmt.bind_text((idx + 1) as i32, std::str::from_utf8(&s).unwrap())?
                     }
-                    Some(OwnedValue::Integer(v)) => stmt.bind_int64((idx + 1) as i32, v),
-                    Some(OwnedValue::Double(v)) => stmt.bind_double((idx + 1) as i32, v),
-                    Some(OwnedValue::Blob(v)) => stmt.bind_blob((idx + 1) as i32, v.as_ref()),
-                    Some(OwnedValue::Null) => stmt.bind_null((idx + 1) as i32),
+                    Some(OwnedValue::Integer(v)) => stmt.bind_int64((idx + 1) as i32, v)?,
+                    Some(OwnedValue::Double(v)) => stmt.bind_double((idx + 1) as i32, v)?,
+                    Some(OwnedValue::Blob(v)) => stmt.bind_blob((idx + 1) as i32, v.as_ref())?,
+                    Some(OwnedValue::Null) => stmt.bind_null((idx + 1) as i32)?,
 
                     None => (),
                 }
@@ -678,7 +678,7 @@ impl Runtime {
             .prepare("SELECT value FROM temp.sqlite_parameters WHERE key = ?1")
             .ok()?
             .1?;
-        stmt.bind_text(1, key);
+        stmt.bind_text(1, key).ok()?;
         stmt.next()
             .unwrap()
             .map(|v| OwnedValue::from_value_ref(v.first().unwrap()))
@@ -692,7 +692,7 @@ impl Runtime {
             .unwrap()
             .1
             .unwrap();
-        stmt.bind_text(1, key);
+        stmt.bind_text(1, key).expect("bind within range");
         stmt.execute().unwrap();
     }
 

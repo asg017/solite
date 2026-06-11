@@ -95,7 +95,9 @@ fn handle_query(connection: &Connection, sql: &str, params: &[(String, OwnedValu
         Err(e) => return Response::Error(e),
     };
 
-    bind_params(&stmt, params);
+    if let Err(e) = bind_params(&stmt, params) {
+        return Response::Error(e);
+    }
 
     let columns = stmt.column_meta();
     let readonly = stmt.readonly();
@@ -148,7 +150,9 @@ fn handle_execute(
         Err(e) => return Response::Error(e),
     };
 
-    bind_params(&stmt, params);
+    if let Err(e) = bind_params(&stmt, params) {
+        return Response::Error(e);
+    }
 
     match stmt.execute() {
         Ok(count) => Response::Executed {
@@ -159,7 +163,10 @@ fn handle_execute(
     }
 }
 
-fn bind_params(stmt: &solite_core::sqlite::Statement, params: &[(String, OwnedValue)]) {
+fn bind_params(
+    stmt: &solite_core::sqlite::Statement,
+    params: &[(String, OwnedValue)],
+) -> Result<(), solite_core::sqlite::SQLiteError> {
     for (name, value) in params {
         let bind_params = stmt.bind_parameters();
         if let Some(idx) = bind_params.iter().position(|p| {
@@ -168,15 +175,16 @@ fn bind_params(stmt: &solite_core::sqlite::Statement, params: &[(String, OwnedVa
         }) {
             let idx = (idx + 1) as i32;
             match value {
-                OwnedValue::Null => stmt.bind_null(idx),
-                OwnedValue::Integer(v) => stmt.bind_int64(idx, *v),
-                OwnedValue::Double(v) => stmt.bind_double(idx, *v),
+                OwnedValue::Null => stmt.bind_null(idx)?,
+                OwnedValue::Integer(v) => stmt.bind_int64(idx, *v)?,
+                OwnedValue::Double(v) => stmt.bind_double(idx, *v)?,
                 OwnedValue::Text(v) => {
                     let s = String::from_utf8_lossy(v);
-                    stmt.bind_text(idx, s.as_ref());
+                    stmt.bind_text(idx, s.as_ref())?;
                 }
-                OwnedValue::Blob(v) => stmt.bind_blob(idx, v),
+                OwnedValue::Blob(v) => stmt.bind_blob(idx, v)?,
             }
         }
     }
+    Ok(())
 }

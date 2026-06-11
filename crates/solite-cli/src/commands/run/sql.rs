@@ -93,7 +93,10 @@ fn setup_trace_statement(runtime: &Runtime, stmt: &Statement) -> Option<i64> {
         }
     };
 
-    insert_stmt.bind_text(1, stmt.sql());
+    if let Err(e) = insert_stmt.bind_text(1, stmt.sql()) {
+        eprintln!("Warning: Failed to bind trace statement: {:?}", e);
+        return None;
+    }
 
     match insert_stmt.nextx() {
         Ok(Some(row)) => Some(row.value_at(0).as_int64()),
@@ -181,8 +184,13 @@ fn record_trace_steps(runtime: &Runtime, stmt: &Statement, trace_stmt_id: i64) {
         }
     };
 
-    trace_stmt.bind_int64(1, trace_stmt_id);
-    unsafe { trace_stmt.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer") };
+    let bound = trace_stmt
+        .bind_int64(1, trace_stmt_id)
+        .and_then(|_| unsafe { trace_stmt.bind_pointer(2, stmt.pointer().cast(), c"stmt-pointer") });
+    if let Err(e) = bound {
+        eprintln!("Warning: Failed to bind trace step: {:?}", e);
+        return;
+    }
 
     if let Err(e) = trace_stmt.execute() {
         eprintln!("Warning: Failed to record trace steps: {:?}", e);

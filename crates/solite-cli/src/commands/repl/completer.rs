@@ -143,7 +143,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
             Ok((_, Some(stmt))) => stmt,
             _ => return None,
         };
-        stmt.bind_text(1, name);
+        stmt.bind_text(1, name).ok()?;
 
         let mut nargs = vec![];
         while let Ok(Some(row)) = stmt.next() {

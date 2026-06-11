@@ -455,7 +455,9 @@ fn write_trace_output(rt: &Runtime, trace_path: &std::path::Path) -> Result<()> 
     };
 
     let path_str = trace_path.to_string_lossy();
-    stmt.bind_text(1, &path_str);
+    stmt.bind_text(1, &path_str)
+        .map_err(|e| anyhow::anyhow!("{e:?}"))
+        .context("Failed to bind trace output path")?;
 
     stmt.execute()
         .map_err(|e| anyhow::anyhow!("{e:?}"))

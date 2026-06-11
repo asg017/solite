@@ -51,7 +51,7 @@ impl TablesCommand {
         let stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
 
         if let Some(schema) = &self.schema {
-            stmt.bind_text(1, schema.as_str());
+            stmt.bind_text(1, schema.as_str())?;
         }
 
         let mut tables = Vec::new();

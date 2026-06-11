@@ -95,15 +95,18 @@ fn handle_query(
             p.trim_start_matches([':', '$', '@', '?']) == name.trim_start_matches([':', '$', '@', '?'])
         }) {
             let idx = (idx + 1) as i32;
-            match value {
+            let bound = match value {
                 OwnedValue::Null => stmt.bind_null(idx),
                 OwnedValue::Integer(v) => stmt.bind_int64(idx, *v),
                 OwnedValue::Double(v) => stmt.bind_double(idx, *v),
                 OwnedValue::Text(v) => {
                     let s = String::from_utf8_lossy(v);
-                    stmt.bind_text(idx, s.as_ref());
+                    stmt.bind_text(idx, s.as_ref())
                 }
                 OwnedValue::Blob(v) => stmt.bind_blob(idx, v),
+            };
+            if let Err(e) = bound {
+                return Response::Error(e);
             }
         }
     }
@@ -171,15 +174,18 @@ fn handle_execute(
             p.trim_start_matches([':', '$', '@', '?']) == name.trim_start_matches([':', '$', '@', '?'])
         }) {
             let idx = (idx + 1) as i32;
-            match value {
+            let bound = match value {
                 OwnedValue::Null => stmt.bind_null(idx),
                 OwnedValue::Integer(v) => stmt.bind_int64(idx, *v),
                 OwnedValue::Double(v) => stmt.bind_double(idx, *v),
                 OwnedValue::Text(v) => {
                     let s = String::from_utf8_lossy(v);
-                    stmt.bind_text(idx, s.as_ref());
+                    stmt.bind_text(idx, s.as_ref())
                 }
                 OwnedValue::Blob(v) => stmt.bind_blob(idx, v),
+            };
+            if let Err(e) = bound {
+                return Response::Error(e);
             }
         }
     }

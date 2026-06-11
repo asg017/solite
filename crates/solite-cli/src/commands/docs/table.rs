@@ -98,7 +98,7 @@ pub fn render_table(columns: &[String], results: &[Vec<ValueCopy>]) -> String {
                 output.push_str(&" ".repeat(widths[i] - cell.len()));
             }
             output.push(' ');
-            if i < row.len() - 1 {
+            if i < widths.len() - 1 {
                 output.push(border::VERTICAL);
             }
         }

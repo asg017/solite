@@ -54,6 +54,12 @@ use sql::{
 };
 use table::render_table;
 
+/// Stand-in for `_` in generated heading anchors. The markdown serializer
+/// escapes underscores in text nodes (`_` → `\_`), which would corrupt
+/// anchors like `{#my_function}`. Underscores are swapped to this
+/// private-use-area character before serialization and swapped back after.
+const ANCHOR_UNDERSCORE_SENTINEL: &str = "\u{E000}";
+
 /// Errors that can occur during documentation generation.
 #[derive(Debug)]
 pub enum DocsError {
@@ -145,10 +151,10 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
         .cloned()
         .collect();
 
-    // Convert AST back to markdown
+    // Convert AST back to markdown, restoring underscores in anchors
     let out_md = to_markdown(&ast)
         .map_err(|e| DocsError::MarkdownParse(format!("Failed to serialize: {}", e)))?
-        .replace("ю", "_");
+        .replace(ANCHOR_UNDERSCORE_SENTINEL, "_");
 
     // Write output
     write_output(&args, &out_md)?;
@@ -318,7 +324,10 @@ fn extract_documented_functions(ast: &mut Node) -> Vec<String> {
                     if let Some(ref f) = function {
                         if let Some(children) = node.children_mut() {
                             children.push(Node::Text(Text {
-                                value: format!(" {{#{}}}", f.replace('_', "ю")),
+                                value: format!(
+                                    " {{#{}}}",
+                                    f.replace('_', ANCHOR_UNDERSCORE_SENTINEL)
+                                ),
                                 position: None,
                             }));
                         }

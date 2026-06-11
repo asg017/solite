@@ -548,7 +548,7 @@ fn completions(runtime: &Runtime, code: &str, cursor_pos: usize) -> CompleteRepl
 /// Build an analyzer schema from the live database by parsing the DDL in
 /// sqlite_master. Returns None when there is nothing usable.
 fn schema_from_connection(runtime: &Runtime) -> Option<solite_analyzer::Schema> {
-    let stmt = match runtime.connection.prepare(
+    let mut stmt = match runtime.connection.prepare(
         "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'view')",
     ) {
         Ok((_, Some(stmt))) => stmt,
@@ -621,13 +621,13 @@ fn inspect(runtime: &Runtime, code: &str, cursor_pos: usize) -> InspectReply {
 /// `Send` but not `Sync`), so holding a reference across the sends would
 /// make the calling futures non-`Send`.
 pub(super) async fn send_statement_result(
-    stmt: solite_core::sqlite::Statement,
+    mut stmt: solite_core::sqlite::Statement,
     response: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
     timer: bool,
 ) -> Result<bool> {
     let started_at = std::time::Instant::now();
-    match render_statement(&stmt) {
+    match render_statement(&mut stmt) {
         Ok(tbl) => {
             let elapsed = started_at.elapsed();
             response

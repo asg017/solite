@@ -94,7 +94,7 @@ mod tests {
 
     fn query_val(rt: &solite_core::Runtime, sql: &str) -> String {
         let (_, stmt) = rt.connection.prepare(sql).unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
         row.first().unwrap().as_str().to_string()
     }

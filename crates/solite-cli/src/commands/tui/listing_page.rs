@@ -29,7 +29,7 @@ impl ListingPage {
             .connection
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         {
-            Ok((_, Some(stmt))) => loop {
+            Ok((_, Some(mut stmt))) => loop {
                 match stmt.next() {
                     Ok(Some(row)) => {
                         tables.push(row[0].as_str().to_owned());

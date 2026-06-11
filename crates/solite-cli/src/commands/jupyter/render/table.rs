@@ -12,7 +12,7 @@ pub struct UiResponse {
 
 /// Render a SQL statement result as both text and HTML, from a single pass
 /// over the rows (a `Statement` can't be iterated twice).
-pub fn render_statement(stmt: &Statement) -> Result<UiResponse> {
+pub fn render_statement(stmt: &mut Statement) -> Result<UiResponse> {
     let html_config = TableConfig::html();
     let buffered =
         solite_table::buffer_statement(stmt, html_config.head_rows, html_config.tail_rows)

@@ -181,8 +181,8 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                     }
                 };
                 match runtime.prepare_with_parameters(&proc.sql) {
-                    Ok((_, Some(stmt))) => {
-                        super::sql::handle_sql(runtime, &stmt, &run_cmd.file, false, *timer);
+                    Ok((_, Some(mut stmt))) => {
+                        super::sql::handle_sql(runtime, &mut stmt, &run_cmd.file, false, *timer);
                     }
                     Ok((_, None)) => {
                         eprintln!("Procedure '{}' prepared to empty statement", proc_name);
@@ -204,7 +204,7 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                     match runtime.next_stepx() {
                         None => break,
                         Some(Ok(mut step)) => match step.result {
-                            StepResult::SqlStatement { ref stmt, .. } => {
+                            StepResult::SqlStatement { ref mut stmt, .. } => {
                                 super::sql::handle_sql(
                                     runtime,
                                     stmt,

@@ -105,7 +105,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                     handle_dot_command(&cmd, &mut rt, &mut stats);
                 }
                 StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
-                StepResult::SqlStatement { stmt, .. } => {
+                StepResult::SqlStatement { mut stmt, .. } => {
                     let epilogue = match &step.epilogue {
                         Some(s) => parse_epilogue_comment(s),
                         None => {
@@ -154,7 +154,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                         Ok(Some(snap_dir)) => {
                             handle_snap_assertion(
                                 &mut snap_state,
-                                &stmt,
+                                &mut stmt,
                                 &snap_dir.name,
                                 &filestem,
                                 &source_path,

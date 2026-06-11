@@ -294,9 +294,9 @@ fn run_impl(flags: RunArgs) -> Result<()> {
                 .clone();
 
             match rt.prepare_with_parameters(&proc.sql) {
-                Ok((_, Some(stmt))) => {
+                Ok((_, Some(mut stmt))) => {
                     let config = solite_table::TableConfig::terminal();
-                    solite_table::print_statement(&stmt, &config)
+                    solite_table::print_statement(&mut stmt, &config)
                         .map_err(|e| anyhow::anyhow!("Error executing procedure: {e}"))?;
                 }
                 Ok((_, None)) => bail!("Procedure '{proc_name}' prepared to empty statement"),
@@ -415,7 +415,7 @@ fn execute_steps(rt: &mut Runtime, is_trace: bool, timer: &mut bool) {
         match rt.next_stepx() {
             None => break,
             Some(Ok(mut step)) => match step.result {
-                StepResult::SqlStatement { ref stmt, .. } => {
+                StepResult::SqlStatement { ref mut stmt, .. } => {
                     handle_sql(rt, stmt, &step.reference.to_string(), is_trace, *timer);
                 }
                 StepResult::DotCommand(ref mut cmd) => {

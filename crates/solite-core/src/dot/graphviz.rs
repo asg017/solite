@@ -102,7 +102,7 @@ impl GraphvizCommand {
             "#,
         )?;
 
-        let stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
+        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
 
         let mut tables = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
@@ -121,7 +121,7 @@ impl GraphvizCommand {
         );
 
         let (_, stmt) = runtime.connection.prepare(&query)?;
-        let stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
+        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
 
         let mut columns = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
@@ -159,7 +159,7 @@ impl GraphvizCommand {
         );
 
         let (_, stmt) = runtime.connection.prepare(&query)?;
-        let stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
+        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
 
         let mut fks = Vec::new();
         while let Ok(Some(row)) = stmt.next() {
@@ -208,7 +208,7 @@ impl GraphvizCommand {
             .prepare(&query)
             .ok()
             .and_then(|(_, stmt)| stmt)
-            .is_some_and(|stmt| stmt.next().is_ok_and(|r| r.is_some()))
+            .is_some_and(|mut stmt| stmt.next().is_ok_and(|r| r.is_some()))
     }
 
     /// Generate the DOT graph definition.

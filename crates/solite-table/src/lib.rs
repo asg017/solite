@@ -13,7 +13,7 @@
 //! use solite_table::{render_statement, TableConfig};
 //!
 //! let config = TableConfig::terminal();
-//! let result = render_statement(&stmt, &config)?;
+//! let result = render_statement(&mut stmt, &config)?;
 //! println!("{}", result.output);
 //! ```
 
@@ -66,7 +66,7 @@ pub struct BufferedStatement {
 /// Returns `None` for column-less statements (e.g. CREATE TABLE), which are
 /// still stepped to completion so they execute.
 pub fn buffer_statement(
-    stmt: &Statement,
+    stmt: &mut Statement,
     head_rows: usize,
     tail_rows: usize,
 ) -> Result<Option<BufferedStatement>, SQLiteError> {
@@ -172,7 +172,7 @@ pub fn render_buffered(buffered: &BufferedStatement, config: &TableConfig) -> Re
 /// This is the main entry point for table rendering. It streams through
 /// the statement results, collecting rows into a buffer that retains
 /// head and tail rows, then renders the table.
-pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<RenderResult, SQLiteError> {
+pub fn render_statement(stmt: &mut Statement, config: &TableConfig) -> Result<RenderResult, SQLiteError> {
     match buffer_statement(stmt, config.head_rows, config.tail_rows)? {
         Some(buffered) => Ok(render_buffered(&buffered, config)),
         None => Ok(RenderResult {
@@ -188,7 +188,7 @@ pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<Render
 /// Print a SQLite statement result to stdout.
 ///
 /// Convenience function that renders and prints in one call.
-pub fn print_statement(stmt: &Statement, config: &TableConfig) -> Result<RenderResult, SQLiteError> {
+pub fn print_statement(stmt: &mut Statement, config: &TableConfig) -> Result<RenderResult, SQLiteError> {
     let result = render_statement(stmt, config)?;
     print!("{}", result.output);
     Ok(result)

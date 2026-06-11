@@ -81,7 +81,7 @@ fn handle_request(connection: &Connection, request: Request) -> Response {
 }
 
 fn handle_query(connection: &Connection, sql: &str, params: &[(String, OwnedValue)]) -> Response {
-    let (_, stmt) = match connection.prepare(sql) {
+    let (_, mut stmt) = match connection.prepare(sql) {
         Ok((remaining, Some(stmt))) => (remaining, stmt),
         Ok((_, None)) => {
             return Response::Query(QueryResult {

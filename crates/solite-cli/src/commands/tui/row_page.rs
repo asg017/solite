@@ -31,7 +31,7 @@ pub fn get_primary_keys(runtime: &Runtime, table_name: &str) -> Vec<PrimaryKeyIn
 
     let mut pks = Vec::new();
 
-    if let Ok((_, Some(stmt))) = runtime.connection.prepare(&sql) {
+    if let Ok((_, Some(mut stmt))) = runtime.connection.prepare(&sql) {
         loop {
             match stmt.next() {
                 Ok(Some(row)) => {

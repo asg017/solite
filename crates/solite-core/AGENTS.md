@@ -138,14 +138,14 @@ Wraps a raw `*mut sqlite3`. Key methods:
 - `in_transaction()` -- check autocommit state.
 - `set_progress_handler()` / `clear_progress_handler()` -- register/unregister a progress callback (`FnMut() -> bool`; returning `true` interrupts).
 
-`Connection` is `Send` but not `Sync`. It calls `sqlite3_close` on drop.
+`Connection` is `Send` but not `Sync` (sound because all open paths use `SQLITE_OPEN_FULLMUTEX`). It calls `sqlite3_close` on drop (if it owns the handle) and frees any registered progress handler.
 
 ### Statement
 
 Wraps a raw `*mut sqlite3_stmt`. Key methods:
 
-- `next() -> Result<Option<Vec<ValueRefX>>, SQLiteError>` -- step and return column values as a vec.
-- `nextx() -> Result<Option<Row>, SQLiteError>` -- step and return a `Row` for indexed access (faster, avoids allocation).
+- `next(&mut self) -> Result<Option<Vec<ValueRefX>>, SQLiteError>` -- step and return column values as a vec. The returned values borrow the statement mutably, so they cannot outlive the next step.
+- `nextx(&mut self) -> Result<Option<Row>, SQLiteError>` -- step and return a `Row` for indexed access (faster, avoids allocation). Errors on buffered (remote) statements; use `next()` there.
 - `execute() -> Result<usize, SQLiteError>` -- step until `SQLITE_DONE`, return row count.
 - `column_names()` / `column_meta()` -- column introspection.
 - `bind_text()`, `bind_int64()`, `bind_double()`, `bind_blob()`, `bind_null()`, `bind_pointer()` -- parameter binding; all return `Result<(), SQLiteError>`.

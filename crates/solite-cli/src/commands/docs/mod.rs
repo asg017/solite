@@ -221,7 +221,7 @@ fn process_code_block(
 
     loop {
         match rt.prepare_with_parameters(curr) {
-            Ok((rest, Some(stmt))) => {
+            Ok((rest, Some(mut stmt))) => {
                 new_value.push_str(&stmt.sql());
                 new_value.push('\n');
 
@@ -343,7 +343,7 @@ fn extract_documented_functions(ast: &mut Node) -> Vec<String> {
 
 /// Get list of loaded functions from extension.
 fn get_loaded_functions(rt: &Runtime) -> Result<Vec<String>, DocsError> {
-    let stmt = match rt
+    let mut stmt = match rt
         .connection
         .prepare("SELECT name FROM solite_docs.solite_docs_loaded_functions")
     {

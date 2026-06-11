@@ -31,7 +31,7 @@ pub fn dedent(input: &str) -> String {
 }
 
 /// Generate snapshot contents from a SQL statement execution.
-pub fn generate_snapshot_contents(source: String, stmt: &Statement) -> Option<String> {
+pub fn generate_snapshot_contents(source: String, stmt: &mut Statement) -> Option<String> {
     let mut snapshot_contents = String::new();
     let sql = stmt.sql();
     if write!(

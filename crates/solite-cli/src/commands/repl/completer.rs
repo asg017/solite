@@ -22,7 +22,7 @@ impl<'a> LiveSchemaSource<'a> {
 
 impl SchemaSource for LiveSchemaSource<'_> {
     fn table_names(&self) -> Vec<String> {
-        let stmt = match self.runtime.connection.prepare(
+        let mut stmt = match self.runtime.connection.prepare(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
         ) {
             Ok((_, Some(stmt))) => stmt,
@@ -41,7 +41,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
     fn columns_for_table(&self, table: &str) -> Option<Vec<String>> {
         // Use PRAGMA table_info to get column names
         let sql = format!("PRAGMA table_info(\"{}\")", table.replace("\"", "\"\""));
-        let stmt = match self.runtime.connection.prepare(&sql) {
+        let mut stmt = match self.runtime.connection.prepare(&sql) {
             Ok((_, Some(stmt))) => stmt,
             _ => return None,
         };
@@ -69,7 +69,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
             "SELECT sql FROM sqlite_master WHERE type='table' AND name = \"{}\"",
             table.replace("\"", "\"\"")
         );
-        let stmt = match self.runtime.connection.prepare(&sql) {
+        let mut stmt = match self.runtime.connection.prepare(&sql) {
             Ok((_, Some(stmt))) => stmt,
             _ => return Some(columns),
         };
@@ -87,7 +87,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
     }
 
     fn index_names(&self) -> Vec<String> {
-        let stmt = match self.runtime.connection.prepare(
+        let mut stmt = match self.runtime.connection.prepare(
             "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
         ) {
             Ok((_, Some(stmt))) => stmt,
@@ -104,7 +104,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
     }
 
     fn view_names(&self) -> Vec<String> {
-        let stmt = match self.runtime.connection.prepare(
+        let mut stmt = match self.runtime.connection.prepare(
             "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name",
         ) {
             Ok((_, Some(stmt))) => stmt,
@@ -121,7 +121,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
     }
 
     fn function_names(&self) -> Vec<String> {
-        let stmt = match self.runtime.connection.prepare(
+        let mut stmt = match self.runtime.connection.prepare(
             "SELECT DISTINCT name FROM pragma_function_list ORDER BY name",
         ) {
             Ok((_, Some(stmt))) => stmt,
@@ -139,7 +139,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
 
     fn function_nargs(&self, name: &str) -> Option<Vec<i32>> {
         let sql = "SELECT DISTINCT narg FROM pragma_function_list WHERE lower(name) = lower(?) ORDER BY narg";
-        let stmt = match self.runtime.connection.prepare(sql) {
+        let mut stmt = match self.runtime.connection.prepare(sql) {
             Ok((_, Some(stmt))) => stmt,
             _ => return None,
         };

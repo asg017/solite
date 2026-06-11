@@ -190,7 +190,7 @@ async fn handle_dot_command_inner(
                     .prepare("SELECT count(*) FROM temp.sqlite_parameters")
                     .ok()
                     .and_then(|(_, stmt)| stmt)
-                    .and_then(|stmt| {
+                    .and_then(|mut stmt| {
                         stmt.next()
                             .ok()
                             .flatten()

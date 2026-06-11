@@ -61,7 +61,7 @@ impl AskCommand {
             .connection
             .prepare("SELECT sql FROM sqlite_master WHERE type = 'table'");
 
-        let stmt = match result {
+        let mut stmt = match result {
             Ok((_, Some(stmt))) => stmt,
             _ => return String::new(),
         };

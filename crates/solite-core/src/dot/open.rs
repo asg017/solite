@@ -82,7 +82,7 @@ mod tests {
 
         // Verify we can use it
         let (_, stmt) = runtime.connection.prepare("SELECT 1").unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let result = stmt.next();
         assert!(result.is_ok());
     }
@@ -99,7 +99,7 @@ mod tests {
 
         // Verify we can use it
         let (_, stmt) = runtime.connection.prepare("SELECT 1").unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let result = stmt.next();
         assert!(result.is_ok());
     }
@@ -129,7 +129,7 @@ mod tests {
             .connection
             .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='foo'")
             .unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let row = stmt.next().unwrap();
         assert!(row.is_some());
     }

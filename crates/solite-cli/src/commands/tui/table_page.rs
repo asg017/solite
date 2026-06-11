@@ -131,7 +131,7 @@ impl RowCount {
             self.probe_offset
         );
 
-        let stmt = match runtime.connection.prepare(&sql) {
+        let mut stmt = match runtime.connection.prepare(&sql) {
             Ok((_, Some(stmt))) => stmt,
             _ => {
                 self.is_complete = true;
@@ -195,7 +195,7 @@ fn load_table_data(
     }
     let _ = writeln!(&mut sql, "LIMIT {} OFFSET {}", limit, offset);
 
-    let stmt = match runtime.connection.prepare(&sql) {
+    let mut stmt = match runtime.connection.prepare(&sql) {
         Ok((_, Some(stmt))) => stmt,
         Ok((_, None)) => {
             return LoadResult {

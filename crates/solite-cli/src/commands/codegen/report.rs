@@ -75,7 +75,7 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
         Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
 
     // Query for all tables and views
-    let stmt = match base_db.prepare(
+    let mut stmt = match base_db.prepare(
         r#"
         WITH t AS (
             SELECT name

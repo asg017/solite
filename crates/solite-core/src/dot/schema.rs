@@ -42,7 +42,7 @@ impl SchemaCommand {
             "#,
         )?;
 
-        let stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
+        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
 
         let mut schemas = Vec::new();
         while let Ok(Some(row)) = stmt.next() {

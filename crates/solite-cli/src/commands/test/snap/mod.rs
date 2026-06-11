@@ -128,7 +128,7 @@ impl SnapState {
 /// and creates/updates/rejects based on the mode.
 pub fn handle_snap_assertion(
     state: &mut SnapState,
-    stmt: &Statement,
+    stmt: &mut Statement,
     snap_name: &str,
     filestem: &str,
     source_path: &Path,

@@ -671,7 +671,7 @@ impl Runtime {
         }
     }
     pub fn lookup_parameter<S: AsRef<str>>(&self, key: S) -> Option<OwnedValue> {
-        let stmt = self
+        let mut stmt = self
             .connection
             .prepare("SELECT value FROM temp.sqlite_parameters WHERE key = ?1")
             .ok()?
@@ -870,7 +870,7 @@ mod tests {
     }
 
     fn functions_of(db: &Connection) -> Vec<String> {
-        let stmt = db
+        let mut stmt = db
             .prepare("select distinct name from pragma_function_list order by 1")
             .unwrap()
             .1
@@ -882,7 +882,7 @@ mod tests {
         fns
     }
     fn version_functions_of(db: &Connection) -> Vec<String> {
-        let stmt = db
+        let mut stmt = db
             .prepare("select distinct name from pragma_function_list where name like '%_version' order by 1")
             .unwrap()
             .1
@@ -898,7 +898,7 @@ mod tests {
             .map(|v| format!("{v}()"))
             .collect::<Vec<String>>()
             .join(", ");
-        let stmt = db.prepare(&sql).unwrap().1.unwrap();
+        let mut stmt = db.prepare(&sql).unwrap().1.unwrap();
         let row = stmt.next().unwrap().unwrap();
         let vers = row.iter().map(|v| v.as_str().to_string());
         assert_eq!(fns.len(), vers.len());
@@ -909,7 +909,7 @@ mod tests {
             .collect()
     }
     fn modules_of(db: &Connection) -> Vec<String> {
-        let stmt = db
+        let mut stmt = db
             .prepare("select distinct name from pragma_module_list order by 1")
             .unwrap()
             .1
@@ -924,7 +924,7 @@ mod tests {
     #[test]
     fn core_basic() {
         let runtime = Runtime::new(None).unwrap();
-        let stmt = runtime
+        let mut stmt = runtime
             .connection
             .prepare("select sqlite_version();")
             .unwrap()
@@ -1023,7 +1023,7 @@ select not_exist();",
         // Open readonly and read
         let rt = Runtime::new_readonly(db_str);
         let (_, stmt) = rt.connection.prepare("SELECT x FROM t").unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
         assert_eq!(row.first().unwrap().as_str(), "hi");
     }
@@ -1074,7 +1074,7 @@ select not_exist();",
         rt.add_virtual_file("/helper.sql", "create table vtest(x); insert into vtest values (99);");
         rt.load_file("/helper.sql").unwrap();
         let (_, stmt) = rt.connection.prepare("select x from vtest").unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
         assert_eq!(row.first().unwrap().as_str(), "99");
     }
@@ -1202,7 +1202,7 @@ select not_exist();",
             match rt.next_stepx() {
                 None => break,
                 Some(Ok(step)) => match step.result {
-                    StepResult::SqlStatement { stmt, .. } => {
+                    StepResult::SqlStatement { mut stmt, .. } => {
                         match stmt.next() {
                             Ok(Some(row)) => {
                                 results.push(row.first().unwrap().as_str().to_string());
@@ -1245,7 +1245,7 @@ select not_exist();",
             match rt.next_stepx() {
                 None => break,
                 Some(Ok(step)) => match step.result {
-                    StepResult::SqlStatement { stmt, .. } => {
+                    StepResult::SqlStatement { mut stmt, .. } => {
                         match stmt.next() {
                             Ok(Some(row)) => {
                                 results.push(row.first().unwrap().as_str().to_string());
@@ -1405,7 +1405,7 @@ select not_exist();",
         let (_, stmt) = rt
             .prepare_with_parameters("SELECT typeof(:x), length(:x), hex(:x)")
             .unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
         let typeof_x = OwnedValue::from_value_ref(row.first().unwrap());
         let length_x = OwnedValue::from_value_ref(row.get(1).unwrap());

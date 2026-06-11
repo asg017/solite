@@ -148,7 +148,8 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
 
     if use_table {
         let config = TableConfig::terminal();
-        solite_table::print_statement(&stmt, &config)
+        let mut stmt = stmt;
+        solite_table::print_statement(&mut stmt, &config)
             .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
     } else {
         // Determine output format

@@ -273,9 +273,9 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                     }
                 };
                 match runtime.prepare_with_parameters(&proc.sql) {
-                    Ok((_, Some(stmt))) => {
+                    Ok((_, Some(mut stmt))) => {
                         let config = solite_table::TableConfig::terminal();
-                        if let Err(e) = solite_table::print_statement(&stmt, &config) {
+                        if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
                             eprintln!("✗ failed to execute procedure: {}", e);
                         }
                     }
@@ -302,10 +302,10 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                             StepResult::ProcedureDefinition(ref proc) => {
                                 println!("Registered procedure: {}", proc.name);
                             }
-                            StepResult::SqlStatement { stmt, .. } => {
+                            StepResult::SqlStatement { mut stmt, .. } => {
                                 let start = std::time::Instant::now();
                                 let config = solite_table::TableConfig::terminal();
-                                if let Err(e) = solite_table::print_statement(&stmt, &config) {
+                                if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
                                     eprintln!("✗ failed to print table: {}", e);
                                 }
                                 if *timer {
@@ -380,10 +380,10 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
                 StepResult::ProcedureDefinition(ref proc) => {
                     println!("Registered procedure: {}", proc.name);
                 }
-                StepResult::SqlStatement { stmt, .. } => {
+                StepResult::SqlStatement { mut stmt, .. } => {
                     let start = std::time::Instant::now();
                     let config = TableConfig::terminal();
-                    match solite_table::print_statement(&stmt, &config) {
+                    match solite_table::print_statement(&mut stmt, &config) {
                         Ok(_) => {}
                         Err(e) => {
                             eprintln!("✗ failed to print table: {}", e);

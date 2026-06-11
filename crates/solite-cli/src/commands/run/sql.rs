@@ -19,7 +19,7 @@ use super::status::get_statement_status;
 /// Execute a SQL statement with progress tracking and output.
 pub fn handle_sql(
     runtime: &mut Runtime,
-    stmt: &Statement,
+    stmt: &mut Statement,
     step_reference: &str,
     is_trace: bool,
     timer: bool,
@@ -84,7 +84,7 @@ fn create_progress_bar() -> indicatif::ProgressBar {
 
 /// Set up trace statement and return its ID.
 fn setup_trace_statement(runtime: &Runtime, stmt: &Statement) -> Option<i64> {
-    let insert_stmt = match runtime
+    let mut insert_stmt = match runtime
         .connection
         .prepare("INSERT INTO solite_trace.statements (sql) VALUES (?) RETURNING id")
     {

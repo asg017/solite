@@ -10,7 +10,7 @@ use solite_core::sqlite::Connection;
 use crate::cli::BackupArgs;
 
 fn get_page_size(conn: &Connection) -> u64 {
-    let Ok((_, Some(stmt))) = conn.prepare("PRAGMA page_size") else {
+    let Ok((_, Some(mut stmt))) = conn.prepare("PRAGMA page_size") else {
         return 4096;
     };
     if let Ok(Some(row)) = stmt.next() {

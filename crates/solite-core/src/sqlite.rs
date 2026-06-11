@@ -1,3 +1,27 @@
+//! Rust bindings over the SQLite C API, plus a remote (RPC) flavor.
+//!
+//! The module's central design idea is a local/remote duality. Both
+//! [`Connection`] and [`Statement`] are enums internally:
+//!
+//! ```text
+//! Connection ── Local  { *mut sqlite3 }            in-process SQLite
+//!            └─ Remote { RemoteTransport }         `solite serve` over SSH/pipe
+//!
+//! Statement ─── Local    { *mut sqlite3_stmt }     stepped row by row
+//!            └─ Buffered { QueryResult, cursor }   fully materialized rows
+//!                                                  returned by a remote server
+//! ```
+//!
+//! A remote `prepare()` executes the query on the server and returns a
+//! `Buffered` statement; stepping it just walks the materialized rows.
+//! Methods that only make sense on one flavor are documented as no-ops or
+//! errors on the other.
+//!
+//! Statement lifecycle: [`Connection::prepare`] → [`Statement::bind_text`]
+//! (and the other `bind_*` methods) → [`Statement::next`] /
+//! [`Statement::nextx`] / [`Statement::execute`] → [`Statement::reset`] to
+//! run again. Statements finalize on drop.
+
 use core::fmt;
 use libsqlite3_sys::*;
 use serde::{Deserialize, Serialize};
@@ -12,15 +36,24 @@ use std::{ffi::CString, os::raw::c_char};
 pub use libsqlite3_sys::{sqlite3_sql, sqlite3_stmt};
 
 /// Not exported by libsqlite3-sys 0.26 (added in SQLite 3.42).
-/// https://www.sqlite.org/c3ref/c_dbconfig_defensive.html
+/// <https://www.sqlite.org/c3ref/c_dbconfig_defensive.html>
 const SQLITE_DBCONFIG_STMT_SCANSTATUS: c_int = 1018;
+/// Value subtype SQLite's json functions attach to JSON text results. The
+/// exporter and table renderer use it to emit such values as raw JSON rather
+/// than quoted strings.
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/json.c#L126
 pub const JSON_SUBTYPE: u32 = 74;
 
+/// Value subtype carried by `sqlite3_bind_pointer` values, used when passing
+/// statement pointers to the `bytecode()` virtual table (see `bytecode_steps`).
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/vdbeapi.c#L212
 pub const POINTER_SUBTYPE: u32 = 112;
 
-/// Abstraction of a SQLite error.
+/// A SQLite (or transport) error: the numeric result code, its generic
+/// description (`sqlite3_errstr`), the connection's specific message
+/// (`sqlite3_errmsg`), and the byte offset into the SQL where the error
+/// occurred, when SQLite reports one. Errors synthesized outside SQLite
+/// (remote transport, RPC protocol) use `result_code` -1.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SQLiteError {
     pub result_code: i32,
@@ -124,7 +157,12 @@ pub fn escape_string(value: &str) -> String {
     }
 }
 
-// https://www.sqlite.org/c3ref/value.html
+/// A borrowed reference to a single result value, valid only until the
+/// statement is stepped, reset, or dropped (the borrow on the stepping
+/// method enforces this). The `X` suffix is historical. For data that must
+/// outlive the row, convert to [`OwnedValue`].
+///
+/// <https://www.sqlite.org/c3ref/value.html>
 pub struct ValueRefX<'a> {
     raw: *mut sqlite3_value,
     pub value: ValueRefXValue<'a>,
@@ -132,6 +170,8 @@ pub struct ValueRefX<'a> {
     /// For raw pointer values, this is None and subtype() uses the C API.
     stored_subtype: Option<u32>,
 }
+/// The type-tagged payload of a [`ValueRefX`]. `Text`/`Blob` borrow
+/// SQLite-owned (or buffer-owned) memory.
 pub enum ValueRefXValue<'a> {
     Null,
     Int(i64),
@@ -143,7 +183,11 @@ pub enum ValueRefXValue<'a> {
 impl<'a> ValueRefX<'a> {
     /// # Safety
     ///
-    /// Only use on real sqlite3_value bro
+    /// `value` must be a valid, non-null `sqlite3_value` pointer obtained
+    /// from SQLite (e.g. `sqlite3_column_value`). The returned `ValueRefX`
+    /// (including its `Text`/`Blob` slices) borrows memory owned by SQLite
+    /// that is invalidated by the next step/reset/finalize of the producing
+    /// statement — the caller must pick a lifetime that does not outlive it.
     pub unsafe fn from_value(value: *mut sqlite3_value) -> Self {
         let v = match sqlite3_value_type(value) {
             SQLITE_INTEGER => ValueRefXValue::Int(sqlite3_value_int64(value)),
@@ -164,6 +208,7 @@ impl<'a> ValueRefX<'a> {
             stored_subtype: None,
         }
     }
+    /// The value as UTF-8 text; empty string for non-text or invalid UTF-8.
     pub fn as_str(&self) -> &str {
         if self.raw.is_null() {
             match &self.value {
@@ -182,6 +227,7 @@ impl<'a> ValueRefX<'a> {
             }
         }
     }
+    /// The value as an integer; 0 for non-integer values.
     pub fn as_int64(&self) -> i64 {
         if self.raw.is_null() {
             match &self.value {
@@ -195,6 +241,7 @@ impl<'a> ValueRefX<'a> {
 }
 
 impl ValueRefX<'_> {
+    /// The value's subtype (e.g. [`JSON_SUBTYPE`]), or `None` if unset.
     pub fn subtype(&self) -> Option<u32> {
         if let Some(st) = self.stored_subtype {
             if st == 0 { None } else { Some(st) }
@@ -216,6 +263,10 @@ impl ValueRefX<'_> {
     }
 }
 
+/// An owned copy of a SQLite value, used wherever data outlives the row it
+/// came from: parameter storage (`temp.sqlite_parameters`), the RPC wire
+/// format, and test assertions. Convert from a borrowed value with
+/// [`OwnedValue::from_value_ref`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum OwnedValue {
     Null,
@@ -225,6 +276,7 @@ pub enum OwnedValue {
     Blob(Vec<u8>),
 }
 impl OwnedValue {
+    /// Copy a borrowed value into an owned one.
     pub fn from_value_ref(v: &'_ ValueRefX) -> Self {
         match v.value {
             ValueRefXValue::Null => OwnedValue::Null,
@@ -236,22 +288,33 @@ impl OwnedValue {
     }
 }
 
+/// Zero-allocation access to the current row of a stepped statement,
+/// returned by [`Statement::nextx`]. Columns are fetched lazily by index;
+/// the row (and anything borrowed from it) is only valid until the
+/// statement is stepped again.
 pub struct Row<'a> {
     statement: *mut sqlite3_stmt,
     phantom: std::marker::PhantomData<&'a ()>,
 }
 impl<'a> Row<'a> {
+    /// Number of columns in the row.
     #[inline(always)]
     pub fn count(&self) -> usize {
         unsafe { sqlite3_column_count(self.statement) as usize }
     }
 
+    /// Fetch the value of column `at` (0-based). An out-of-range index is
+    /// undefined behavior at the SQLite level; checked in debug builds.
     #[inline(always)]
     pub fn value_at(&self, at: usize) -> ValueRefX<'a> {
+        debug_assert!(at < self.count(), "column index {at} out of range");
         unsafe { ValueRefX::from_value(sqlite3_column_value(self.statement, at as i32)) }
     }
 }
 
+/// Column metadata from a prepared statement: result name, origin
+/// database/table/column (for direct column references), declared type,
+/// and nullability.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ColumnMeta {
     pub name: String,
@@ -266,11 +329,17 @@ pub struct ColumnMeta {
     pub nullable: Option<bool>,
 }
 
+/// Whether a statement is `EXPLAIN` or `EXPLAIN QUERY PLAN` (see
+/// [`Statement::is_explain`]).
 pub enum IsExplain {
     Explain,
     ExplainQueryPlan,
 }
-/// https://www.sqlite.org/c3ref/stmt.html
+/// A prepared statement: either a live local `sqlite3_stmt` stepped row by
+/// row, or a `Buffered` result set already materialized by a remote server
+/// (see the module doc). Finalized on drop.
+///
+/// <https://www.sqlite.org/c3ref/stmt.html>
 #[derive(Serialize, Debug)]
 pub struct Statement {
     #[serde(skip)]
@@ -315,6 +384,7 @@ impl Statement {
         }
     }
 
+    /// The original SQL text of the statement.
     pub fn sql(&self) -> String {
         match &self.inner {
             StatementInner::Local { statement } => unsafe {
@@ -345,6 +415,7 @@ impl Statement {
         }
     }
 
+    /// `Some` if this statement is an EXPLAIN / EXPLAIN QUERY PLAN.
     pub fn is_explain(&self) -> Option<IsExplain> {
         match &self.inner {
             StatementInner::Local { statement } => {
@@ -364,6 +435,7 @@ impl Statement {
         }
     }
 
+    /// Result column names, in order.
     pub fn column_names(&self) -> Result<Vec<String>, Utf8Error> {
         match &self.inner {
             StatementInner::Local { statement } => unsafe {
@@ -381,6 +453,7 @@ impl Statement {
         }
     }
 
+    /// Full [`ColumnMeta`] for each result column.
     pub fn column_meta(&self) -> Vec<ColumnMeta> {
         match &self.inner {
             StatementInner::Local { statement } => unsafe {
@@ -439,7 +512,25 @@ impl Statement {
         }
     }
 
-    pub fn next(&self) -> Result<Option<Vec<ValueRefX<'_>>>, SQLiteError> {
+    /// Step once and return the next row as a `Vec` of borrowed values, or
+    /// `None` when the statement is done. Works on both local and buffered
+    /// statements; prefer [`Statement::nextx`] when iterating hot loops
+    /// (no per-row allocation) and [`Statement::execute`] when the rows
+    /// themselves don't matter.
+    ///
+    /// The returned values borrow `self` mutably, so they must be dropped
+    /// (or copied out via [`OwnedValue::from_value_ref`]) before stepping
+    /// again:
+    ///
+    /// ```no_run
+    /// # fn demo(stmt: &mut solite_core::sqlite::Statement) -> Result<(), solite_core::sqlite::SQLiteError> {
+    /// while let Some(row) = stmt.next()? {
+    ///     println!("{}", row[0].as_str()); // row dropped before the next step
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn next(&mut self) -> Result<Option<Vec<ValueRefX<'_>>>, SQLiteError> {
         match &self.inner {
             StatementInner::Local { statement } => {
                 let rc = unsafe { sqlite3_step(*statement) };
@@ -485,8 +576,15 @@ impl Statement {
         }
     }
 
+    /// Step once and return a [`Row`] for lazy, zero-allocation column
+    /// access, or `None` when done. Faster than [`Statement::next`] for wide
+    /// rows where only some columns are read.
+    ///
+    /// Errors on buffered (remote) statements — `Row` wraps a raw statement
+    /// pointer that buffered results don't have; use [`Statement::next`]
+    /// there instead.
     #[inline(always)]
-    pub fn nextx<'a>(&self) -> Result<Option<Row<'a>>, SQLiteError> {
+    pub fn nextx(&mut self) -> Result<Option<Row<'_>>, SQLiteError> {
         match &self.inner {
             StatementInner::Local { statement } => {
                 let rc = unsafe { sqlite3_step(*statement) };
@@ -537,6 +635,7 @@ impl Statement {
         }
     }
 
+    /// Bind an integer to parameter `i` (1-based). No-op on buffered statements.
     pub fn bind_int64(&self, i: i32, value: i64) -> Result<(), SQLiteError> {
         // Binding on a Buffered statement is a no-op for every bind_* method:
         // remote statements already have their parameters bound on the server.
@@ -547,6 +646,7 @@ impl Statement {
             Ok(())
         }
     }
+    /// Bind a float to parameter `i` (1-based). No-op on buffered statements.
     pub fn bind_double(&self, i: i32, value: f64) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
             let rc = unsafe { sqlite3_bind_double(*statement, i, value) };
@@ -555,6 +655,7 @@ impl Statement {
             Ok(())
         }
     }
+    /// Bind NULL to parameter `i` (1-based). No-op on buffered statements.
     pub fn bind_null(&self, i: i32) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
             let rc = unsafe { sqlite3_bind_null(*statement, i) };
@@ -563,6 +664,7 @@ impl Statement {
             Ok(())
         }
     }
+    /// Bind a blob to parameter `i` (1-based). No-op on buffered statements.
     pub fn bind_blob(&self, i: i32, value: &[u8]) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
             let rc = unsafe {
@@ -591,6 +693,8 @@ impl Statement {
         }
     }
 
+    /// Bind text to parameter `i` (1-based); interior NUL bytes round-trip.
+    /// No-op on buffered statements.
     pub fn bind_text<S: AsRef<str>>(&self, i: i32, value: S) -> Result<(), SQLiteError> {
         if let StatementInner::Local { statement } = &self.inner {
             // Explicit-length form: interior NUL bytes round-trip correctly.
@@ -619,6 +723,9 @@ impl Statement {
         }
     }
 
+    /// Names of the statement's parameters, in index order; anonymous
+    /// positional parameters (bare `?`) are empty strings. Empty for
+    /// buffered statements (parameters were bound on the server).
     pub fn bind_parameters(&self) -> Vec<String> {
         match &self.inner {
             StatementInner::Local { statement } => unsafe {
@@ -643,6 +750,8 @@ impl Statement {
         }
     }
 
+    /// Reset the statement so it can be stepped again from the start.
+    /// For buffered statements, rewinds the row cursor.
     pub fn reset(&self) {
         match &self.inner {
             StatementInner::Local { statement } => {
@@ -654,6 +763,7 @@ impl Statement {
         }
     }
 
+    /// Whether the statement makes no direct changes to the database.
     pub fn readonly(&self) -> bool {
         match &self.inner {
             StatementInner::Local { statement } => {
@@ -664,6 +774,10 @@ impl Statement {
     }
 
     /// Get the raw statement pointer. Panics on buffered statements.
+    ///
+    /// The pointer must not outlive this `Statement` (which finalizes it on
+    /// drop), and the caller must not finalize it; treat it as a borrow for
+    /// FFI calls like `sqlite3_bind_pointer` or the `bytecode()` vtab.
     pub fn pointer(&self) -> *mut sqlite3_stmt {
         match &self.inner {
             StatementInner::Local { statement } => *statement,
@@ -686,6 +800,8 @@ impl Drop for Statement {
 }
 
 #[derive(Debug)]
+/// One row of the `bytecode()` virtual table (a VDBE instruction with its
+/// nexec/ncycle stats), produced by `bytecode_steps` for `.bench` reports.
 pub struct BytecodeStep {
     pub addr: i64,
     pub opcode: String,
@@ -708,7 +824,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Result<Vec<BytecodeSte
         // Borrowed handle: owned=false makes Drop skip sqlite3_close.
         let db = Connection::from_local(db, false);
 
-        let stmt = match db.prepare(
+        let mut stmt = match db.prepare(
             "SELECT addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle
     FROM bytecode(?)
     ",
@@ -747,7 +863,8 @@ pub struct RemoteTransport {
     writer: std::io::BufWriter<std::process::ChildStdin>,
 }
 
-// NOT Sync, sqlite limitation
+// SAFETY: RemoteTransport owns its child process and pipes outright; moving
+// it to another thread is sound. Not Sync: &self methods mutate the pipes.
 unsafe impl std::marker::Send for RemoteTransport {}
 
 impl RemoteTransport {
@@ -817,7 +934,11 @@ fn buffered_statement(result: crate::rpc::QueryResult) -> (Option<usize>, Option
 /// cross the C `void*` boundary.
 type ProgressHandlerBox = Box<dyn FnMut() -> bool + Send>;
 
-/// https://www.sqlite.org/c3ref/sqlite3.html
+/// A database connection: an in-process SQLite handle, or a remote
+/// `solite serve` process reached over a transport (see the module doc).
+/// Closes the database (if locally owned) on drop.
+///
+/// <https://www.sqlite.org/c3ref/sqlite3.html>
 pub struct Connection {
     inner: ConnectionInner,
     /// Shared with [`InterruptHandle`]s handed out by [`Connection::interrupt_handle`].
@@ -839,8 +960,13 @@ enum ConnectionInner {
     },
 }
 
-// NOT Sync, sqlite limitation
+// SAFETY: Send (but NOT Sync) is sound because every open path uses
+// SQLITE_OPEN_FULLMUTEX (serialized mode), so the handle may be used from
+// any one thread at a time. HAZARD: if an open path ever switches to
+// SQLITE_OPEN_NOMUTEX, these impls become unsound — keep them in sync.
 unsafe impl std::marker::Send for Connection {}
+// SAFETY: same FULLMUTEX argument as Connection; a Statement is only used
+// from one thread at a time and its connection's mutex serializes the C API.
 unsafe impl std::marker::Send for Statement {}
 
 /// A handle for interrupting an in-flight statement on a [`Connection`] from
@@ -854,11 +980,17 @@ pub struct InterruptHandle {
     db: Arc<StdMutex<*mut sqlite3>>,
 }
 
+// SAFETY: sqlite3_interrupt is documented as callable from any thread on a
+// live connection, and the Arc<Mutex<_>> pointer is nulled (under the lock)
+// before the connection closes, so a handle can never reach a freed pointer.
 unsafe impl std::marker::Send for InterruptHandle {}
 unsafe impl std::marker::Sync for InterruptHandle {}
 
 impl InterruptHandle {
-    /// https://www.sqlite.org/c3ref/interrupt.html
+    /// Cancel any in-flight statement on this connection. On remote
+    /// connections, sends an Interrupt request to the server.
+    ///
+    /// <https://www.sqlite.org/c3ref/interrupt.html>
     pub fn interrupt(&self) {
         let db = self.db.lock().unwrap();
         if !db.is_null() {
@@ -867,6 +999,7 @@ impl InterruptHandle {
     }
 }
 
+/// Legacy prepare error shape; superseded by [`SQLiteError`].
 #[derive(Debug)]
 pub struct PrepareError {
     pub code: i32,
@@ -904,11 +1037,13 @@ impl Connection {
         }
     }
 
+    /// Open (or create) a read-write database file. Accepts URI filenames.
     pub fn open(path: &str) -> Result<Self, SQLiteError> {
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI;
         Self::open_with_flags(path, flags)
     }
 
+    /// Open an existing database file read-only.
     pub fn open_readonly(path: &str) -> Result<Self, SQLiteError> {
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI;
         Self::open_with_flags(path, flags)
@@ -938,6 +1073,8 @@ impl Connection {
         }
     }
 
+    /// Open a fresh in-memory database (with per-opcode stats enabled for
+    /// `.bench`).
     pub fn open_in_memory() -> Result<Self, SQLiteError> {
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE;
         let conn = Self::open_with_flags(":memory:", flags)?;
@@ -963,6 +1100,8 @@ impl Connection {
         Self::open_remote_with_bin(url, None)
     }
 
+    /// Like [`Connection::open_remote`], with an explicit path to the
+    /// `solite` binary on the remote host.
     pub fn open_remote_with_bin(url: &str, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
         let (user, host, port, db_path) = parse_remote_path(url)
             .map_err(|msg| SQLiteError::custom("SSH_ERROR", msg))?;
@@ -1035,6 +1174,8 @@ impl Connection {
         }
     }
 
+    /// The filename of the main database (`None` for in-memory). Asks the
+    /// server on remote connections.
     pub fn db_name(&self) -> Option<String> {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => unsafe {
@@ -1056,6 +1197,8 @@ impl Connection {
         }
     }
 
+    /// Whether the connection is inside an explicit transaction (autocommit
+    /// off). Asks the server on remote connections.
     pub fn in_transaction(&self) -> bool {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
@@ -1071,6 +1214,7 @@ impl Connection {
         }
     }
 
+    /// Load a SQLite extension via the C API. Errors on remote connections.
     pub fn load_extension(&self, path: &str, entrypoint: &Option<String>) -> anyhow::Result<()> {
         match &self.inner {
             ConnectionInner::Local { .. } => {
@@ -1096,6 +1240,8 @@ impl Connection {
         }
     }
 
+    /// Prepare and run `sql` to completion, returning the number of result
+    /// rows. Comment-only/empty input returns `Ok(0)`.
     pub fn execute(&self, sql: &str) -> Result<usize, SQLiteError> {
         match self.prepare(sql)? {
             (_, Some(stmt)) => stmt.execute(),
@@ -1104,6 +1250,7 @@ impl Connection {
         }
     }
 
+    /// Run every statement in `sql` (via `sqlite3_exec`), discarding rows.
     pub fn execute_script(&self, sql: &str) -> Result<(), SQLiteError> {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
@@ -1134,7 +1281,8 @@ impl Connection {
 
     /// Register a progress handler, replacing (and freeing) any previous one.
     /// Returning `true` from the handler interrupts the running statement
-    /// (SQLITE_INTERRUPT).
+    /// (SQLITE_INTERRUPT). No-op on remote connections (the server executes
+    /// fully and returns results).
     ///
     /// Safety of the registration: the handler runs on whatever thread is
     /// stepping a statement (hence the `Send` bound; the connection is opened
@@ -1186,6 +1334,8 @@ impl Connection {
         }
     }
 
+    /// Serialize the main database to bytes (`sqlite3_serialize`). Asks the
+    /// server on remote connections.
     pub fn serialize(&self) -> Result<Vec<u8>, SQLiteError> {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => unsafe {
@@ -1217,6 +1367,19 @@ impl Connection {
         }
     }
 
+    /// Prepare the first statement in `sql`. The success tuple
+    /// `(remaining_offset, statement)` has four shapes:
+    ///
+    /// - `(None, Some(stmt))` — one statement, nothing left over.
+    /// - `(Some(offset), Some(stmt))` — a statement, plus more SQL starting
+    ///   at byte `offset` (prepare again with `&sql[offset..]`).
+    /// - `(None, None)` — nothing to prepare: empty or comment-only input.
+    /// - `(Some(offset), None)` — leading comment/whitespace consumed, real
+    ///   SQL starts at `offset` (only whitespace/comments were prepared).
+    ///
+    /// On remote connections this executes the query server-side and
+    /// returns a `Buffered` statement (no parameters; use
+    /// [`Connection::prepare_remote`] to pass any).
     pub fn prepare(&self, sql: &str) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
@@ -1292,7 +1455,10 @@ impl Connection {
         }
     }
 
-    /// https://www.sqlite.org/c3ref/interrupt.html
+    /// Whether `interrupt()` has been called on this connection.
+    /// Always `false` for remote connections.
+    ///
+    /// <https://www.sqlite.org/c3ref/interrupt.html>
     pub fn is_interrupted(&self) -> bool {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
@@ -1302,7 +1468,7 @@ impl Connection {
         }
     }
 
-    /// https://www.sqlite.org/c3ref/interrupt.html
+    /// <https://www.sqlite.org/c3ref/interrupt.html>
     pub fn interrupt(&self) {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
@@ -1446,9 +1612,12 @@ fn parse_remote_path(input: &str) -> Result<(Option<String>, String, Option<u16>
     }
 }
 
-/// https://www.sqlite.org/c3ref/complete.html
+/// Whether `sql` ends in a complete SQL statement (terminating semicolon
+/// outside any string/comment), per `sqlite3_complete`. Used by the REPL and
+/// Jupyter to decide if input needs another line. Input containing an
+/// interior NUL byte is never complete.
 ///
-/// Input containing an interior NUL byte is never a complete SQL statement.
+/// <https://www.sqlite.org/c3ref/complete.html>
 pub fn complete(sql: &str) -> bool {
     let Ok(sql) = CString::new(sql) else {
         return false;
@@ -1485,6 +1654,7 @@ pub fn input_complete(input: &str) -> bool {
     false
 }
 
+/// The linked SQLite library version, e.g. `"3.50.1"`.
 pub fn sqlite_version() -> Cow<'static, str> {
     unsafe { CStr::from_ptr(sqlite3_libversion()).to_string_lossy() }
 }
@@ -1639,7 +1809,7 @@ mod tests {
 
         // NUL-containing text values bind and round-trip intact
         let (_, stmt) = conn.prepare("select ?").unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         stmt.bind_text(1, "a\0b").unwrap();
         let row = stmt.next().unwrap().unwrap();
         match &row.first().unwrap().value {
@@ -1765,7 +1935,7 @@ mod tests {
         // Open readonly and verify reads work
         let conn = Connection::open_readonly(db_str).unwrap();
         let (_, stmt) = conn.prepare("SELECT * FROM t").unwrap();
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         assert!(stmt.readonly());
         let row = stmt.next().unwrap();
         assert!(row.is_some());

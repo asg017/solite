@@ -33,15 +33,9 @@ impl<'a> HelpItem<'a> {
     }
 }
 
-enum HelpBarEntry<'a> {
-    Item(HelpItem<'a>),
-    /// Separator (vertical bar)
-    Separator,
-}
-
 /// Builder for creating help bar content
 pub struct HelpBar<'a> {
-    items: Vec<HelpBarEntry<'a>>,
+    items: Vec<HelpItem<'a>>,
 }
 
 impl<'a> HelpBar<'a> {
@@ -51,21 +45,13 @@ impl<'a> HelpBar<'a> {
 
     /// Add a key binding with a label
     pub fn item(mut self, key: &'a str, label: &'a str) -> Self {
-        self.items
-            .push(HelpBarEntry::Item(HelpItem::new(key, label)));
+        self.items.push(HelpItem::new(key, label));
         self
     }
 
     /// Add multiple keys that do the same thing (displayed as "key1/key2 label")
     pub fn keys(mut self, keys: Vec<&'a str>, label: &'a str) -> Self {
-        self.items
-            .push(HelpBarEntry::Item(HelpItem::keys(keys, label)));
-        self
-    }
-
-    /// Add a separator between groups
-    pub fn separator(mut self) -> Self {
-        self.items.push(HelpBarEntry::Separator);
+        self.items.push(HelpItem::keys(keys, label));
         self
     }
 
@@ -78,28 +64,18 @@ impl<'a> HelpBar<'a> {
 
         let mut spans = Vec::new();
 
-        for (i, entry) in self.items.into_iter().enumerate() {
+        for (i, item) in self.items.into_iter().enumerate() {
             if i > 0 {
-                match &entry {
-                    HelpBarEntry::Separator => {}
-                    _ => spans.push(Span::styled("  ", label_style)),
-                }
+                spans.push(Span::styled("  ", label_style));
             }
 
-            match entry {
-                HelpBarEntry::Item(item) => {
-                    for (j, key) in item.keys.iter().enumerate() {
-                        if j > 0 {
-                            spans.push(Span::styled("/", label_style));
-                        }
-                        spans.push(Span::styled(*key, key_style));
-                    }
-                    spans.push(Span::styled(item.label, label_style));
+            for (j, key) in item.keys.iter().enumerate() {
+                if j > 0 {
+                    spans.push(Span::styled("/", label_style));
                 }
-                HelpBarEntry::Separator => {
-                    spans.push(Span::styled("  │  ", label_style));
-                }
+                spans.push(Span::styled(*key, key_style));
             }
+            spans.push(Span::styled(item.label, label_style));
         }
 
         Line::from(spans)

@@ -2,7 +2,7 @@
 source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
-"people > row 1                       Solite                       ? help  q quit"
+"people > row 1                       Solite               ? help  q back  Q quit"
 "                                   people id=1                                  "
 "                                                                                "
 "────────────────────────────────────────────────────────────────────────────────"
@@ -21,4 +21,4 @@ expression: self.terminal.backend()
 "                                                                                "
 "                                                                                "
 "────────────────────────────────────────────────────────────────────────────────"
-"      j/k navigate  y/Enter copy value  p copy PK  J copy JSON  │    q back     "
+"     j/k navigate  y/Enter copy value  p copy PK  Y/J copy JSON  q/Esc back     "

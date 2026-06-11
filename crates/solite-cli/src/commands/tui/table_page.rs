@@ -1,14 +1,14 @@
 use std::fmt::Write;
 
 use crate::commands::tui::copy_popup::{CopyOption, CopyPopup};
-use crate::commands::tui::help_bar::HelpBar;
+use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, TABLE_KEYS};
 use crate::commands::tui::row_page::{get_primary_keys, PrimaryKeyInfo};
 use crate::commands::tui::utils::render_value_for_display;
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{
     value_to_string, Frame, HandleKeyResult, NavigateToPage, RowPageData, SharedClipboard,
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
@@ -320,6 +320,7 @@ pub struct TablePage<'a> {
     n_columns_show: usize,
     error: Option<String>,
     copy_popup: CopyPopup,
+    help_popup: HelpPopup,
     primary_keys: Vec<PrimaryKeyInfo>,
     /// Row count tracker (streams count incrementally)
     pub(crate) row_count: RowCount,
@@ -357,6 +358,7 @@ impl<'a> TablePage<'a> {
             footer_message: None,
             error: result.error,
             copy_popup: CopyPopup::new(),
+            help_popup: HelpPopup::new(" Help — Table ", TABLE_KEYS),
             primary_keys,
             row_count,
             window_start: 0,
@@ -557,8 +559,40 @@ enum SortDirection {
 }
 
 impl TablePage<'_> {
+    /// Move the selection down one page (PageDown / Ctrl+d).
+    fn page_down(&mut self) {
+        let page_size = 20; // Approximate visible rows
+        if let Some(current) = self.state.selected() {
+            let absolute = self.window_to_absolute(current);
+            let target = absolute
+                .saturating_add(page_size)
+                .min(self.row_count.known.saturating_sub(1));
+            self.ensure_row_loaded(target);
+            if let Some(window_idx) = self.absolute_to_window(target) {
+                self.state.select(Some(window_idx));
+            }
+        }
+    }
+
+    /// Move the selection up one page (PageUp / Ctrl+u).
+    fn page_up(&mut self) {
+        let page_size = 20; // Approximate visible rows
+        if let Some(current) = self.state.selected() {
+            let absolute = self.window_to_absolute(current);
+            let target = absolute.saturating_sub(page_size);
+            self.ensure_row_loaded(target);
+            if let Some(window_idx) = self.absolute_to_window(target) {
+                self.state.select(Some(window_idx));
+            }
+        }
+    }
+
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> HandleKeyResult {
-        // Handle copy popup first if visible
+        // Popups consume keys while visible
+        if self.help_popup.visible {
+            self.help_popup.handle_key(key);
+            return HandleKeyResult::None;
+        }
         if self.copy_popup.visible {
             if let Some(option) = self.copy_popup.handle_key(key) {
                 self.execute_copy(option);
@@ -569,7 +603,26 @@ impl TablePage<'_> {
         // Clear footer message on any key press
         self.footer_message = None;
 
+        // Ctrl+d / Ctrl+u page like PageDown / PageUp
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('d') => {
+                    self.page_down();
+                    return HandleKeyResult::None;
+                }
+                KeyCode::Char('u') => {
+                    self.page_up();
+                    return HandleKeyResult::None;
+                }
+                _ => {}
+            }
+        }
+
         match key.code {
+            KeyCode::Char('?') => {
+                self.help_popup.show();
+                HandleKeyResult::None
+            }
             KeyCode::Char('q') | KeyCode::Esc => HandleKeyResult::Navigate(NavigateToPage::Listing),
             KeyCode::Char('Q') => HandleKeyResult::Quit,
             KeyCode::Char('[') => {
@@ -618,32 +671,12 @@ impl TablePage<'_> {
                 }
                 HandleKeyResult::None
             }
-            // Page down (Ctrl+d or PageDown)
             KeyCode::PageDown => {
-                let page_size = 20; // Approximate visible rows
-                if let Some(current) = self.state.selected() {
-                    let absolute = self.window_to_absolute(current);
-                    let target = absolute
-                        .saturating_add(page_size)
-                        .min(self.row_count.known.saturating_sub(1));
-                    self.ensure_row_loaded(target);
-                    if let Some(window_idx) = self.absolute_to_window(target) {
-                        self.state.select(Some(window_idx));
-                    }
-                }
+                self.page_down();
                 HandleKeyResult::None
             }
-            // Page up (Ctrl+u or PageUp)
             KeyCode::PageUp => {
-                let page_size = 20; // Approximate visible rows
-                if let Some(current) = self.state.selected() {
-                    let absolute = self.window_to_absolute(current);
-                    let target = absolute.saturating_sub(page_size);
-                    self.ensure_row_loaded(target);
-                    if let Some(window_idx) = self.absolute_to_window(target) {
-                        self.state.select(Some(window_idx));
-                    }
-                }
+                self.page_up();
                 HandleKeyResult::None
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -854,18 +887,11 @@ impl TablePage<'_> {
         }
 
         // Help bar
-        HelpBar::new()
-            .keys(vec!["h", "j", "k", "l"], " navigate")
-            .item("Enter", " view row")
-            .item("[", " sort asc")
-            .item("]", " desc")
-            .separator()
-            .keys(vec!["y", "c"], " copy")
-            .item("q", " back")
-            .render(frame, help_rect);
+        help_bar_from(TABLE_KEYS).render(frame, help_rect);
 
-        // Copy popup (renders on top)
+        // Popups (render on top)
         self.copy_popup.render(frame, area);
+        self.help_popup.render(frame, area);
     }
 }
 

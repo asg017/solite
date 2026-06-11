@@ -9,7 +9,7 @@ use ratatui::Frame;
 use solite_core::sqlite::OwnedValue;
 use solite_core::Runtime;
 
-use crate::commands::tui::help_bar::HelpBar;
+use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, ROW_KEYS};
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::utils::render_value_for_display;
 use crate::commands::tui::{value_to_string, HandleKeyResult, NavigateToPage, SharedClipboard};
@@ -102,6 +102,7 @@ pub struct RowPage {
     pub state: ListState,
     pub footer_message: Option<String>,
     clipboard: SharedClipboard,
+    help_popup: HelpPopup,
 }
 
 impl RowPage {
@@ -128,6 +129,7 @@ impl RowPage {
             state,
             footer_message: None,
             clipboard,
+            help_popup: HelpPopup::new(" Help — Row ", ROW_KEYS),
         }
     }
 
@@ -236,9 +238,18 @@ impl RowPage {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> HandleKeyResult {
+        if self.help_popup.visible {
+            self.help_popup.handle_key(key);
+            return HandleKeyResult::None;
+        }
+
         self.footer_message = None;
 
         match key.code {
+            KeyCode::Char('?') => {
+                self.help_popup.show();
+                HandleKeyResult::None
+            }
             KeyCode::Char('q') | KeyCode::Esc => {
                 HandleKeyResult::Navigate(NavigateToPage::BackToTable)
             }
@@ -394,14 +405,10 @@ impl RowPage {
         }
 
         // Help bar
-        HelpBar::new()
-            .keys(vec!["j", "k"], " navigate")
-            .keys(vec!["y", "Enter"], " copy value")
-            .item("p", " copy PK")
-            .item("J", " copy JSON")
-            .separator()
-            .item("q", " back")
-            .render(frame, help_rect);
+        help_bar_from(ROW_KEYS).render(frame, help_rect);
+
+        // Help overlay (renders on top)
+        self.help_popup.render(frame, area);
     }
 }
 

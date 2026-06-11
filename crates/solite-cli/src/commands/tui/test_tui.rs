@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::commands::tui::{App, Clipboard, ListingPage, Page, SharedClipboard};
-    use crossterm::event::{KeyCode, KeyEvent};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use insta::assert_snapshot;
     use ratatui::{backend::TestBackend, Terminal};
     use solite_core::Runtime;
@@ -293,6 +293,56 @@ mod tests {
         app.send_char('y');
         app.send_char('2');
         assert_eq!(app.last_copied().unwrap(), "221");
+
+        // Ctrl+d / Ctrl+u page like PageDown / PageUp
+        app.send_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "241");
+        app.send_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "221");
+    }
+
+    #[test]
+    fn test_help_overlay() {
+        let mut runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(
+                r#"
+              create table t(a, b);
+              insert into t values (1, 'x');
+              "#,
+            )
+            .unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 24);
+
+        // ? opens the overlay on the listing page; ? again dismisses it
+        app.send_char('?');
+        app.draw_and_snapshot("help overlay listing");
+        app.send_char('?');
+        app.draw_and_snapshot("help overlay dismissed");
+
+        // table page overlay
+        app.send_key(KeyCode::Enter.into());
+        app.send_char('?');
+        app.draw_and_snapshot("help overlay table");
+        // while the overlay is open, other keys are consumed (no navigation)
+        app.send_char('j');
+        app.send_char('y');
+        assert!(app.copied().is_empty());
+        // Esc dismisses the overlay without leaving the page
+        app.send_key(KeyCode::Esc.into());
+
+        // row page overlay
+        app.send_key(KeyCode::Enter.into());
+        app.send_char('?');
+        app.draw_and_snapshot("help overlay row");
+        // q dismisses the overlay (does not navigate back)
+        app.send_char('q');
+        app.draw_and_snapshot("help overlay row dismissed");
     }
 
     #[test]

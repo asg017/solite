@@ -8,7 +8,7 @@ use ratatui::widgets::{List, ListDirection, ListItem, ListState};
 use ratatui::Frame;
 use solite_core::Runtime;
 
-use crate::commands::tui::help_bar::HelpBar;
+use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, LISTING_KEYS};
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{HandleKeyResult, NavigateToPage};
 
@@ -18,6 +18,7 @@ pub struct ListingPage {
     pub(crate) database_name: String,
     pub(crate) tables: Vec<String>,
     pub(crate) error: Option<String>,
+    help_popup: HelpPopup,
 }
 
 impl ListingPage {
@@ -71,11 +72,21 @@ impl ListingPage {
             tables,
             database_name,
             error,
+            help_popup: HelpPopup::new(" Help — Tables ", LISTING_KEYS),
         }
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> HandleKeyResult {
+        if self.help_popup.visible {
+            self.help_popup.handle_key(key);
+            return HandleKeyResult::None;
+        }
+
         match key.code {
+            KeyCode::Char('?') => {
+                self.help_popup.show();
+                HandleKeyResult::None
+            }
             KeyCode::Char('q') | KeyCode::Esc => HandleKeyResult::Quit,
             KeyCode::Char('j') | KeyCode::Down => {
                 self.state.select_next();
@@ -174,12 +185,9 @@ impl ListingPage {
         frame.render_stateful_widget(list, list_area, &mut self.state);
 
         // Render help bar
-        HelpBar::new()
-            .keys(vec!["j", "k"], " navigate")
-            .item("Enter", " open")
-            .item("1-9", " jump")
-            .separator()
-            .item("q", " quit")
-            .render(frame, help_area);
+        help_bar_from(LISTING_KEYS).render(frame, help_area);
+
+        // Help overlay (renders on top)
+        self.help_popup.render(frame, area);
     }
 }

@@ -5,6 +5,7 @@
 
 mod copy_popup;
 mod help_bar;
+mod help_popup;
 mod listing_page;
 mod row_page;
 mod table_page;
@@ -208,13 +209,24 @@ impl<'a> App<'a> {
             center,
         );
 
-        // Right: quick help
-        let help = Line::from(vec![
-            "?".bold().fg::<Color>(self.theme.keycap.clone().into()),
-            " help  ".into(),
-            "q".bold().fg::<Color>(self.theme.keycap.clone().into()),
-            " quit".into(),
-        ])
+        // Right: quick help (q backs out of table/row pages; only Q hard-quits)
+        let keycap: Color = self.theme.keycap.clone().into();
+        let help = match &self.page {
+            Page::Listing(_) => Line::from(vec![
+                "?".bold().fg(keycap),
+                " help  ".into(),
+                "q".bold().fg(keycap),
+                " quit".into(),
+            ]),
+            Page::Table(_) | Page::Row(_) => Line::from(vec![
+                "?".bold().fg(keycap),
+                " help  ".into(),
+                "q".bold().fg(keycap),
+                " back  ".into(),
+                "Q".bold().fg(keycap),
+                " quit".into(),
+            ]),
+        }
         .right_aligned();
         frame.render_widget(help, right);
 

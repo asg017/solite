@@ -1,0 +1,28 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"t > row 1                            Solite               ? help  q back  Q quit"
+"                                     t Row 1                                    "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"› a                     1                                                       "
+"  b                     x                                                       "
+"                                                                                "
+"                    ┌ Help — Row ──────────────────────────┐                    "
+"                    │          j/k  navigate               │                    "
+"                    │          g/G  first/last column      │                    "
+"                    │      y/Enter  copy value             │                    "
+"                    │            p  copy PK                │                    "
+"                    │          Y/J  copy JSON              │                    "
+"                    │            ?  help                   │                    "
+"                    │        q/Esc  back                   │                    "
+"                    │            Q  quit                   │                    "
+"                    │ press ? or Esc to close              │                    "
+"                    └──────────────────────────────────────┘                    "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"     j/k navigate  y/Enter copy value  p copy PK  Y/J copy JSON  q/Esc back     "

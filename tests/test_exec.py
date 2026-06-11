@@ -115,3 +115,18 @@ def test_exec_error_output(solite_cli):
     # the diagnostic names the problem; no Debug-formatted anyhow dump
     assert "no such table" in result.stderr
     assert "Error: SQL error" not in result.stderr
+
+
+def test_exec_rejects_output_and_format_flags(solite_cli, tmp_path):
+    """The formerly-hidden reserved -o/-f flags are rejected, not ignored."""
+    db = str(tmp_path / "data.db")
+    out = tmp_path / "out.json"
+
+    result = solite_cli(["exec", db, "create table t(a)", "-o", str(out)])
+    assert not result.success
+    assert "unexpected argument" in result.stderr
+    assert not out.exists()
+
+    result = solite_cli(["exec", db, "create table t(a)", "-f", "json"])
+    assert not result.success
+    assert "unexpected argument" in result.stderr

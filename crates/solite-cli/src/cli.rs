@@ -196,14 +196,6 @@ pub struct ExecuteArgs {
     #[arg(num_args = 0..=2)]
     pub args: Vec<String>,
 
-    /// Reserved; currently ignored
-    #[arg(long, short = 'o', hide = true)]
-    pub output: Option<PathBuf>,
-
-    /// Reserved; currently ignored
-    #[arg(long, short = 'f', value_enum, hide = true)]
-    pub format: Option<QueryFormat>,
-
     /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
     /// Integer/decimal values bind as numbers; single-quote to force
     /// text, e.g. -p id "'42'"

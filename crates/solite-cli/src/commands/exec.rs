@@ -242,8 +242,6 @@ mod tests {
     fn make_args(args: Vec<&str>) -> ExecuteArgs {
         ExecuteArgs {
             args: args.into_iter().map(String::from).collect(),
-            output: None,
-            format: None,
             parameters: vec![],
         }
     }
@@ -438,8 +436,6 @@ mod tests {
                 db_str.to_string(),
                 "INSERT INTO t VALUES (42)".into(),
             ],
-            output: None,
-            format: None,
             parameters: vec![],
         };
         exec_impl(args).unwrap();
@@ -512,8 +508,6 @@ mod tests {
     fn exec_error_reported() {
         let args = ExecuteArgs {
             args: vec!["INSERT INTO nonexistent VALUES (1)".into()],
-            output: None,
-            format: None,
             parameters: vec![],
         };
         assert!(exec_impl(args).is_err());

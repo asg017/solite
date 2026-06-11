@@ -110,6 +110,45 @@ def test_run_procedure_with_params(solite_cli, tmp_path):
     assert "hi world" in result.stdout
 
 
+def test_run_procedure_params_scoped(solite_cli, tmp_path):
+    # `.run file proc --k=v` must not leak the parameter into the session
+    (tmp_path / "procs.sql").write_text(
+        "-- name: greet :row\nselect upper(:x) as msg;\n"
+    )
+    (tmp_path / "main.sql").write_text(
+        ".timer off\n.run procs.sql greet --x=world\nselect :x as leaked;\n"
+    )
+    result = solite_cli(["run", "main.sql"], cwd=tmp_path)
+    assert result.success
+    assert "WORLD" in result.stdout
+    # The trailing `select :x` binds NULL, not the leaked value
+    assert "world" not in result.stdout.replace("WORLD", "")
+
+
+def test_run_procedure_params_restored(solite_cli, tmp_path):
+    # A pre-existing parameter overridden by `.run file proc --k=v` is restored
+    (tmp_path / "procs.sql").write_text(
+        "-- name: greet :row\nselect :x as msg;\n"
+    )
+    (tmp_path / "main.sql").write_text(
+        ".timer off\n.param set x original\n.run procs.sql greet --x=override\n"
+        "select :x as after;\n"
+    )
+    result = solite_cli(["run", "main.sql"], cwd=tmp_path)
+    assert result.success
+    assert "override" in result.stdout
+    assert "original" in result.stdout
+
+
+def test_run_failed_leaves_no_params(solite_cli, tmp_path):
+    # A failed .run (missing file) must not define its --k=v parameters
+    (tmp_path / "main.sql").write_text(
+        ".timer off\n.run missing.sql greet --x=leaky\nselect :x as leaked;\n"
+    )
+    result = solite_cli(["run", "main.sql"], cwd=tmp_path)
+    assert "leaky" not in result.stdout
+
+
 def test_run_procedure_binds_dollar_params(solite_cli, tmp_path):
     # `.run file proc --x=v` stores the bare key "x"; procedures written with
     # the documented `$x` syntax must bind it too.

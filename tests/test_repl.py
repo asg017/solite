@@ -83,6 +83,23 @@ def test_param_set_prefixed_key_still_binds(solite_cli):
     assert "prefixed" in out
 
 
+def test_repl_run_procedure_params_scoped(solite_cli, tmp_path):
+    # `.run file proc --k=v` in the REPL must not leak parameters
+    (tmp_path / "procs.sql").write_text(
+        "-- name: greet :row\nselect upper(:x) as msg;\n"
+    )
+    out = solite_cli(
+        [],
+        communicate=[
+            b".timer off\n.run procs.sql greet --x=world\nselect :x as leaked;\n"
+        ],
+        kill=True,
+        cwd=tmp_path,
+    ).stdout
+    assert "WORLD" in out
+    assert "world" not in out.replace("WORLD", "")
+
+
 def test_sigint_interrupts_query_without_exiting():
     """SIGINT (Ctrl-C) during a long-running query aborts the statement but
     keeps the REPL alive; a subsequent statement still executes."""

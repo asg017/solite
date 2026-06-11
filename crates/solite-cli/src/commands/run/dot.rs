@@ -162,13 +162,10 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {
-                // Procedure mode: set params, load file, call procedure
-                for (key, value) in &run_cmd.parameters {
-                    if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
-                        eprintln!("Error setting parameter {}: {}", key, e);
-                        return;
-                    }
-                }
+                // Procedure mode: load file, then call the procedure with
+                // --key=val parameters scoped to this invocation. Parameters
+                // are defined only after the file loads and the procedure
+                // resolves, so a failed .run leaves nothing behind.
                 if let Err(e) = runtime.load_file(&run_cmd.file) {
                     eprintln!("Error loading file '{}': {}", run_cmd.file, e);
                     return;
@@ -177,6 +174,13 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                     Some(p) => p.clone(),
                     None => {
                         eprintln!("Unknown procedure: '{}'", proc_name);
+                        return;
+                    }
+                };
+                let saved = match runtime.save_and_define_parameters(&run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Error setting parameters: {}", e);
                         return;
                     }
                 };
@@ -191,6 +195,7 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                         eprintln!("Error preparing procedure '{}': {:?}", proc_name, e);
                     }
                 }
+                runtime.restore_parameters(saved);
             } else {
                 // File mode: run_file_begin, step loop, run_file_end
                 let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {

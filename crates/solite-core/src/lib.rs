@@ -81,8 +81,15 @@ pub struct State {
 #[derive(Debug)]
 pub struct SavedRunState {
     stack: Vec<Block>,
-    saved_params: Vec<(String, Option<OwnedValue>)>,
+    saved_params: SavedParameters,
 }
+
+/// Previous values of parameters overridden by a scoped operation
+/// (e.g. `.run file.sql --key=val`), captured by
+/// [`Runtime::save_and_define_parameters`] and restored by
+/// [`Runtime::restore_parameters`].
+#[derive(Debug)]
+pub struct SavedParameters(Vec<(String, Option<OwnedValue>)>);
 
 pub struct Runtime {
     pub connection: Connection,
@@ -715,15 +722,15 @@ impl Runtime {
         }
 
         let content = self.read_file(path)?;
-        self.running_files.push(path.to_string());
 
         // Save current param values and set new ones
-        let mut saved_params = Vec::new();
-        for (key, value) in params {
-            let old_value = self.lookup_parameter(key);
-            saved_params.push((key.clone(), old_value));
-            self.define_parameter(key.clone(), value.clone()).unwrap();
-        }
+        let saved_params = self.save_and_define_parameters(params)?;
+
+        // Mark the file as running only after all fallible setup succeeded:
+        // on error the caller never gets a SavedRunState (so run_file_end
+        // never pops), and a stale entry would falsely report a recursion
+        // cycle for every later .run of this file.
+        self.running_files.push(path.to_string());
 
         // Save and clear the stack
         let saved_stack: Vec<Block> = self.stack.drain(..).collect();
@@ -744,10 +751,36 @@ impl Runtime {
         self.running_files.pop();
 
         // Restore parameters
-        for (key, old_value) in saved.saved_params {
+        self.restore_parameters(saved.saved_params);
+
+        // Restore the stack
+        self.stack.extend(saved.stack);
+    }
+
+    /// Save the current values of `params` and define the new ones, so a
+    /// scoped operation (`.run file [proc] --key=val`) can later restore the
+    /// session's parameters with [`Runtime::restore_parameters`].
+    pub fn save_and_define_parameters(
+        &mut self,
+        params: &HashMap<String, String>,
+    ) -> Result<SavedParameters, String> {
+        let mut saved = Vec::new();
+        for (key, value) in params {
+            let old_value = self.lookup_parameter(key);
+            saved.push((key.clone(), old_value));
+            self.define_parameter(key.clone(), value.clone())?;
+        }
+        Ok(SavedParameters(saved))
+    }
+
+    /// Restore parameters saved by [`Runtime::save_and_define_parameters`].
+    /// Parameters that did not exist before are deleted.
+    pub fn restore_parameters(&mut self, saved: SavedParameters) {
+        for (key, old_value) in saved.0 {
             match old_value {
                 Some(OwnedValue::Text(s)) => {
-                    self.define_parameter(key, std::str::from_utf8(&s).unwrap().to_string()).unwrap();
+                    self.define_parameter(key, std::str::from_utf8(&s).unwrap().to_string())
+                        .unwrap();
                 }
                 Some(OwnedValue::Integer(v)) => {
                     self.define_parameter(key, v.to_string()).unwrap();
@@ -755,17 +788,11 @@ impl Runtime {
                 Some(OwnedValue::Double(v)) => {
                     self.define_parameter(key, v.to_string()).unwrap();
                 }
-                Some(_) => {
-                    self.delete_parameter(&key);
-                }
-                None => {
+                Some(_) | None => {
                     self.delete_parameter(&key);
                 }
             }
         }
-
-        // Restore the stack
-        self.stack.extend(saved.stack);
     }
 }
 

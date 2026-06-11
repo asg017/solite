@@ -257,12 +257,6 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {
-                for (key, value) in &run_cmd.parameters {
-                    if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
-                        eprintln!("✗ failed to set parameter {}: {}", key, e);
-                        return;
-                    }
-                }
                 if let Err(e) = runtime.load_file(&run_cmd.file) {
                     eprintln!("✗ failed to load file '{}': {}", run_cmd.file, e);
                     return;
@@ -271,6 +265,16 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                     Some(p) => p.clone(),
                     None => {
                         eprintln!("✗ unknown procedure: '{}'", proc_name);
+                        return;
+                    }
+                };
+                // Scope --key=val parameters to this invocation; defined only
+                // after the file loads and the procedure resolves, so a failed
+                // .run leaves no parameters behind.
+                let saved = match runtime.save_and_define_parameters(&run_cmd.parameters) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("✗ failed to set parameters: {}", e);
                         return;
                     }
                 };
@@ -288,6 +292,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                         eprintln!("✗ failed to prepare procedure '{}': {:?}", proc_name, e);
                     }
                 }
+                runtime.restore_parameters(saved);
             } else {
                 let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
                     Ok(s) => s,
@@ -296,43 +301,50 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                         return;
                     }
                 };
-                loop {
-                    match runtime.next_stepx() {
-                        None => break,
-                        Some(Ok(step)) => match step.result {
-                            StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
-                            StepResult::ProcedureDefinition(ref proc) => {
-                                println!("Registered procedure: {}", proc.name);
-                            }
-                            StepResult::SqlStatement { mut stmt, .. } => {
-                                let start = std::time::Instant::now();
-                                let config = solite_table::TableConfig::terminal();
-                                if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
-                                    eprintln!("✗ failed to print table: {}", e);
-                                }
-                                if *timer {
-                                    println!(
-                                        "{}",
-                                        crate::colors::italic_gray(format_duration(start.elapsed()))
-                                    );
-                                }
-                            }
-                        },
-                        Some(Err(error)) => match error {
-                            StepError::Prepare {
-                                error,
-                                file_name,
-                                src,
-                                offset,
-                            } => {
-                                crate::errors::report_error(&file_name, &src, &error, Some(offset));
-                            }
-                            StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
-                        },
-                    }
-                }
+                step_loop(runtime, timer);
                 runtime.run_file_end(saved);
             }
+        }
+    }
+}
+
+/// Drain the runtime's execution stack, printing results and errors. The
+/// single step loop shared by `execute()` and the `.run` file branch of
+/// `handle_dot_command`.
+fn step_loop(runtime: &mut Runtime, timer: &mut bool) {
+    loop {
+        match runtime.next_stepx() {
+            None => break,
+            Some(Ok(step)) => match step.result {
+                StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
+                StepResult::ProcedureDefinition(ref proc) => {
+                    println!("Registered procedure: {}", proc.name);
+                }
+                StepResult::SqlStatement { mut stmt, .. } => {
+                    let start = std::time::Instant::now();
+                    let config = TableConfig::terminal();
+                    if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
+                        eprintln!("✗ failed to print table: {}", e);
+                    }
+                    if *timer {
+                        println!(
+                            "{}",
+                            crate::colors::italic_gray(format_duration(start.elapsed()))
+                        );
+                    }
+                }
+            },
+            Some(Err(error)) => match error {
+                StepError::Prepare {
+                    error,
+                    file_name,
+                    src,
+                    offset,
+                } => {
+                    crate::errors::report_error(&file_name, &src, &error, Some(offset));
+                }
+                StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
+            },
         }
     }
 }
@@ -374,45 +386,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
         }
     }
     runtime.enqueue("[repl]", &code, BlockSource::Repl);
-
-    loop {
-        match runtime.next_stepx() {
-            Some(Ok(step)) => match step.result {
-                StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
-                StepResult::ProcedureDefinition(ref proc) => {
-                    println!("Registered procedure: {}", proc.name);
-                }
-                StepResult::SqlStatement { mut stmt, .. } => {
-                    let start = std::time::Instant::now();
-                    let config = TableConfig::terminal();
-                    match solite_table::print_statement(&mut stmt, &config) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("✗ failed to print table: {}", e);
-                        }
-                    }
-                    if *timer {
-                        println!(
-                            "{}",
-                            crate::colors::italic_gray(format_duration(start.elapsed()))
-                        );
-                    }
-                }
-            },
-            None => break,
-            Some(Err(error)) => match error {
-                StepError::Prepare {
-                    error,
-                    file_name,
-                    src,
-                    offset,
-                } => {
-                    crate::errors::report_error(&file_name, &src, &error, Some(offset));
-                }
-                StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
-            },
-        }
-    }
+    step_loop(runtime, timer);
 }
 
 // possible arrows: › ❱ ❯

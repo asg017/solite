@@ -73,6 +73,26 @@ def test_complete(solite_kernel):
     assert content["status"] == "ok"
 
 
+def test_dot_command_errors_fail_cell(solite_kernel):
+    # failing .open: parent directory doesn't exist
+    reply, output_msgs = solite_kernel.execute(".open /nonexistent/dir/db.db")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in output_msgs if m["msg_type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["content"]["ename"] == "OpenError"
+
+    # failing .load: not a loadable extension
+    reply, output_msgs = solite_kernel.execute(".load not-an-extension")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in output_msgs if m["msg_type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["content"]["ename"] == "LoadError"
+
+    # successful dot commands still report ok
+    reply, output_msgs = solite_kernel.execute(".tables")
+    assert reply["content"]["status"] == "ok"
+
+
 def test_run_dot_command(solite_kernel, tmp_path):
     sql_file = tmp_path / "queries.sql"
     sql_file.write_text(

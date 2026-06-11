@@ -54,8 +54,7 @@ async fn handle_dot_command_inner(
             }
             Err(e) => {
                 sender
-                    .send_plain(format!("Graphviz error: {}", e), parent)
-                    .await?;
+                    .send_error("GraphvizError", &format!("{}", e)).await?;
             }
         },
         DotCommand::Dotenv(dotenv_cmd) => match dotenv_cmd.execute() {
@@ -94,8 +93,7 @@ async fn handle_dot_command_inner(
             }
             Err(e) => {
                 sender
-                    .send_plain(format!("Dotenv error: {}", e), parent)
-                    .await?;
+                    .send_error("DotenvError", &format!("{}", e)).await?;
             }
         },
         DotCommand::Tui(_) => {
@@ -130,8 +128,7 @@ async fn handle_dot_command_inner(
             }
             Err(e) => {
                 sender
-                    .send_plain(format!("Shell error: {}", e), parent)
-                    .await?;
+                    .send_error("ShellError", &format!("{}", e)).await?;
             }
         },
         DotCommand::Timer(_) => {
@@ -144,7 +141,15 @@ async fn handle_dot_command_inner(
                 solite_core::dot::ParameterCommand::Set { key, value } => {
                     match runtime.define_parameter(key.clone(), value) {
                         Ok(()) => format!("Set parameter: {}", key),
-                        Err(e) => format!("Failed to set parameter {}: {}", key, e),
+                        Err(e) => {
+                            sender
+                                .send_error(
+                                    "ParameterError",
+                                    &format!("Failed to set parameter {}: {}", key, e),
+                                )
+                                .await?;
+                            return Ok(());
+                        }
                     }
                 }
                 solite_core::dot::ParameterCommand::Unset(key) => {
@@ -181,20 +186,29 @@ async fn handle_dot_command_inner(
                 }
                 Err(e) => {
                     sender
-                        .send_plain(format!("Open error: {}", e), parent)
-                        .await?;
+                        .send_error("OpenError", &format!("{}", e)).await?;
                 }
             }
         }
         DotCommand::Load(load_cmd) => {
-            let msg = match load_cmd.execute(&mut runtime.connection) {
-                Ok(LoadCommandSource::Path(v)) => format!("Loaded '{v}'"),
-                Ok(LoadCommandSource::Uv { directory, package }) => {
-                    format!("Loaded '{package}' with uv from {directory}")
+            match load_cmd.execute(&mut runtime.connection) {
+                Ok(LoadCommandSource::Path(v)) => {
+                    sender.send_plain(format!("Loaded '{v}'"), parent).await?;
                 }
-                Err(error) => format!("Load failed: {}", error),
-            };
-            sender.send_plain(msg, parent).await?;
+                Ok(LoadCommandSource::Uv { directory, package }) => {
+                    sender
+                        .send_plain(
+                            format!("Loaded '{package}' with uv from {directory}"),
+                            parent,
+                        )
+                        .await?;
+                }
+                Err(error) => {
+                    sender
+                        .send_error("LoadError", &format!("{}", error))
+                        .await?;
+                }
+            }
         }
         DotCommand::Tables(cmd) => match cmd.execute(runtime) {
             Ok(tables) => {
@@ -202,8 +216,7 @@ async fn handle_dot_command_inner(
             }
             Err(e) => {
                 sender
-                    .send_plain(format!("Tables error: {}", e), parent)
-                    .await?;
+                    .send_error("TablesError", &format!("{}", e)).await?;
             }
         },
         DotCommand::Schema(cmd) => match cmd.execute(runtime) {
@@ -217,8 +230,7 @@ async fn handle_dot_command_inner(
             }
             Err(e) => {
                 sender
-                    .send_plain(format!("Schema error: {}", e), parent)
-                    .await?;
+                    .send_error("SchemaError", &format!("{}", e)).await?;
             }
         },
         DotCommand::Vegalite(mut cmd) => {
@@ -232,8 +244,7 @@ async fn handle_dot_command_inner(
                 }
                 Err(e) => {
                     sender
-                        .send_plain(format!("Vega-Lite error: {}", e), parent)
-                        .await?;
+                        .send_error("VegaLiteError", &format!("{}", e)).await?;
                 }
             }
         }
@@ -249,8 +260,7 @@ async fn handle_dot_command_inner(
                 }
                 Err(e) => {
                     sender
-                        .send_plain(format!("Export failed: {}", e), parent)
-                        .await?;
+                        .send_error("ExportError", &format!("{}", e)).await?;
                 }
             }
         }
@@ -291,13 +301,14 @@ async fn handle_dot_command_inner(
                 for (key, value) in &run_cmd.parameters {
                     if let Err(e) = runtime.define_parameter(key.clone(), value.clone()) {
                         sender
-                            .send_plain(format!("Failed to set parameter {}: {}", key, e), parent)
+                            .send_error("RunError", &format!("Failed to set parameter {}: {}", key, e))
                             .await?;
+                        return Ok(());
                     }
                 }
                 if let Err(e) = runtime.load_file(&run_cmd.file) {
                     sender
-                        .send_plain(format!("Failed to load file '{}': {}", run_cmd.file, e), parent)
+                        .send_error("RunError", &format!("Failed to load file '{}': {}", run_cmd.file, e))
                         .await?;
                     return Ok(());
                 }
@@ -305,7 +316,7 @@ async fn handle_dot_command_inner(
                     Some(p) => p.clone(),
                     None => {
                         sender
-                            .send_plain(format!("Unknown procedure: '{}'", proc_name), parent)
+                            .send_error("RunError", &format!("Unknown procedure: '{}'", proc_name))
                             .await?;
                         return Ok(());
                     }
@@ -316,12 +327,12 @@ async fn handle_dot_command_inner(
                     }
                     Ok((_, None)) => {
                         sender
-                            .send_plain(format!("Procedure '{}' prepared to empty statement", proc_name), parent)
+                            .send_error("RunError", &format!("Procedure '{}' prepared to empty statement", proc_name))
                             .await?;
                     }
                     Err(e) => {
                         sender
-                            .send_plain(format!("Error preparing procedure '{}': {:?}", proc_name, e), parent)
+                            .send_error("RunError", &format!("Error preparing procedure '{}': {:?}", proc_name, e))
                             .await?;
                     }
                 }
@@ -329,7 +340,7 @@ async fn handle_dot_command_inner(
                 let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
                     Ok(s) => s,
                     Err(e) => {
-                        sender.send_plain(format!("Error: {}", e), parent).await?;
+                        sender.send_error("RunError", &format!("{}", e)).await?;
                         return Ok(());
                     }
                 };

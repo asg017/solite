@@ -20,6 +20,8 @@ use std::borrow::Cow::{self, Borrowed, Owned};
 use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Simple matching bracket validator.
 #[derive(Default)]
@@ -468,6 +470,18 @@ Enter \".help\" for usage hints.
     let _ = std::fs::File::create_new(&solite_history_path);
     let _ = rl.load_history(&solite_history_path);
 
+    // Ctrl-C while a statement is running raises SIGINT (rustyline is not
+    // reading, so the terminal is in its normal mode). The handler just sets
+    // a flag; a SQLite progress handler polls it and aborts the running
+    // statement with SQLITE_INTERRUPT so the REPL survives.
+    let interrupted = Arc::new(AtomicBool::new(false));
+    {
+        let flag = Arc::clone(&interrupted);
+        // Failure to install the handler (e.g. another handler already
+        // registered) only loses query cancellation, not the REPL itself.
+        let _ = ctrlc::set_handler(move || flag.store(true, Ordering::SeqCst));
+    }
+
     loop {
         let prompt = if runtime_ref.borrow().connection.in_transaction() {
             PROMPT_TRANSACTION
@@ -488,15 +502,22 @@ Enter \".help\" for usage hints.
                     .unwrap_or(&line);
                 {
                     let mut rt = runtime_ref.borrow_mut();
+                    // Re-register every iteration: `.open` swaps the
+                    // connection out, which drops any previous registration.
+                    interrupted.store(false, Ordering::SeqCst);
+                    let flag = Arc::clone(&interrupted);
+                    rt.connection
+                        .set_progress_handler(1000, move || flag.load(Ordering::SeqCst));
                     execute(&mut rt, &mut timer, line);
                 }
                 let _ = rl.add_history_entry(line);
                 let _ = rl.append_history(&solite_history_path);
             }
             Err(ReadlineError::Interrupted) => {
+                // Ctrl-C at the prompt discards the current input line and
+                // re-prompts (like sqlite3/psql). Ctrl-D exits.
                 println!("^C");
-                runtime_ref.borrow().connection.interrupt();
-                break;
+                continue;
             }
             Err(ReadlineError::Eof) => {
                 println!("^D");

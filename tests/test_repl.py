@@ -58,3 +58,39 @@ def test_non_db_file_is_usage_error(solite_cli):
     result = solite_cli(["not-a-db.txt"])
     assert not result.success
     assert result.stderr != ""
+
+
+def test_sigint_interrupts_query_without_exiting():
+    """SIGINT (Ctrl-C) during a long-running query aborts the statement but
+    keeps the REPL alive; a subsequent statement still executes."""
+    import signal
+    import subprocess
+    import time
+    from pathlib import Path
+
+    cli = Path(__file__).parent.parent / "target" / "debug" / "solite"
+    p = subprocess.Popen(
+        [str(cli)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        p.stdin.write(
+            b".timer off\n"
+            b"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c)"
+            b" SELECT count(*) FROM c;\n"
+        )
+        p.stdin.flush()
+        time.sleep(1.0)  # let the query start spinning
+        p.send_signal(signal.SIGINT)
+        time.sleep(0.5)
+        assert p.poll() is None, "REPL exited after SIGINT"
+        p.stdin.write(b"select 'still-alive';\n")
+        p.stdin.flush()
+        out, _ = p.communicate(timeout=10)
+        text = out.decode("utf8", "replace").lower()
+        assert "interrupt" in text
+        assert "still-alive" in text
+    finally:
+        p.kill()

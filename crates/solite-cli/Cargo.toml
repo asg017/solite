@@ -21,6 +21,7 @@ solite-lsp = {path="../solite-lsp"}
 solite-completion = {path="../solite-completion"}
 solite-table = {path="../solite-table"}
 rustyline = {version="12.0.0", features = ["derive"]}
+ctrlc = "3.4"
 futures = "0.3"
 anyhow.workspace = true
 serde_json = "1"

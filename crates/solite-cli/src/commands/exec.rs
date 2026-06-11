@@ -1,8 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use solite_core::Runtime;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::cli::ExecuteArgs;
+use super::{is_sql_file, read_sql_file};
+use crate::cli::{is_database_path, ExecuteArgs};
 
 pub(crate) fn exec(args: ExecuteArgs) -> Result<(), ()> {
     match exec_impl(args) {
@@ -15,7 +16,7 @@ pub(crate) fn exec(args: ExecuteArgs) -> Result<(), ()> {
 }
 
 fn exec_impl(args: ExecuteArgs) -> Result<()> {
-    let (db_path, sql) = parse_arguments(&args);
+    let (db_path, sql) = parse_arguments(&args)?;
 
     let mut runtime = Runtime::new(db_path.map(|p| p.to_string_lossy().to_string()))?;
 
@@ -58,35 +59,97 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
     Ok(())
 }
 
+/// Whether the arg should be classified as a database by extension alone
+/// (so a not-yet-existing database can be created by `execute`).
+fn is_database_arg(s: &str) -> bool {
+    s == ":memory:" || is_database_path(Path::new(s))
+}
+
+/// Resolve a SQL argument: read `.sql` files, otherwise use the string as-is.
+fn resolve_sql_arg(arg: &str) -> Result<String> {
+    let path = Path::new(arg);
+    if is_sql_file(path) {
+        read_sql_file(path).with_context(|| format!("Failed to read SQL file '{arg}'"))
+    } else {
+        Ok(arg.to_string())
+    }
+}
+
 /// Parse arguments to determine database path and SQL string.
 ///
-/// Accepts 1 or 2 positional args in any order: if an arg exists as a file
-/// it's the database, the other is SQL.
-fn parse_arguments(args: &ExecuteArgs) -> (Option<PathBuf>, String) {
+/// Accepts 1 or 2 positional args in any order, classified by extension
+/// first: `.db`/`.sqlite`/`.sqlite3` (or `:memory:`) is the database —
+/// whether or not it exists on disk, so new databases can be created —
+/// and `.sql` is a file whose contents are the SQL. Unclassified args fall
+/// back to the existence check (the arg that exists is the database).
+fn parse_arguments(args: &ExecuteArgs) -> Result<(Option<PathBuf>, String)> {
     match args.args.as_slice() {
         [only] => {
             let p = PathBuf::from(only);
-            if p.exists() {
-                (Some(p), String::new())
+            if is_sql_file(&p) {
+                Ok((None, resolve_sql_arg(only)?))
+            } else if is_database_arg(only) || p.exists() {
+                Ok((Some(p), String::new()))
             } else {
-                (None, only.clone())
+                Ok((None, only.clone()))
             }
         }
         [first, second] => {
+            let db0 = is_database_arg(first);
+            let db1 = is_database_arg(second);
+            let sql0 = is_sql_file(Path::new(first));
+            let sql1 = is_sql_file(Path::new(second));
+
+            if db0 && db1 {
+                bail!(
+                    "two database arguments given ('{first}' and '{second}'); \
+                     expected one database and one SQL argument"
+                );
+            }
+            if sql0 && sql1 {
+                bail!(
+                    "two .sql file arguments given ('{first}' and '{second}'); \
+                     expected at most one SQL argument"
+                );
+            }
+            if db0 {
+                return Ok((Some(PathBuf::from(first)), resolve_sql_arg(second)?));
+            }
+            if db1 {
+                return Ok((Some(PathBuf::from(second)), resolve_sql_arg(first)?));
+            }
+
             let p0 = PathBuf::from(first);
             let p1 = PathBuf::from(second);
+            if sql0 || sql1 {
+                // One arg is a .sql file; the other must be the database.
+                let (sql_arg, db, db_arg) =
+                    if sql0 { (first, p1, second) } else { (second, p0, first) };
+                if !db.exists() {
+                    bail!(
+                        "database '{db_arg}' does not exist. To create a new database, \
+                         give it a .db/.sqlite/.sqlite3 extension"
+                    );
+                }
+                return Ok((Some(db), resolve_sql_arg(sql_arg)?));
+            }
+
+            // Neither arg is classified by extension: the one that exists on
+            // disk is the database.
             if p0.exists() {
-                (Some(p0), second.clone())
+                Ok((Some(p0), second.clone()))
             } else if p1.exists() {
-                (Some(p1), first.clone())
+                Ok((Some(p1), first.clone()))
             } else {
-                // Neither is a file — treat first as SQL, ignore second?
-                // More likely: the db doesn't exist yet, treat the one that
-                // looks like a path as the db. Fall back to first=sql.
-                (None, first.clone())
+                bail!(
+                    "cannot tell which argument is the database: neither '{first}' nor \
+                     '{second}' exists on disk. To create a new database, give it a \
+                     .db/.sqlite/.sqlite3 extension; to run multiple statements, pass \
+                     them as a single argument"
+                );
             }
         }
-        _ => (None, String::new()),
+        _ => bail!("expected 1 or 2 arguments: a SQL statement and an optional database"),
     }
 }
 
@@ -116,7 +179,7 @@ mod tests {
     #[test]
     fn parse_args_sql_only() {
         let args = make_args(vec!["INSERT INTO t VALUES (1)"]);
-        let (db, sql) = parse_arguments(&args);
+        let (db, sql) = parse_arguments(&args).unwrap();
         assert!(db.is_none());
         assert_eq!(sql, "INSERT INTO t VALUES (1)");
     }
@@ -128,7 +191,7 @@ mod tests {
         std::fs::write(&db_path, "").unwrap();
 
         let args = make_args(vec![db_path.to_str().unwrap(), "INSERT INTO t VALUES (1)"]);
-        let (db, sql) = parse_arguments(&args);
+        let (db, sql) = parse_arguments(&args).unwrap();
         assert_eq!(db.unwrap(), db_path);
         assert_eq!(sql, "INSERT INTO t VALUES (1)");
     }
@@ -140,17 +203,99 @@ mod tests {
         std::fs::write(&db_path, "").unwrap();
 
         let args = make_args(vec!["INSERT INTO t VALUES (1)", db_path.to_str().unwrap()]);
-        let (db, sql) = parse_arguments(&args);
+        let (db, sql) = parse_arguments(&args).unwrap();
         assert_eq!(db.unwrap(), db_path);
         assert_eq!(sql, "INSERT INTO t VALUES (1)");
     }
 
     #[test]
-    fn parse_args_neither_is_file() {
+    fn parse_args_neither_is_file_errors() {
+        // Nothing is silently ignored: two unclassifiable args are an error
         let args = make_args(vec!["CREATE TABLE t(a)", "INSERT INTO t VALUES (1)"]);
-        let (db, sql) = parse_arguments(&args);
-        assert!(db.is_none());
+        let err = parse_arguments(&args).unwrap_err();
+        assert!(err.to_string().contains("cannot tell"), "{err}");
+    }
+
+    #[test]
+    fn parse_args_nonexistent_db_extension_is_database() {
+        // A .db arg is the database even if it doesn't exist yet
+        let args = make_args(vec!["/tmp/solite_brand_new_db_does_not_exist.db", "CREATE TABLE t(a)"]);
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert_eq!(
+            db.unwrap(),
+            PathBuf::from("/tmp/solite_brand_new_db_does_not_exist.db")
+        );
         assert_eq!(sql, "CREATE TABLE t(a)");
+    }
+
+    #[test]
+    fn parse_args_memory_is_database() {
+        let args = make_args(vec![":memory:", "CREATE TABLE t(a)"]);
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert_eq!(sql, "CREATE TABLE t(a)");
+    }
+
+    #[test]
+    fn parse_args_sql_file_is_sql() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("script.sql");
+        std::fs::write(&script, "CREATE TABLE t(a);\n").unwrap();
+        let db_path = dir.path().join("data.db");
+
+        // .sql file + .db database (db doesn't exist yet)
+        let args = make_args(vec![script.to_str().unwrap(), db_path.to_str().unwrap()]);
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert_eq!(db.unwrap(), db_path);
+        assert_eq!(sql, "CREATE TABLE t(a);");
+
+        // single .sql file arg: contents are the SQL, in-memory database
+        let args = make_args(vec![script.to_str().unwrap()]);
+        let (db, sql) = parse_arguments(&args).unwrap();
+        assert!(db.is_none());
+        assert_eq!(sql, "CREATE TABLE t(a);");
+    }
+
+    #[test]
+    fn parse_args_sql_file_with_unrecognized_missing_db_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("script.sql");
+        std::fs::write(&script, "CREATE TABLE t(a);\n").unwrap();
+
+        let args = make_args(vec![script.to_str().unwrap(), "newdb_without_extension"]);
+        let err = parse_arguments(&args).unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
+    }
+
+    #[test]
+    fn parse_args_two_databases_errors() {
+        let args = make_args(vec!["a.db", "b.db"]);
+        let err = parse_arguments(&args).unwrap_err();
+        assert!(err.to_string().contains("two database arguments"), "{err}");
+    }
+
+    #[test]
+    fn parse_args_two_sql_files_errors() {
+        let args = make_args(vec!["a.sql", "b.sql"]);
+        let err = parse_arguments(&args).unwrap_err();
+        assert!(err.to_string().contains("two .sql file arguments"), "{err}");
+    }
+
+    #[test]
+    fn exec_creates_new_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("brand_new.db");
+        assert!(!db_path.exists());
+
+        let args = make_args(vec![
+            db_path.to_str().unwrap(),
+            "CREATE TABLE t(a); INSERT INTO t VALUES (7)",
+        ]);
+        exec_impl(args).unwrap();
+
+        assert!(db_path.exists());
+        let rt = Runtime::new(Some(db_path.to_str().unwrap().to_string())).unwrap();
+        assert_eq!(query_val(&rt, "SELECT a FROM t"), "7");
     }
 
     // --- exec_impl tests ---

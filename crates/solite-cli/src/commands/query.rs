@@ -7,7 +7,6 @@ use solite_core::{exporter::ExportFormat, replacement_scans::replacement_scan, R
 use solite_table::TableConfig;
 use std::{
     fmt,
-    fs,
     io::{stdout, IsTerminal, Write},
     path::{Path, PathBuf},
 };
@@ -83,16 +82,8 @@ pub(crate) fn query(args: QueryArgs) -> Result<(), ()> {
 /// contents. Otherwise return the string as-is.
 fn resolve_sql(sql: String) -> Result<String, QueryError> {
     let path = Path::new(&sql);
-    if path.extension().is_some_and(|ext| ext == "sql") {
-        if !path.exists() {
-            return Err(QueryError::FileReadError(
-                path.to_path_buf(),
-                std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
-            ));
-        }
-        let contents = fs::read_to_string(path)
-            .map_err(|e| QueryError::FileReadError(path.to_path_buf(), e))?;
-        Ok(contents.trim().to_string())
+    if super::is_sql_file(path) {
+        super::read_sql_file(path).map_err(|e| QueryError::FileReadError(path.to_path_buf(), e))
     } else {
         Ok(sql)
     }
@@ -176,9 +167,7 @@ fn is_remote_url(s: &str) -> bool {
     solite_core::sqlite::is_remote_path(s)
 }
 
-fn is_sql_file(p: &Path) -> bool {
-    p.extension().is_some_and(|ext| ext == "sql")
-}
+use super::is_sql_file;
 
 fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryError> {
     match &args.database {
@@ -297,6 +286,7 @@ fn determine_format(args: &QueryArgs) -> ExportFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn test_query_error_display() {

@@ -54,7 +54,7 @@
   
   Arguments:
     [ARGS]...
-            SQL statement and optional database path, in any order; the argument that exists as a file is the database
+            SQL statement (or .sql file) and optional database path, in any order; classified by extension, then by which one exists on disk
   
   Options:
         --allow-ssh
@@ -69,11 +69,15 @@
   Examples:
     solite execute app.db "INSERT INTO users(name) VALUES ('alex')"
     solite execute "CREATE TABLE t(a)" app.db     # order doesn't matter
+    solite execute new.db "CREATE TABLE t(a)"     # creates new.db if missing
+    solite execute app.db migrate.sql             # SQL from a .sql file
     solite execute app.db "DELETE FROM users WHERE id = $id" -p id 42
   
-  The database file must already exist: the argument that exists on disk is
-  the database, the other is the SQL. With a single argument, the SQL runs
-  against an in-memory database.
+  Arguments are classified by extension: .db/.sqlite/.sqlite3 (or :memory:)
+  is the database — created if it doesn't exist yet — and .sql is a file
+  whose contents are the SQL. Otherwise the argument that exists on disk is
+  the database and the other is the SQL. With a single SQL argument, the
+  statements run against an in-memory database.
   
   '''
 # ---

@@ -1,3 +1,23 @@
+use std::path::Path;
+
+/// Whether the path ends in `.sql`, for positional-arg classification in
+/// `query` and `execute` (the file's contents are then used as the SQL).
+pub(crate) fn is_sql_file(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "sql")
+}
+
+/// Read the contents of a `.sql` file, trimmed. Errors with `NotFound` if
+/// the path doesn't exist.
+pub(crate) fn read_sql_file(path: &Path) -> Result<String, std::io::Error> {
+    if !path.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+    }
+    std::fs::read_to_string(path).map(|contents| contents.trim().to_string())
+}
+
 pub mod repl;
 pub mod run;
 pub mod query;

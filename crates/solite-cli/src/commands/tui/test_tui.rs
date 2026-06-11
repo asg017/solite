@@ -565,6 +565,57 @@ mod tests {
     }
 
     #[test]
+    fn test_generated_columns_display_and_copy() {
+        let mut runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(
+                "create table gen(a integer, b as (a * 2), c text);\n\
+                 insert into gen(a, c) values (21, 'x');",
+            )
+            .unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 12);
+        app.send_key(KeyCode::Enter.into());
+        // The generated column b appears in the grid
+        app.draw_and_snapshot("generated column grid");
+
+        // Cell copy of the generated column copies its value (not a
+        // misaligned neighbor)
+        app.send_char('l'); // select column b
+        app.send_char('y');
+        app.send_char('1');
+        assert_eq!(app.last_copied().unwrap(), "42");
+
+        // The row page shows aligned column/value pairs and copies them
+        app.send_key(KeyCode::Enter.into());
+        app.send_char('j'); // b
+        app.send_char('y');
+        assert_eq!(app.last_copied().unwrap(), "42");
+        app.send_char('j'); // c
+        app.send_char('y');
+        assert_eq!(app.last_copied().unwrap(), "x");
+    }
+
+    #[test]
+    fn test_wide_table_last_column_reachable() {
+        // L must land on the true last column even though fewer/more columns
+        // fit at the tail than at the current offset (variable widths)
+        let columns: Vec<String> = (0..30).map(|i| format!("{i} as col{i}")).collect();
+        let script = format!("create table wide as select {}", columns.join(", "));
+        let mut runtime = Runtime::new(None).unwrap();
+        runtime.connection.execute_script(&script).unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 12);
+        app.send_key(KeyCode::Enter.into());
+        app.draw(); // establish the real viewport width for L
+        app.send_char('L');
+        app.draw(); // recompute the fit at the new offset
+        // The selected (last) column's value is col29's
+        app.send_char('y');
+        app.send_char('1');
+        assert_eq!(app.last_copied().unwrap(), "29");
+    }
+
+    #[test]
     fn test_quoted_table_name() {
         let mut runtime = Runtime::new(None).unwrap();
         runtime

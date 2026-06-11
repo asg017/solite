@@ -2,19 +2,15 @@
 source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
-"wide (1 row)                         Solite               ? help  q back  Q quit"
-"col87 col88 col89 col90 col91 col92 col93 col94 col95 col96 col97 col98 col99   "
-"  957   968   979   990  1001  1012  1023  1034  1045  1056  1067  1078  1089   "
+"gen (1+ row)                         Solite               ? help  q back  Q quit"
+"a   b   c                                                                       "
+" 21  42 x                                                                       "
 "                                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                   Row 1 of 1                                   "
+"                                 Row 1 of 1+ ⠋                                  "
 "────────────────────────────────────────────────────────────────────────────────"
 " h/j/k/l navigate  Enter view row  [ sort asc  ] sort desc  y/c copy  q/Esc back"

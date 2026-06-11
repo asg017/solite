@@ -117,6 +117,11 @@ impl RowCount {
             return row_count;
         };
 
+        // The thread is detached and never cancelled: if the page closes
+        // mid-count the send simply fails and the thread exits. On a huge
+        // rollback-journal database the read-only scan's SHARED lock could
+        // briefly make concurrent writes return SQLITE_BUSY; add a
+        // cancellation flag here if that ever bites.
         let (tx, rx) = std::sync::mpsc::channel();
         let table = table.to_owned();
         std::thread::spawn(move || {
@@ -340,19 +345,17 @@ fn load_table_data_with_select(
     }
 }
 
-/// The table's column names, via `pragma_table_info`. Empty on failure.
+/// The column names exactly as `SELECT *` produces them, via a prepared
+/// `LIMIT 0` probe. Crucially this includes generated columns, which
+/// `pragma_table_info` omits — the truncating window SELECT list, the
+/// displayed columns, and the on-demand `SELECT *` full-row fetch must all
+/// agree on the same column set. Empty on failure.
 fn table_column_names(runtime: &Runtime, table: &str) -> Vec<String> {
-    let sql = format!(
-        "SELECT name FROM pragma_table_info('{}')",
-        table.replace('\'', "''")
-    );
-    let mut columns = vec![];
-    if let Ok((_, Some(mut stmt))) = runtime.connection.prepare(&sql) {
-        while let Ok(Some(row)) = stmt.next() {
-            columns.push(row[0].as_str().to_owned());
-        }
+    let sql = format!("SELECT * FROM \"{}\" LIMIT 0", table.replace('"', "\"\""));
+    match runtime.connection.prepare(&sql) {
+        Ok((_, Some(stmt))) => stmt.column_names().unwrap_or_default(),
+        _ => vec![],
     }
-    columns
 }
 
 /// Per-column SELECT expression that truncates oversized text/blob values
@@ -367,8 +370,24 @@ fn truncating_select_expr(column: &str) -> String {
     )
 }
 
+/// How many columns (with 1-cell spacing) fit in `available` width, walking
+/// `widths` in order. At least 1 when `widths` is non-empty.
+fn fit_column_count<'w>(widths: impl Iterator<Item = &'w u16>, available: u16) -> usize {
+    let mut used: u16 = 0;
+    let mut count = 0usize;
+    for width in widths {
+        let needed = *width + if count == 0 { 0 } else { 1 };
+        if used.saturating_add(needed) > available && count > 0 {
+            break;
+        }
+        used = used.saturating_add(needed);
+        count += 1;
+    }
+    count
+}
+
 /// SELECT list for window loads: truncating expressions when the column
-/// names are known, `*` otherwise (e.g. table_info failed).
+/// names are known, `*` otherwise (e.g. the column probe failed).
 fn window_select_list(columns: &[String]) -> String {
     if columns.is_empty() {
         "*".to_owned()
@@ -590,6 +609,9 @@ pub struct TablePage<'a> {
     select_list: String,
     /// Measured display width per column for the loaded window
     col_widths: Vec<u16>,
+    /// Width of the table area at the last render (used by `L` to compute
+    /// how many tail columns fit)
+    last_table_width: u16,
     /// Destination for copy operations
     clipboard: SharedClipboard,
 }
@@ -654,6 +676,7 @@ impl<'a> TablePage<'a> {
             rowids,
             select_list,
             col_widths: vec![],
+            last_table_width: 80,
             clipboard,
         };
         page.recompute_col_widths();
@@ -942,7 +965,12 @@ impl<'a> TablePage<'a> {
             }
         }
 
-        // OFFSET fallback, respecting the active sort.
+        // OFFSET fallback, respecting the active sort. Caveat: SQLite gives
+        // no cross-query ordering guarantee under sort ties (or for
+        // unordered scans of WITHOUT ROWID tables), so under a non-unique
+        // sort this can in principle land on a different row than the one
+        // displayed. In practice the same plan re-runs; acceptable for the
+        // copy fallback.
         let result = load_table_data(
             self.runtime,
             &self.table_name,
@@ -961,16 +989,17 @@ impl<'a> TablePage<'a> {
             .ok_or_else(|| "Row not found".to_owned())
     }
 
-    /// Full values for the window row at `window_idx`: fetched on demand,
-    /// falling back to the (possibly truncated) window values on error.
+    /// Full values for the window row at `window_idx`, for the row detail
+    /// page: falls back to the (possibly truncated) window values on error —
+    /// a degraded view beats failing to open the page.
     fn full_row_or_window(&self, window_idx: usize) -> Vec<OwnedValue> {
         self.fetch_full_row(self.window_to_absolute(window_idx))
             .unwrap_or_else(|_| self.data.rows[window_idx].clone())
     }
 
-    /// Generate TSV for a single row (full values, fetched on demand)
-    fn row_to_tsv(&self, row_idx: usize) -> String {
-        self.full_row_or_window(row_idx)
+    /// Generate TSV for one row's values
+    fn values_to_tsv(values: &[OwnedValue]) -> String {
+        values
             .iter()
             .map(|v| tsv_escape(value_to_string(v)))
             .collect::<Vec<_>>()
@@ -1012,13 +1041,20 @@ impl<'a> TablePage<'a> {
                     let actual_col = col.saturating_add(self.column_idx_offset);
                     if row < self.data.rows.len() && actual_col < self.data.rows[row].len() {
                         // Full value, fetched on demand: the window copy may
-                        // be truncated at MAX_CELL_FETCH_LEN.
-                        let values = self.full_row_or_window(row);
-                        match values.get(actual_col) {
-                            Some(value) => {
-                                (value_to_string(value), "Copied cell to clipboard".to_owned())
+                        // be truncated at MAX_CELL_FETCH_LEN. Fail honestly
+                        // rather than silently copy a truncated value.
+                        match self.fetch_full_row(self.window_to_absolute(row)) {
+                            Ok(values) => match values.get(actual_col) {
+                                Some(value) => (
+                                    value_to_string(value),
+                                    "Copied cell to clipboard".to_owned(),
+                                ),
+                                None => return,
+                            },
+                            Err(e) => {
+                                self.footer_message = Some(format!("Copy failed: {}", e));
+                                return;
                             }
-                            None => return,
                         }
                     } else {
                         return;
@@ -1030,7 +1066,16 @@ impl<'a> TablePage<'a> {
             CopyOption::Row => {
                 if let Some((row, _)) = self.state.selected_cell() {
                     if row < self.data.rows.len() {
-                        (self.row_to_tsv(row), "Copied row to clipboard".to_owned())
+                        match self.fetch_full_row(self.window_to_absolute(row)) {
+                            Ok(values) => (
+                                Self::values_to_tsv(&values),
+                                "Copied row to clipboard".to_owned(),
+                            ),
+                            Err(e) => {
+                                self.footer_message = Some(format!("Copy failed: {}", e));
+                                return;
+                            }
+                        }
                     } else {
                         return;
                     }
@@ -1242,10 +1287,17 @@ impl TablePage<'_> {
                 HandleKeyResult::None
             }
             KeyCode::Char('L') => {
-                self.state.select_last_column();
-                if self.data.columns.len() > self.n_columns_show {
-                    self.column_idx_offset =
-                        self.data.columns.len().saturating_sub(self.n_columns_show);
+                // Jump to the last column: with variable widths, the number
+                // of columns that fit at the tail differs from the current
+                // fit, so measure backwards from the last column.
+                if !self.data.columns.is_empty() {
+                    let count = fit_column_count(
+                        self.col_widths.iter().rev(),
+                        self.last_table_width.max(1),
+                    )
+                    .max(1);
+                    self.column_idx_offset = self.data.columns.len().saturating_sub(count);
+                    self.state.select_last_column();
                 }
                 HandleKeyResult::None
             }
@@ -1293,21 +1345,18 @@ impl TablePage<'_> {
         // (an id column no longer gets the same slot as a description one,
         // and a 100-column table shows as many columns as actually fit).
         let column_spacing: u16 = 1;
-        let mut visible_widths: Vec<u16> = vec![];
-        let mut used: u16 = 0;
-        for width in self.col_widths.iter().skip(self.column_idx_offset) {
-            let needed = *width
-                + if visible_widths.is_empty() {
-                    0
-                } else {
-                    column_spacing
-                };
-            if used.saturating_add(needed) > table_rect.width && !visible_widths.is_empty() {
-                break;
-            }
-            used = used.saturating_add(needed);
-            visible_widths.push(*width);
-        }
+        self.last_table_width = table_rect.width;
+        let count = fit_column_count(
+            self.col_widths.iter().skip(self.column_idx_offset),
+            table_rect.width,
+        );
+        let mut visible_widths: Vec<u16> = self
+            .col_widths
+            .iter()
+            .skip(self.column_idx_offset)
+            .take(count)
+            .copied()
+            .collect();
         if visible_widths.is_empty() {
             // No measured widths (e.g. load error): one full-width column
             visible_widths.push(table_rect.width.max(1));
@@ -1557,6 +1606,40 @@ mod tests {
         let runtime = Runtime::new(None).unwrap();
         let err = load_table_for_copy(&runtime, "no_such_table", None, 10).unwrap_err();
         assert!(err.contains("no_such_table"));
+    }
+
+    #[test]
+    fn test_rowid_keyset_usable_classes() {
+        let runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(
+                "create table plain(a, b);\n\
+                 create table no_rowid(id integer primary key, v) without rowid;\n\
+                 create table shadowed(a, rowid text);\n\
+                 create view v_plain as select * from plain;",
+            )
+            .unwrap();
+        assert!(rowid_keyset_usable(&runtime, "plain"));
+        assert!(!rowid_keyset_usable(&runtime, "no_rowid"));
+        assert!(!rowid_keyset_usable(&runtime, "shadowed"));
+        assert!(!rowid_keyset_usable(&runtime, "v_plain"));
+        assert!(!rowid_keyset_usable(&runtime, "missing_table"));
+    }
+
+    #[test]
+    fn test_table_column_names_include_generated_columns() {
+        // pragma_table_info omits generated columns; the SELECT * probe
+        // must not, or the window/copy/row-page column sets disagree
+        let runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script("create table gen(a integer, b as (a * 2), c text)")
+            .unwrap();
+        assert_eq!(
+            table_column_names(&runtime, "gen"),
+            vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]
+        );
     }
 
     #[test]

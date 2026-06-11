@@ -493,10 +493,9 @@ impl Statement {
                 let mut n = 0;
                 loop {
                     let rc = unsafe { sqlite3_step(*statement) };
-                    n += 1;
                     match rc {
                         SQLITE_DONE => break,
-                        SQLITE_ROW => continue,
+                        SQLITE_ROW => n += 1,
                         _ => {
                             return Err(unsafe {
                                 SQLiteError::from_latest(sqlite3_db_handle(*statement), rc)
@@ -1540,6 +1539,16 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_execute_row_count() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_script("CREATE TABLE t(a)").unwrap();
+        let (_, stmt) = conn.prepare("INSERT INTO t VALUES (1),(2),(3)").unwrap();
+        assert_eq!(stmt.unwrap().execute().unwrap(), 0); // INSERT yields no SQLITE_ROW
+        let (_, stmt) = conn.prepare("SELECT * FROM t").unwrap();
+        assert_eq!(stmt.unwrap().execute().unwrap(), 3);
+    }
+
     #[test]
     fn test_bind_parameters_positional() {
         let conn = Connection::open_in_memory().unwrap();

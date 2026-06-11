@@ -183,7 +183,7 @@ pub struct Statement { /* wraps *mut sqlite3_stmt */ }
 pub enum OwnedValue { Null, Integer(i64), Double(f64), Text(Vec<u8>), Blob(Vec<u8>) }
 ```
 
-**Statement methods:** `sql()`, `column_names()`, `column_meta()`, `next()` (returns `Vec<ValueRefX>`), `nextx()` (returns `Row`), `execute()` (returns `usize`), `bind_*()`, `parameter_info()`.
+**Statement methods:** `sql()`, `column_names()`, `column_meta()`, `next()` (returns `Vec<ValueRefX>`), `nextx()` (returns `Row`), `execute()` (returns SQLITE_ROW count as `usize`), `bind_*()` (return `Result<(), SQLiteError>`), `bind_parameters()`.
 
 ## CLI Commands (`solite-cli/src/cli.rs`)
 

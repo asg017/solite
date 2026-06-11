@@ -5,11 +5,15 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::ffi::{c_int, c_void, CStr};
-use std::ptr::{self};
+use std::ptr;
 use std::str::Utf8Error;
 use std::{ffi::CString, os::raw::c_char};
 
 pub use libsqlite3_sys::{sqlite3_sql, sqlite3_stmt};
+
+/// Not exported by libsqlite3-sys 0.26 (added in SQLite 3.42).
+/// https://www.sqlite.org/c3ref/c_dbconfig_defensive.html
+const SQLITE_DBCONFIG_STMT_SCANSTATUS: c_int = 1018;
 // https://github.com/sqlite/sqlite/blob/853fb5e723a284347051756157a42bd65b53ebc4/src/json.c#L126
 pub const JSON_SUBTYPE: u32 = 74;
 
@@ -221,14 +225,6 @@ impl OwnedValue {
     }
 }
 
-pub enum ValueType {
-    Null,
-    Integer,
-    Double,
-    Text,
-    Blob,
-}
-
 pub struct Row<'a> {
     statement: *mut sqlite3_stmt,
     phantom: std::marker::PhantomData<&'a ()>,
@@ -259,9 +255,9 @@ pub struct ColumnMeta {
     pub nullable: Option<bool>,
 }
 
-pub enum IsExplain{
-  Explain,
-  ExplainQueryPlan,
+pub enum IsExplain {
+    Explain,
+    ExplainQueryPlan,
 }
 /// https://www.sqlite.org/c3ref/stmt.html
 #[derive(Serialize, Debug)]
@@ -355,10 +351,6 @@ impl Statement {
                 _ => None,
             },
         }
-    }
-
-    pub fn explain(&self, _emode: i32) {
-        // TODO: sqlite3_stmt_explain(self.statement, emode);
     }
 
     pub fn column_names(&self) -> Result<Vec<String>, Utf8Error> {
@@ -643,10 +635,6 @@ impl Statement {
         }
     }
 
-    pub fn parameter_info(&self) -> Vec<String> {
-        self.bind_parameters()
-    }
-
     pub fn reset(&self) {
         match &self.inner {
             StatementInner::Local { statement } => {
@@ -882,7 +870,11 @@ impl Connection {
             unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };
         if rc == SQLITE_OK {
             unsafe {
-                sqlite3_enable_load_extension(connection, 1);
+                // Enable extension loading for the C API only
+                // (Connection::load_extension); the SQL load_extension()
+                // function stays disabled, as the SQLite docs recommend.
+                let v = 1;
+                sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, &v);
             }
             Ok(Connection::from_local(connection, true))
         } else {
@@ -895,25 +887,17 @@ impl Connection {
     }
 
     pub fn open_in_memory() -> Result<Self, SQLiteError> {
-        let mut connection: *mut sqlite3 = ptr::null_mut();
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_CREATE;
-        let filename = CString::new(":memory:").unwrap();
-        let rc =
-            unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };
-        if rc == SQLITE_OK {
+        let conn = Self::open_with_flags(":memory:", flags)?;
+        if let ConnectionInner::Local { connection, .. } = &conn.inner {
             unsafe {
+                // Collect per-opcode nexec/ncycle stats for bytecode_steps()
+                // (used by `.bench` reports).
                 let v = 1;
-                sqlite3_db_config(connection, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, &v);
-                sqlite3_db_config(connection, 1018, 1, &v);
+                sqlite3_db_config(*connection, SQLITE_DBCONFIG_STMT_SCANSTATUS, 1, &v);
             }
-            Ok(Connection::from_local(connection, true))
-        } else {
-            let err = unsafe { SQLiteError::from_latest(connection, rc) };
-            unsafe {
-                sqlite3_close(connection);
-            }
-            Err(err)
         }
+        Ok(conn)
     }
 
     /// Open a remote database over SSH.
@@ -1631,6 +1615,24 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_sql_load_extension_disabled() {
+        // Extension loading is enabled for the C API only; the SQL
+        // load_extension() function must stay disabled on every open path.
+        let conn = Connection::open_in_memory().unwrap();
+        let err = conn.execute("SELECT load_extension('nope')").unwrap_err();
+        assert!(err.message.contains("not authorized"), "{}", err.message);
+
+        let dir = std::env::temp_dir().join("solite-load-ext-policy-test.db");
+        let path = dir.to_str().unwrap();
+        let _ = std::fs::remove_file(path);
+        let conn = Connection::open(path).unwrap();
+        let err = conn.execute("SELECT load_extension('nope')").unwrap_err();
+        assert!(err.message.contains("not authorized"), "{}", err.message);
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn test_progress_handler() {
         use std::sync::atomic::{AtomicUsize, Ordering};

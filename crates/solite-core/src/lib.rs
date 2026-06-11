@@ -469,7 +469,7 @@ impl Runtime {
                             if let Some((name, annotations, result_class)) = procedure::parse_name_line(name_line) {
                                 let columns = stmt.column_meta();
                                 let parameters: Vec<_> = stmt
-                                    .parameter_info()
+                                    .bind_parameters()
                                     .iter()
                                     .map(|p| procedure::parse_parameter(p))
                                     .collect();

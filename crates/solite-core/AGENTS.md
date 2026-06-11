@@ -136,7 +136,7 @@ Wraps a raw `*mut sqlite3`. Key methods:
 - `serialize() -> Vec<u8>` -- serialize the database to bytes.
 - `interrupt()` / `is_interrupted()` -- cancellation support.
 - `in_transaction()` -- check autocommit state.
-- `set_progress_handler()` -- register a progress callback.
+- `set_progress_handler()` / `clear_progress_handler()` -- register/unregister a progress callback (`FnMut() -> bool`; returning `true` interrupts).
 
 `Connection` is `Send` but not `Sync`. It calls `sqlite3_close` on drop.
 
@@ -148,9 +148,9 @@ Wraps a raw `*mut sqlite3_stmt`. Key methods:
 - `nextx() -> Result<Option<Row>, SQLiteError>` -- step and return a `Row` for indexed access (faster, avoids allocation).
 - `execute() -> Result<usize, SQLiteError>` -- step until `SQLITE_DONE`, return row count.
 - `column_names()` / `column_meta()` -- column introspection.
-- `bind_text()`, `bind_int64()`, `bind_double()`, `bind_blob()`, `bind_null()`, `bind_pointer()` -- parameter binding.
-- `bind_parameters()` / `parameter_info()` -- list bound parameter names.
-- `sql()` / `expanded_sql()` -- get the SQL text.
+- `bind_text()`, `bind_int64()`, `bind_double()`, `bind_blob()`, `bind_null()`, `bind_pointer()` -- parameter binding; all return `Result<(), SQLiteError>`.
+- `bind_parameters()` -- list bound parameter names (empty string for bare `?`).
+- `sql()` / `expanded_sql()` -- get the SQL text (`expanded_sql` returns `Option<String>`).
 - `readonly()` -- check if statement is read-only.
 - `reset()` -- reset for re-execution.
 - `is_explain()` -- check if this is an EXPLAIN or EXPLAIN QUERY PLAN statement.

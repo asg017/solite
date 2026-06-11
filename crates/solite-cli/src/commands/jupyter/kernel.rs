@@ -36,6 +36,12 @@ enum RuntimeRequest {
         cursor_pos: usize,
         reply: tokio::sync::oneshot::Sender<CompleteReply>,
     },
+    Inspect {
+        code: String,
+        /// Cursor position in unicode code points, per the Jupyter spec.
+        cursor_pos: usize,
+        reply: tokio::sync::oneshot::Sender<InspectReply>,
+    },
 }
 use runtimelib::{KernelIoPubConnection, KernelShellConnection};
 use solite_core::sqlite::InterruptHandle;
@@ -102,6 +108,14 @@ impl SoliteKernel {
                         reply,
                     } => {
                         let _ = reply.send(completions(&rt, &code, cursor_pos));
+                        continue;
+                    }
+                    RuntimeRequest::Inspect {
+                        code,
+                        cursor_pos,
+                        reply,
+                    } => {
+                        let _ = reply.send(inspect(&rt, &code, cursor_pos));
                         continue;
                     }
                     RuntimeRequest::Execute {
@@ -377,16 +391,23 @@ impl SoliteKernel {
                 shell.send(reply).await?;
             }
 
-            JupyterMessageContent::InspectRequest(_) => {
-                let reply = InspectReply {
+            JupyterMessageContent::InspectRequest(req) => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.runtime
+                    .send(RuntimeRequest::Inspect {
+                        code: req.code.clone(),
+                        cursor_pos: req.cursor_pos,
+                        reply: tx,
+                    })
+                    .await?;
+                let reply = rx.await.unwrap_or_else(|_| InspectReply {
                     found: false,
                     data: Media::default(),
                     metadata: Default::default(),
                     status: ReplyStatus::Ok,
                     error: None,
-                }
-                .as_child_of(parent);
-                shell.send(reply).await?;
+                });
+                shell.send(reply.as_child_of(parent)).await?;
             }
 
             JupyterMessageContent::IsCompleteRequest(req) => {
@@ -499,6 +520,75 @@ fn completions(runtime: &Runtime, code: &str, cursor_pos: usize) -> CompleteRepl
         matches,
         cursor_start: to_char_pos(start),
         cursor_end: cursor_pos,
+        metadata: Default::default(),
+        status: ReplyStatus::Ok,
+        error: None,
+    }
+}
+
+/// Build an analyzer schema from the live database by parsing the DDL in
+/// sqlite_master. Returns None when there is nothing usable.
+fn schema_from_connection(runtime: &Runtime) -> Option<solite_analyzer::Schema> {
+    let stmt = match runtime.connection.prepare(
+        "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'view')",
+    ) {
+        Ok((_, Some(stmt))) => stmt,
+        _ => return None,
+    };
+
+    let mut ddl = String::new();
+    while let Ok(Some(row)) = stmt.next() {
+        if let Some(sql) = row.first() {
+            ddl.push_str(sql.as_str());
+            ddl.push_str(";\n");
+        }
+    }
+
+    let program = solite_parser::parse_program(&ddl).ok()?;
+    Some(solite_analyzer::build_schema(&program))
+}
+
+/// Answer an inspect_request (Shift-Tab hover docs). Runs on the runtime
+/// task, which owns the connection used to build the live schema.
+fn inspect(runtime: &Runtime, code: &str, cursor_pos: usize) -> InspectReply {
+    let not_found = || InspectReply {
+        found: false,
+        data: Media::default(),
+        metadata: Default::default(),
+        status: ReplyStatus::Ok,
+        error: None,
+    };
+
+    // Jupyter cursor_pos is in unicode code points; spans/offsets are bytes.
+    let byte_offset = code
+        .char_indices()
+        .nth(cursor_pos)
+        .map(|(i, _)| i)
+        .unwrap_or(code.len());
+
+    // Cells containing dot commands won't parse as pure SQL; reply not-found.
+    let Ok(program) = solite_parser::parse_program(code) else {
+        return not_found();
+    };
+
+    let schema = schema_from_connection(runtime);
+    let Some(stmt) = solite_analyzer::find_statement_at_offset(&program, byte_offset) else {
+        return not_found();
+    };
+    let Some((symbol, _span)) =
+        solite_analyzer::find_symbol_at_offset(stmt, code, byte_offset, schema.as_ref())
+    else {
+        return not_found();
+    };
+
+    let content = solite_analyzer::format_hover_content(&symbol, schema.as_ref());
+    InspectReply {
+        found: true,
+        data: vec![
+            MediaType::Markdown(content.clone()),
+            MediaType::Plain(content),
+        ]
+        .into(),
         metadata: Default::default(),
         status: ReplyStatus::Ok,
         error: None,

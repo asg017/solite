@@ -73,6 +73,33 @@ def test_complete(solite_kernel):
     assert content["status"] == "ok"
 
 
+def test_inspect(solite_kernel):
+    client = solite_kernel.client
+
+    def inspect(code, cursor_pos):
+        client.inspect(code, cursor_pos)
+        reply = solite_kernel.get_non_kernel_info_reply()
+        assert reply["header"]["msg_type"] == "inspect_reply"
+        return reply["content"]
+
+    solite_kernel.execute("create table users(id integer primary key, name text);")
+
+    # cursor inside 'users' in the FROM clause
+    code = "select name from users"
+    content = inspect(code, code.index("users") + 2)
+    assert content["found"] is True
+    assert "users" in content["data"]["text/markdown"]
+
+    # cursor on a column name
+    content = inspect(code, code.index("name") + 2)
+    assert content["found"] is True
+    assert "name" in content["data"]["text/markdown"]
+
+    # unknown symbol still replies, with found=false
+    content = inspect("select 1", 7)
+    assert content["found"] is False
+
+
 def test_shutdown(solite_kernel):
     """shutdown_request on the control channel gets a reply and the kernel exits."""
     client = solite_kernel.client

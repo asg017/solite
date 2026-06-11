@@ -75,7 +75,7 @@ impl SoliteKernel {
                 rt.enqueue(
                     "<anonymous>",
                     code.as_str(),
-                    solite_core::BlockSource::JupyerCell,
+                    solite_core::BlockSource::JupyterCell,
                 );
                 if let Err(e) = handle_code(&mut rt, &response, &parent).await {
                     eprintln!("Error handling code: {}", e);

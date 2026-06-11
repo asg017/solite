@@ -50,7 +50,7 @@ pub enum StepError {
 }
 
 /// A "block" of commands to run - can be SQL, PRQL(?) or dot commands.
-/// Can come from a SQL file ondisk, a Jupyer cell, REPL, etc.
+/// Can come from a SQL file ondisk, a Jupyter cell, REPL, etc.
 #[derive(Debug)]
 pub struct Block {
     // either file name or "[stdin]" or "[script]" or something
@@ -66,7 +66,7 @@ pub struct Block {
 pub enum BlockSource {
     File(PathBuf),
     Repl,
-    JupyerCell,
+    JupyterCell,
     CommandFlag,
     Stdin,
 }

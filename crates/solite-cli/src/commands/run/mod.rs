@@ -374,7 +374,7 @@ fn enqueue_script(rt: &mut Runtime, script: &std::path::Path) -> Result<()> {
                 rt.enqueue(
                     &format!("{}:{}", script.to_string_lossy(), idx),
                     &code,
-                    BlockSource::JupyerCell,
+                    BlockSource::JupyterCell,
                 );
             }
         }

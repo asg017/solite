@@ -238,12 +238,18 @@ mod tests {
         let mut app = TestApp::new(&mut runtime, 80, 20);
         app.send_key(KeyCode::Enter.into());
 
-        // move selection off the first row, then sort: selection resets to row 1
+        // move selection off the first row, then sort: selection resets to
+        // row 1. The sort is deferred one frame so a "Sorting…" message is
+        // on screen while the blocking ORDER BY runs.
         app.send_char('j');
         app.send_char('[');
+        app.draw_and_snapshot("sorting feedback");
+        app.draw(); // executes the deferred sort
         app.draw_and_snapshot("sorted ascending");
 
         app.send_char(']');
+        app.draw();
+        app.draw();
         app.draw_and_snapshot("sorted descending");
 
         // the sorted order is what gets copied
@@ -343,6 +349,106 @@ mod tests {
         // q dismisses the overlay (does not navigate back)
         app.send_char('q');
         app.draw_and_snapshot("help overlay row dismissed");
+    }
+
+    #[test]
+    fn test_pagination_consistency_sorted_vs_unsorted() {
+        let mut runtime = Runtime::new(None).unwrap();
+        // Values descend as rowids ascend, so the keyset (rowid) order and
+        // the sorted order are different and mixing them up would show.
+        runtime
+            .connection
+            .execute_script(
+                "create table ks as with recursive c(n) as \
+                 (select 1 union all select n+1 from c limit 500) \
+                 select 501 - n as v from c",
+            )
+            .unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 20);
+        app.send_key(KeyCode::Enter.into());
+        app.draw(); // completes the row count
+
+        // Unsorted (keyset path): last row is the last inserted, v = 1
+        app.send_char('G');
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "1");
+
+        // Forward hops past the window edge stay consistent: row 221 = 280
+        app.send_char('g');
+        for _ in 0..220 {
+            app.send_char('j');
+        }
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "280");
+
+        // Backward (splice) path: G then PageUp lands on row 480, v = 21
+        app.send_char('G');
+        app.send_key(KeyCode::PageUp.into());
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "21");
+
+        // Sorted ascending (OFFSET path): same positions, sorted values
+        app.send_char('[');
+        app.draw();
+        app.draw();
+        app.send_char('G');
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "500");
+        app.send_char('g');
+        app.send_char('y');
+        app.send_char('2');
+        assert_eq!(app.last_copied().unwrap(), "1");
+    }
+
+    #[test]
+    fn test_background_count_on_file_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("counted.db");
+        let mut runtime = Runtime::new(Some(path.to_str().unwrap().to_owned())).unwrap();
+        runtime
+            .connection
+            .execute_script(
+                "create table big as with recursive c(n) as \
+                 (select 1 union all select n+1 from c limit 500) select n from c",
+            )
+            .unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 20);
+        app.send_key(KeyCode::Enter.into());
+
+        // File-backed db: the count arrives from the background COUNT(*)
+        // thread; poll renders until it lands.
+        let mut complete = false;
+        for _ in 0..200 {
+            app.draw();
+            if let Page::Table(table_page) = &app.app.page {
+                if table_page.row_count.is_complete {
+                    complete = true;
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(complete, "background count never completed");
+        match &app.app.page {
+            Page::Table(table_page) => assert_eq!(table_page.total_rows(), 500),
+            _ => panic!("expected table page"),
+        }
+
+        // Sorting must not discard the completed count
+        app.send_char('[');
+        app.draw();
+        app.draw();
+        match &app.app.page {
+            Page::Table(table_page) => {
+                assert!(table_page.row_count.is_complete);
+                assert_eq!(table_page.total_rows(), 500);
+            }
+            _ => panic!("expected table page"),
+        }
     }
 
     #[test]

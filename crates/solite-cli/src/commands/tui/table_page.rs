@@ -58,6 +58,16 @@ const COUNT_BATCH_SIZE: usize = 60493;
 /// Spinner characters for counting animation
 const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
+/// Where an in-progress count is coming from.
+enum CountSource {
+    /// `SELECT COUNT(*)` running on its own read-only connection in a
+    /// background thread; the result arrives on this channel.
+    Background(std::sync::mpsc::Receiver<Result<usize, String>>),
+    /// Incremental OFFSET probing on the UI connection. Fallback for
+    /// databases a second connection can't reach (in-memory, remote).
+    Probe,
+}
+
 /// Tracks row count with incremental discovery
 pub struct RowCount {
     /// Minimum known row count (from loaded data)
@@ -68,15 +78,77 @@ pub struct RowCount {
     probe_offset: usize,
     /// Spinner frame for animation
     spinner_frame: usize,
+    /// Active counting strategy
+    source: CountSource,
 }
 
 impl RowCount {
+    /// Probe-based counter (OFFSET batches on the UI connection).
     pub fn new(initial_known: usize) -> Self {
         Self {
             known: initial_known,
             is_complete: initial_known == 0, // Empty table is complete
             probe_offset: initial_known,
             spinner_frame: 0,
+            source: CountSource::Probe,
+        }
+    }
+
+    /// Counter for `table` in the database at `runtime`'s connection.
+    ///
+    /// When the database is a local file, spawns a background thread that
+    /// runs `SELECT COUNT(*)` on its own read-only connection — a single
+    /// optimized scan, off the UI thread. In-memory and remote databases
+    /// can't be reopened by a second connection, so those keep the
+    /// incremental OFFSET probe.
+    fn start(initial_known: usize, runtime: &Runtime, table: &str) -> Self {
+        let mut row_count = Self::new(initial_known);
+        if row_count.is_complete {
+            return row_count;
+        }
+        let Some(path) = background_countable_path(runtime) else {
+            return row_count;
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let table = table.to_owned();
+        std::thread::spawn(move || {
+            let result = count_rows(&path, &table);
+            // Receiver may be gone (page closed); nothing to do then.
+            let _ = tx.send(result);
+        });
+        row_count.source = CountSource::Background(rx);
+        row_count
+    }
+
+    /// Drive counting forward from the render loop. Non-blocking for the
+    /// background source; one OFFSET batch for the probe source.
+    fn tick(&mut self, runtime: &Runtime, table: &str) {
+        if self.is_complete {
+            return;
+        }
+        match &self.source {
+            CountSource::Background(rx) => {
+                use std::sync::mpsc::TryRecvError;
+                self.spinner_frame = (self.spinner_frame + 1) % SPINNER_CHARS.len();
+                match rx.try_recv() {
+                    Ok(Ok(total)) => {
+                        // Loads may have seen more rows than the count if the
+                        // table grew meanwhile; keep the larger value.
+                        self.known = self.known.max(total);
+                        self.is_complete = true;
+                    }
+                    // Count failed or the thread died: fall back to probing.
+                    Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
+                        self.source = CountSource::Probe;
+                        self.probe_offset = self.known;
+                    }
+                    Err(TryRecvError::Empty) => {}
+                }
+            }
+            CountSource::Probe => {
+                self.count_batch(runtime, table);
+            }
         }
     }
 
@@ -146,6 +218,36 @@ impl RowCount {
     }
 }
 
+/// The database file path, if a background thread could open a second
+/// read-only connection to it. None for in-memory and remote databases.
+fn background_countable_path(runtime: &Runtime) -> Option<String> {
+    if runtime.connection.is_remote() {
+        return None;
+    }
+    let path = runtime.connection.db_name()?;
+    if path.is_empty() || !std::path::Path::new(&path).exists() {
+        return None;
+    }
+    Some(path)
+}
+
+/// Open `path` read-only and `SELECT COUNT(*)` from `table`.
+/// Runs on the background counting thread.
+fn count_rows(path: &str, table: &str) -> Result<usize, String> {
+    let connection = solite_core::sqlite::Connection::open_readonly(path)
+        .map_err(|e| format!("Failed to open database for counting: {}", e))?;
+    let sql = format!("SELECT COUNT(*) FROM \"{}\"", table.replace('"', "\"\""));
+    let (_, stmt) = connection
+        .prepare(&sql)
+        .map_err(|e| format!("Count query error: {}", e))?;
+    let mut stmt = stmt.ok_or("Failed to prepare count query")?;
+    let row = stmt
+        .next()
+        .map_err(|e| format!("Count error: {}", e))?
+        .ok_or("Count query returned no rows")?;
+    Ok(row[0].as_int64().max(0) as usize)
+}
+
 pub fn load_table_data(
     runtime: &Runtime,
     table: &str,
@@ -210,6 +312,84 @@ pub fn load_table_data(
         data: Data { columns, rows },
         error,
     }
+}
+
+/// Whether keyset pagination on `rowid` is usable for this table: a real
+/// rowid table (not WITHOUT ROWID, not a view) with no user-defined column
+/// shadowing `rowid`.
+fn rowid_keyset_usable(runtime: &Runtime, table: &str) -> bool {
+    let escaped = table.replace('\'', "''");
+
+    let sql = format!("SELECT wr, type FROM pragma_table_list('{}')", escaped);
+    let Ok((_, Some(mut stmt))) = runtime.connection.prepare(&sql) else {
+        return false;
+    };
+    match stmt.next() {
+        Ok(Some(row)) => {
+            // wr = 1 means WITHOUT ROWID
+            if row[0].as_int64() != 0 || row[1].as_str() != "table" {
+                return false;
+            }
+        }
+        _ => return false,
+    }
+
+    // A column literally named "rowid" shadows the real rowid; keyset
+    // anchors on it would be wrong (it may not be unique or ordered).
+    let sql = format!(
+        "SELECT count(*) FROM pragma_table_info('{}') WHERE lower(name) = 'rowid'",
+        escaped
+    );
+    let Ok((_, Some(mut stmt))) = runtime.connection.prepare(&sql) else {
+        return false;
+    };
+    matches!(stmt.next(), Ok(Some(row)) if row[0].as_int64() == 0)
+}
+
+/// Load a window of `SELECT rowid, * FROM "table" {suffix}`, returning the
+/// rowids alongside the rows (rowid stripped from columns/rows). `reverse`
+/// flips the fetched order, for `ORDER BY rowid DESC` reads.
+#[allow(clippy::type_complexity)]
+fn load_rowid_window(
+    runtime: &Runtime,
+    table: &str,
+    suffix: &str,
+    reverse: bool,
+) -> Result<(Vec<String>, Vec<Vec<OwnedValue>>, Vec<i64>), String> {
+    let sql = format!(
+        "SELECT rowid, * FROM \"{}\" {}",
+        table.replace('"', "\"\""),
+        suffix
+    );
+    let mut stmt = match runtime.connection.prepare(&sql) {
+        Ok((_, Some(stmt))) => stmt,
+        Ok((_, None)) => return Err("Failed to prepare query".to_owned()),
+        Err(e) => return Err(format!("Query error: {}", e)),
+    };
+
+    let mut columns = stmt.column_names().unwrap_or_default();
+    if !columns.is_empty() {
+        columns.remove(0); // the rowid column
+    }
+    let mut rows = vec![];
+    let mut rowids = vec![];
+    loop {
+        match stmt.next() {
+            Ok(None) => break,
+            Ok(Some(row)) => {
+                let mut values = row.iter();
+                let rowid = values.next().map(|v| v.as_int64()).unwrap_or(0);
+                rowids.push(rowid);
+                rows.push(values.map(OwnedValue::from_value_ref).collect());
+            }
+            Err(e) => return Err(format!("Error reading row: {}", e)),
+        }
+    }
+    if reverse {
+        rows.reverse();
+        rowids.reverse();
+    }
+    Ok((columns, rows, rowids))
 }
 
 /// Load up to `cap` rows of the whole table (respecting the active sort
@@ -328,8 +508,23 @@ pub struct TablePage<'a> {
     window_start: usize,
     /// Current sort order (if any)
     current_order: Option<Order>,
+    /// Sort requested but not yet executed (a "Sorting…" frame is shown
+    /// before the blocking ORDER BY query runs)
+    pending_sort: Option<PendingSort>,
+    /// Whether keyset pagination on rowid is usable for this table
+    use_rowid: bool,
+    /// rowids for the loaded window (when loaded via the rowid path),
+    /// used as keyset anchors
+    rowids: Option<Vec<i64>>,
     /// Destination for copy operations
     clipboard: SharedClipboard,
+}
+
+/// A sort waiting for its feedback frame before the blocking query runs.
+struct PendingSort {
+    order: Order,
+    /// The "Sorting…" footer has been drawn; the query may run now.
+    message_rendered: bool,
 }
 
 impl<'a> TablePage<'a> {
@@ -339,30 +534,47 @@ impl<'a> TablePage<'a> {
         theme: TuiTheme,
         clipboard: SharedClipboard,
     ) -> Self {
-        let result = load_table_data(runtime, table_name, None, 0, WINDOW_SIZE);
+        let use_rowid = rowid_keyset_usable(runtime, table_name);
+        let (data, rowids, error) = if use_rowid {
+            match load_rowid_window(
+                runtime,
+                table_name,
+                &format!("ORDER BY rowid LIMIT {}", WINDOW_SIZE),
+                false,
+            ) {
+                Ok((columns, rows, rowids)) => (Data { columns, rows }, Some(rowids), None),
+                Err(e) => (Data::empty(), None, Some(e)),
+            }
+        } else {
+            let result = load_table_data(runtime, table_name, None, 0, WINDOW_SIZE);
+            (result.data, None, result.error)
+        };
         let primary_keys = get_primary_keys(runtime, table_name);
         let mut state = TableState::default();
-        if !result.data.rows.is_empty() {
+        if !data.rows.is_empty() {
             state.select_first();
             state.select_first_column();
         }
-        let row_count = RowCount::new(result.data.rows.len());
+        let row_count = RowCount::start(data.rows.len(), runtime, table_name);
         Self {
             runtime,
             theme,
             state,
             table_name: table_name.to_owned(),
-            data: result.data,
+            data,
             n_columns_show: 5,
             column_idx_offset: 0,
             footer_message: None,
-            error: result.error,
+            error,
             copy_popup: CopyPopup::new(),
             help_popup: HelpPopup::new(" Help — Table ", TABLE_KEYS),
             primary_keys,
             row_count,
             window_start: 0,
             current_order: None,
+            pending_sort: None,
+            use_rowid,
+            rowids,
             clipboard,
         }
     }
@@ -390,23 +602,135 @@ impl<'a> TablePage<'a> {
         if should_reload {
             // Center the window around the target row
             let new_start = absolute_row.saturating_sub(WINDOW_SIZE / 2);
+            self.load_window(new_start);
+        }
+    }
 
-            let result = load_table_data(
+    /// Load the window starting at `new_start`, preferring keyset (rowid
+    /// anchored, O(window)) reads over OFFSET (O(offset)) ones.
+    fn load_window(&mut self, new_start: usize) {
+        let keyset_eligible = self.use_rowid && self.current_order.is_none();
+        if keyset_eligible && self.load_window_keyset(new_start) {
+            return;
+        }
+
+        if keyset_eligible {
+            // OFFSET fallback that still fetches rowids (with an explicit
+            // ORDER BY rowid, matching the keyset reads) so later keyset
+            // hops have anchors again.
+            match load_rowid_window(
                 self.runtime,
                 &self.table_name,
-                self.current_order.clone(),
-                new_start,
-                WINDOW_SIZE,
-            );
-
-            if result.error.is_none() {
-                self.window_start = new_start;
-                // Update row count from loaded data
-                self.row_count.update_from_load(new_start, result.data.rows.len());
-                self.data = result.data;
-            } else {
-                self.error = result.error;
+                &format!("ORDER BY rowid LIMIT {} OFFSET {}", WINDOW_SIZE, new_start),
+                false,
+            ) {
+                Ok((columns, rows, rowids)) => {
+                    self.apply_window(new_start, Data { columns, rows }, Some(rowids));
+                }
+                Err(e) => self.error = Some(e),
             }
+            return;
+        }
+
+        let result = load_table_data(
+            self.runtime,
+            &self.table_name,
+            self.current_order.clone(),
+            new_start,
+            WINDOW_SIZE,
+        );
+        if result.error.is_none() {
+            self.apply_window(new_start, result.data, None);
+        } else {
+            self.error = result.error;
+        }
+    }
+
+    /// Install a freshly loaded window and update the row count from it.
+    fn apply_window(&mut self, new_start: usize, data: Data, rowids: Option<Vec<i64>>) {
+        self.window_start = new_start;
+        self.row_count.update_from_load(new_start, data.rows.len());
+        self.data = data;
+        self.rowids = rowids;
+    }
+
+    /// Try a keyset (rowid-anchored) load of the window at `new_start`.
+    /// Returns false when no anchor applies — the caller falls back to
+    /// OFFSET. On query errors, sets `self.error` and reports handled.
+    fn load_window_keyset(&mut self, new_start: usize) -> bool {
+        let Some(rowids) = self.rowids.clone() else {
+            return false;
+        };
+        if rowids.is_empty() {
+            return false;
+        }
+        let window_end = self.window_start + rowids.len();
+
+        if new_start >= self.window_start && new_start < window_end {
+            // Forward: anchor on a row inside the current window.
+            let anchor = rowids[new_start - self.window_start];
+            match load_rowid_window(
+                self.runtime,
+                &self.table_name,
+                &format!("WHERE rowid >= {} ORDER BY rowid LIMIT {}", anchor, WINDOW_SIZE),
+                false,
+            ) {
+                Ok((columns, rows, new_rowids)) => {
+                    self.apply_window(new_start, Data { columns, rows }, Some(new_rowids));
+                }
+                Err(e) => self.error = Some(e),
+            }
+            true
+        } else if new_start < self.window_start && new_start + WINDOW_SIZE > self.window_start {
+            // Backward with overlap: fetch only the gap before the current
+            // window (reading backwards from its first rowid) and splice it
+            // with the front of the rows we already have.
+            let gap = self.window_start - new_start;
+            let anchor = rowids[0];
+            match load_rowid_window(
+                self.runtime,
+                &self.table_name,
+                &format!("WHERE rowid < {} ORDER BY rowid DESC LIMIT {}", anchor, gap),
+                true,
+            ) {
+                Ok((columns, mut rows, mut new_rowids)) => {
+                    if rows.len() != gap {
+                        // The table changed underneath us; let OFFSET resolve.
+                        return false;
+                    }
+                    let keep = WINDOW_SIZE - gap;
+                    rows.extend(self.data.rows.iter().take(keep).cloned());
+                    new_rowids.extend(rowids.iter().take(keep).copied());
+                    self.apply_window(new_start, Data { columns, rows }, Some(new_rowids));
+                    true
+                }
+                Err(e) => {
+                    self.error = Some(e);
+                    true
+                }
+            }
+        } else if self.row_count.is_complete && new_start + WINDOW_SIZE >= self.row_count.known {
+            // Tail jump (e.g. `G` deep into the table): read the last rows
+            // in reverse — O(window) instead of a near-full OFFSET scan.
+            let n = self.row_count.known.saturating_sub(new_start);
+            if n == 0 {
+                return false;
+            }
+            match load_rowid_window(
+                self.runtime,
+                &self.table_name,
+                &format!("ORDER BY rowid DESC LIMIT {}", n),
+                true,
+            ) {
+                Ok((columns, rows, new_rowids)) => {
+                    let start = self.row_count.known.saturating_sub(rows.len());
+                    self.apply_window(start, Data { columns, rows }, Some(new_rowids));
+                }
+                Err(e) => self.error = Some(e),
+            }
+            true
+        } else {
+            false
         }
     }
 
@@ -429,16 +753,26 @@ impl<'a> TablePage<'a> {
         self.state.selected().map(|window_idx| self.window_to_absolute(window_idx))
     }
 
+    /// Request a sort. The blocking ORDER BY query is deferred until after
+    /// the next frame so a "Sorting…" message is on screen while it runs
+    /// (see the end of `render`).
     fn sort(&mut self, direction: SortDirection) {
         let col_idx = self
             .state
             .selected_column()
             .unwrap_or(0)
             .saturating_add(self.column_idx_offset);
-        let order = Order {
-            column_idx: col_idx,
-            direction,
-        };
+        self.pending_sort = Some(PendingSort {
+            order: Order {
+                column_idx: col_idx,
+                direction,
+            },
+            message_rendered: false,
+        });
+    }
+
+    /// Run the (blocking) sorted reload for `order`.
+    fn apply_sort(&mut self, order: Order) {
         let result = load_table_data(
             self.runtime,
             &self.table_name,
@@ -446,16 +780,21 @@ impl<'a> TablePage<'a> {
             0,
             WINDOW_SIZE,
         );
+        if let Some(err) = result.error {
+            // Keep the previous view; just report the failure.
+            self.footer_message = Some(format!("Sort error: {}", err));
+            return;
+        }
         self.window_start = 0;
         self.current_order = Some(order);
-        // Reset row count - will re-discover during navigation
-        self.row_count = RowCount::new(result.data.rows.len());
+        // A sort doesn't change cardinality: keep the row count, only
+        // extending it if this load saw more rows.
+        self.row_count.update_from_load(0, result.data.rows.len());
         self.data = result.data;
+        // Sorted windows are loaded by OFFSET; rowid anchors no longer apply.
+        self.rowids = None;
         // Reset selection to first row after sort
         self.state.select_first();
-        if let Some(err) = result.error {
-            self.footer_message = Some(format!("Sort error: {}", err));
-        }
     }
 
     /// Generate TSV for a single row
@@ -846,7 +1185,15 @@ impl TablePage<'_> {
         frame.render_stateful_widget(table, table_rect, &mut self.state);
 
         // Footer message (copy confirmation, errors, position indicator)
-        if let Some(msg) = &self.footer_message {
+        if self.pending_sort.is_some() {
+            use ratatui::style::Color;
+            frame.render_widget(
+                Text::from("Sorting…")
+                    .style(Style::new().fg(Color::Yellow))
+                    .centered(),
+                message_rect,
+            );
+        } else if let Some(msg) = &self.footer_message {
             use ratatui::style::Color;
             let style = if msg.starts_with("Copied") || msg.starts_with("✓") {
                 Style::new().fg(Color::Green)
@@ -880,9 +1227,10 @@ impl TablePage<'_> {
                 message_rect,
             );
 
-            // Continue counting in background if not complete
+            // Continue counting if not complete (poll the background
+            // COUNT(*), or advance the OFFSET probe one batch)
             if !self.row_count.is_complete {
-                self.row_count.count_batch(self.runtime, &self.table_name);
+                self.row_count.tick(self.runtime, &self.table_name);
             }
         }
 
@@ -892,6 +1240,19 @@ impl TablePage<'_> {
         // Popups (render on top)
         self.copy_popup.render(frame, area);
         self.help_popup.render(frame, area);
+
+        // Run a pending sort only after its "Sorting…" frame has been
+        // composed: the blocking ORDER BY query executes between frames,
+        // with honest feedback on screen instead of a silent freeze.
+        if let Some(pending) = &mut self.pending_sort {
+            if !pending.message_rendered {
+                pending.message_rendered = true;
+            } else {
+                let order = pending.order.clone();
+                self.pending_sort = None;
+                self.apply_sort(order);
+            }
+        }
     }
 }
 

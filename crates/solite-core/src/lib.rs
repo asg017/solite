@@ -646,14 +646,17 @@ impl Runtime {
         if let Some(stmt) = stmt {
             let params = stmt.bind_parameters();
             for (idx, param) in params.iter().enumerate() {
-                let param = if let Some(param) = param.strip_prefix(':') {
-                    param
-                } else if let Some(param) = param.strip_prefix('@') {
-                    param
-                } else {
-                    param
-                };
-                match self.lookup_parameter(param) {
+                // Look up the raw placeholder name first (so a key stored as
+                // `.param set $x 1` still binds `$x`), then fall back to the
+                // name with its `:`/`@`/`$` prefix stripped, which is how
+                // `.param set x 1` and `.run --x=v` store keys.
+                let stripped = param
+                    .strip_prefix([':', '@', '$'])
+                    .unwrap_or(param.as_str());
+                let value = self
+                    .lookup_parameter(param)
+                    .or_else(|| self.lookup_parameter(stripped));
+                match value {
                     Some(OwnedValue::Text(s)) => {
                         stmt.bind_text((idx + 1) as i32, std::str::from_utf8(&s).unwrap())?
                     }
@@ -1395,6 +1398,49 @@ select not_exist();",
         let (_, errors) = collect_steps_with_errors(&mut rt);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("Failed to read"));
+    }
+
+    fn text_of(value: Option<OwnedValue>) -> Option<String> {
+        match value {
+            Some(OwnedValue::Text(s)) => Some(std::str::from_utf8(&s).unwrap().to_string()),
+            _ => None,
+        }
+    }
+
+    fn select_one(rt: &Runtime, sql: &str) -> Option<String> {
+        let (_, stmt) = rt.prepare_with_parameters(sql).unwrap();
+        let mut stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        text_of(Some(OwnedValue::from_value_ref(row.first().unwrap())))
+    }
+
+    #[test]
+    fn test_bare_parameter_key_binds_all_prefixes() {
+        // `.param set x 1` stores the bare key "x"; all three placeholder
+        // styles must bind it.
+        let mut rt = Runtime::new(None).unwrap();
+        rt.define_parameter("x".to_string(), "hello".to_string()).unwrap();
+        assert_eq!(select_one(&rt, "select $x;"), Some("hello".to_string()));
+        assert_eq!(select_one(&rt, "select :x;"), Some("hello".to_string()));
+        assert_eq!(select_one(&rt, "select @x;"), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_prefixed_parameter_key_still_binds() {
+        // `.param set $x 1` stores the literal key "$x"; the raw placeholder
+        // name is looked up first, so `$x` still binds (back-compat).
+        let mut rt = Runtime::new(None).unwrap();
+        rt.define_parameter("$x".to_string(), "dollar".to_string()).unwrap();
+        assert_eq!(select_one(&rt, "select $x;"), Some("dollar".to_string()));
+    }
+
+    #[test]
+    fn test_raw_key_wins_over_stripped_key() {
+        let mut rt = Runtime::new(None).unwrap();
+        rt.define_parameter("x".to_string(), "bare".to_string()).unwrap();
+        rt.define_parameter("$x".to_string(), "exact".to_string()).unwrap();
+        assert_eq!(select_one(&rt, "select $x;"), Some("exact".to_string()));
+        assert_eq!(select_one(&rt, "select :x;"), Some("bare".to_string()));
     }
 
     #[test]

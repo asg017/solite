@@ -60,6 +60,29 @@ def test_non_db_file_is_usage_error(solite_cli):
     assert result.stderr != ""
 
 
+def test_param_set_binds_all_placeholder_prefixes(solite_cli):
+    out = repl(
+        solite_cli,
+        [
+            ".timer off",
+            ".param set x 1",
+            "select $x as dollar, :x as colon, @x as at;",
+        ],
+    )["stdout"]
+    # All three placeholder styles bind the bare key
+    row = [line for line in out.splitlines() if "│ 1" in line]
+    assert row, out
+    assert row[0].count("1") == 3, out
+
+
+def test_param_set_prefixed_key_still_binds(solite_cli):
+    out = repl(
+        solite_cli,
+        [".timer off", ".param set $x prefixed", "select $x as v;"],
+    )["stdout"]
+    assert "prefixed" in out
+
+
 def test_sigint_interrupts_query_without_exiting():
     """SIGINT (Ctrl-C) during a long-running query aborts the statement but
     keeps the REPL alive; a subsequent statement still executes."""

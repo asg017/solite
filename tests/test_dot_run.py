@@ -108,3 +108,17 @@ def test_run_procedure_with_params(solite_cli, tmp_path):
     result = solite_cli(["run", "main.sql"], cwd=tmp_path)
     assert result.success
     assert "hi world" in result.stdout
+
+
+def test_run_procedure_binds_dollar_params(solite_cli, tmp_path):
+    # `.run file proc --x=v` stores the bare key "x"; procedures written with
+    # the documented `$x` syntax must bind it too.
+    (tmp_path / "procs.sql").write_text(
+        "-- name: greet :row\nselect 'hi ' || $name as msg;\n"
+    )
+    (tmp_path / "main.sql").write_text(
+        ".timer off\n.run procs.sql greet --name=dollar\n"
+    )
+    result = solite_cli(["run", "main.sql"], cwd=tmp_path)
+    assert result.success
+    assert "hi dollar" in result.stdout

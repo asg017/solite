@@ -28,7 +28,7 @@ mod tests {
         let (_, stmt) = rt.connection.prepare(sql).unwrap();
         let stmt = stmt.unwrap();
         stmt.execute().unwrap();
-        let steps = unsafe { solite_core::sqlite::bytecode_steps(stmt.pointer()) };
+        let steps = unsafe { solite_core::sqlite::bytecode_steps(stmt.pointer()) }.unwrap();
         eprintln!("Bytecode for: {}", sql);
         for step in &steps {
             if step.nexec > 0 || step.opcode == "Insert" || step.opcode == "Delete" {

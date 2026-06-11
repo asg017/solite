@@ -259,7 +259,8 @@ fn extract_table_name_from_sql(sql: &str) -> Option<String> {
 
 /// Extract the status of a statement from its bytecode.
 pub fn get_statement_status(stmt: *mut sqlite3_stmt) -> StatementStatus {
-    let steps = unsafe { bytecode_steps(stmt) };
+    // Status display is best-effort: treat a bytecode read failure as no steps.
+    let steps = unsafe { bytecode_steps(stmt) }.unwrap_or_default();
 
     // Only consider main program opcodes (subprog is empty for main program)
     let main_steps: Vec<_> = steps.iter().filter(|s| s.subprog.is_empty()).collect();

@@ -705,59 +705,44 @@ pub struct BytecodeStep {
 }
 /// # Safety
 /// `pstmt` must be a valid, non-null pointer to a prepared sqlite3 statement.
-pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Vec<BytecodeStep> {
+pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Result<Vec<BytecodeStep>, SQLiteError> {
     let mut steps = vec![];
     unsafe {
         let db: *mut sqlite3 = sqlite3_db_handle(pstmt);
+        // Borrowed handle: owned=false makes Drop skip sqlite3_close.
         let db = Connection::from_local(db, false);
 
-        let stmt = db
-            .prepare(
-                "SELECT addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle 
+        let stmt = match db.prepare(
+            "SELECT addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle
     FROM bytecode(?)
     ",
-            )
-            .unwrap()
-            .1
-            .unwrap();
-        stmt.bind_pointer(1, pstmt.cast(), c"stmt-pointer")
-            .expect("bind stmt-pointer within range");
-        loop {
-            let rc = stmt.nextx();
-            match rc {
-                Ok(Some(row)) => {
-                    let addr = row.value_at(0).as_int64();
-                    let opcode = row.value_at(1).as_str().to_owned();
-                    let p1 = row.value_at(2).as_int64();
-                    let p2 = row.value_at(3).as_int64();
-                    let p3 = row.value_at(4).as_int64();
-                    let p4 = row.value_at(5).as_str().to_owned();
-                    let p5 = row.value_at(6).as_int64();
-                    let comment = row.value_at(7).as_str().to_owned();
-                    let subprog = row.value_at(8).as_str().to_owned();
-                    let nexec = row.value_at(9).as_int64();
-                    let ncycle = row.value_at(10).as_int64();
-                    steps.push(BytecodeStep {
-                        addr,
-                        opcode: opcode.to_string(),
-                        p1,
-                        p2,
-                        p3,
-                        p4: p4.to_string(),
-                        p5,
-                        comment: comment.to_string(),
-                        subprog,
-                        nexec,
-                        ncycle,
-                    });
-                }
-                Ok(None) => break,
-                Err(_) => break,
+        )? {
+            (_, Some(stmt)) => stmt,
+            (_, None) => {
+                return Err(SQLiteError::custom(
+                    SQLITE_ERROR,
+                    "bytecode query prepared to no statement".to_string(),
+                ))
             }
+        };
+        stmt.bind_pointer(1, pstmt.cast(), c"stmt-pointer")?;
+        while let Some(row) = stmt.nextx()? {
+            steps.push(BytecodeStep {
+                addr: row.value_at(0).as_int64(),
+                opcode: row.value_at(1).as_str().to_owned(),
+                p1: row.value_at(2).as_int64(),
+                p2: row.value_at(3).as_int64(),
+                p3: row.value_at(4).as_int64(),
+                p4: row.value_at(5).as_str().to_owned(),
+                p5: row.value_at(6).as_int64(),
+                comment: row.value_at(7).as_str().to_owned(),
+                subprog: row.value_at(8).as_str().to_owned(),
+                nexec: row.value_at(9).as_int64(),
+                ncycle: row.value_at(10).as_int64(),
+            });
         }
     }
-    // TODO
-    steps
+    Ok(steps)
 }
 /// Transport for communicating with a remote `solite serve` process over SSH.
 pub struct RemoteTransport {
@@ -1609,6 +1594,16 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_bytecode_steps() {
+        let conn = Connection::open_in_memory().unwrap();
+        let (_, stmt) = conn.prepare("select 1 + 1").unwrap();
+        let stmt = stmt.unwrap();
+        let steps = unsafe { bytecode_steps(stmt.pointer()) }.unwrap();
+        assert!(!steps.is_empty());
+        assert_eq!(steps[0].opcode, "Init");
+    }
+
     #[test]
     fn test_interior_nul_bytes() {
         // SQL with interior NUL errors instead of panicking

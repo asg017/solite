@@ -207,7 +207,7 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
                 ));
             }
 
-            steps = unsafe { bytecode_steps(stmt.pointer()) };
+            steps = unsafe { bytecode_steps(stmt.pointer()) }?;
         }
 
         pb.finish_and_clear();

@@ -11,6 +11,7 @@ use solite_core::Runtime;
 
 use crate::commands::tui::help_bar::HelpBar;
 use crate::commands::tui::tui_theme::TuiTheme;
+use crate::commands::tui::utils::render_value_for_display;
 use crate::commands::tui::{copy_to_clipboard, value_to_string, HandleKeyResult, NavigateToPage};
 
 /// Information about a primary key column
@@ -350,13 +351,7 @@ impl RowPage {
                     OwnedValue::Blob(_) => Style::default().fg(blob_color),
                 };
 
-                let val_display = match val {
-                    OwnedValue::Null => "NULL".to_owned(),
-                    OwnedValue::Integer(i) => i.to_string(),
-                    OwnedValue::Double(f) => f.to_string(),
-                    OwnedValue::Text(s) => String::from_utf8_lossy(s).into_owned(),
-                    OwnedValue::Blob(b) => format!("<blob {} bytes>", b.len()),
-                };
+                let val_display = render_value_for_display(val);
 
                 let pk_marker = if is_pk { " PK" } else { "" };
 

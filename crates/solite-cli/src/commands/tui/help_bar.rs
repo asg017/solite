@@ -10,8 +10,6 @@ use ratatui::{
     Frame,
 };
 
-use super::tui_theme::TuiTheme;
-
 /// A single item in the help bar (key binding + label)
 pub struct HelpItem<'a> {
     /// Keys to display (multiple keys are joined with "/")
@@ -37,9 +35,6 @@ impl<'a> HelpItem<'a> {
 
 enum HelpBarEntry<'a> {
     Item(HelpItem<'a>),
-    /// Plain text displayed in secondary style
-    #[allow(dead_code)]
-    Text(&'a str),
     /// Separator (vertical bar)
     Separator,
 }
@@ -47,23 +42,11 @@ enum HelpBarEntry<'a> {
 /// Builder for creating help bar content
 pub struct HelpBar<'a> {
     items: Vec<HelpBarEntry<'a>>,
-    #[allow(dead_code)]
-    theme: Option<&'a TuiTheme>,
 }
 
 impl<'a> HelpBar<'a> {
     pub fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            theme: None,
-        }
-    }
-
-    /// Set the theme for styling
-    #[allow(dead_code)]
-    pub fn theme(mut self, theme: &'a TuiTheme) -> Self {
-        self.theme = Some(theme);
-        self
+        Self { items: Vec::new() }
     }
 
     /// Add a key binding with a label
@@ -77,13 +60,6 @@ impl<'a> HelpBar<'a> {
     pub fn keys(mut self, keys: Vec<&'a str>, label: &'a str) -> Self {
         self.items
             .push(HelpBarEntry::Item(HelpItem::keys(keys, label)));
-        self
-    }
-
-    /// Add plain text (useful for navigation hints)
-    #[allow(dead_code)]
-    pub fn text(mut self, text: &'a str) -> Self {
-        self.items.push(HelpBarEntry::Text(text));
         self
     }
 
@@ -119,9 +95,6 @@ impl<'a> HelpBar<'a> {
                         spans.push(Span::styled(*key, key_style));
                     }
                     spans.push(Span::styled(item.label, label_style));
-                }
-                HelpBarEntry::Text(text) => {
-                    spans.push(Span::styled(text, label_style));
                 }
                 HelpBarEntry::Separator => {
                     spans.push(Span::styled("  │  ", label_style));

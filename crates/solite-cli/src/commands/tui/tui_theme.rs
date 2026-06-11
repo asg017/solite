@@ -44,11 +44,3 @@ pub(crate) static CTP_MOCHA_THEME: LazyLock<TuiTheme> = LazyLock::new(|| TuiThem
   header_style_fg: ctp_mocha_colors::YELLOW.clone(),
 
 });
-
-#[allow(dead_code)]
-pub(crate) static BUILTIN_THEMES: LazyLock<Vec<(&'static str, TuiTheme)>> = LazyLock::new(|| vec![
-  (
-    "ctp-mocha",
-    CTP_MOCHA_THEME.clone(),
-  ),
-]);

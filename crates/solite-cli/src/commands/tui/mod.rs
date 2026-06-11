@@ -18,7 +18,7 @@ use crate::commands::tui::tui_theme::{CTP_MOCHA_THEME, TuiTheme};
 use crate::commands::tui::{listing_page::ListingPage, row_page::RowPage, table_page::TablePage};
 use color_eyre::Result;
 use crossterm::event::{self, KeyEvent};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Stylize};
 use ratatui::text::{Line, Text};
 use ratatui::Frame;
@@ -61,8 +61,6 @@ enum HandleKeyResult {
     None,
     Quit,
     Navigate(NavigateToPage),
-    #[allow(dead_code)]
-    ShowMessage(String),
 }
 
 /// Convert an OwnedValue to a string for clipboard operations
@@ -84,21 +82,10 @@ fn copy_to_clipboard(content: &str) -> std::result::Result<(), String> {
         .map_err(|e| format!("Failed to copy: {}", e))
 }
 
-/// Copy an OwnedValue to the clipboard
-#[allow(dead_code)]
-fn copy(value: &OwnedValue) -> std::result::Result<(), String> {
-    copy_to_clipboard(&value_to_string(value))
-}
-
-trait TuiPage {
-    fn handle_key(&mut self, key: KeyEvent) -> HandleKeyResult;
-    fn render(&mut self, frame: &mut Frame, area: Rect);
-}
-
 enum Page<'a> {
     Listing(ListingPage),
     Table(TablePage<'a>),
-    Row(RowPage, String), // RowPage + table_name for back navigation
+    Row(RowPage),
 }
 
 pub(crate) struct App<'a> {
@@ -112,17 +99,12 @@ impl<'a> App<'a> {
         let result = match &mut self.page {
             Page::Listing(page) => page.handle_key(key),
             Page::Table(page) => page.handle_key(key),
-            Page::Row(page, _) => page.handle_key(key),
+            Page::Row(page) => page.handle_key(key),
         };
 
         match result {
             HandleKeyResult::Quit => return true,
             HandleKeyResult::None => (),
-            HandleKeyResult::ShowMessage(msg) => {
-                // Messages are handled by individual pages via their footer_message
-                // This variant exists for consistency but the page already set the message
-                let _ = msg;
-            }
             HandleKeyResult::Navigate(to) => match to {
                 NavigateToPage::Listing => {
                     let page = ListingPage::new(self.runtime, &self.theme);
@@ -134,19 +116,19 @@ impl<'a> App<'a> {
                 }
                 NavigateToPage::Row(data) => {
                     let row_page = RowPage::new(
-                        data.table_name.clone(),
+                        data.table_name,
                         data.row_index,
                         data.columns,
                         data.values,
                         data.primary_keys,
                         self.theme.clone(),
                     );
-                    self.page = Page::Row(row_page, data.table_name);
+                    self.page = Page::Row(row_page);
                 }
                 NavigateToPage::BackToTable => {
                     // Get table name from current Row page, then navigate back
-                    if let Page::Row(_, table_name) = &self.page {
-                        let table_name = table_name.clone();
+                    if let Page::Row(row_page) = &self.page {
+                        let table_name = row_page.table_name.clone();
                         self.page = Page::Table(TablePage::new(
                             &table_name,
                             self.runtime,
@@ -186,7 +168,7 @@ impl<'a> App<'a> {
                 let row_text = if row_count == 1 { "row" } else { "rows" };
                 format!("{} ({}{} {})", table_page.table_name, formatted_count, suffix, row_text)
             }
-            Page::Row(row_page, _) => {
+            Page::Row(row_page) => {
                 format!(
                     "{} > row {}",
                     row_page.table_name,
@@ -218,15 +200,20 @@ impl<'a> App<'a> {
         match &mut self.page {
             Page::Listing(listing_page) => listing_page.render(frame, main),
             Page::Table(table_page) => table_page.render(frame, main),
-            Page::Row(row_page, _) => row_page.render(frame, main),
+            Page::Row(row_page) => row_page.render(frame, main),
         }
     }
 }
 
-pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
+/// Shared app construction + event loop for both TUI entry points.
+/// Opens directly on `initial_table` when given (skipping the listing query).
+fn run_app(runtime: &Runtime, initial_table: Option<&str>) -> anyhow::Result<()> {
     let theme = CTP_MOCHA_THEME.clone();
-    let page = Page::Listing(ListingPage::new(runtime, &theme));
-    let mut app = App { runtime, page, theme: theme.clone() };
+    let page = match initial_table {
+        Some(table_name) => Page::Table(TablePage::new(table_name, runtime, theme.clone())),
+        None => Page::Listing(ListingPage::new(runtime, &theme)),
+    };
+    let mut app = App { runtime, page, theme };
 
     ratatui::run(|terminal| loop {
         terminal.draw(|frame| app.render(frame))?;
@@ -241,6 +228,10 @@ pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
     })
 }
 
+pub fn launch_tui(runtime: &mut Runtime) -> anyhow::Result<()> {
+    run_app(runtime, None)
+}
+
 pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
     // Failure means a hook is already installed; degraded panic reports are fine.
     let _ = color_eyre::install();
@@ -251,7 +242,7 @@ pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
         );
         return Err(());
     };
-    let mut runtime = Runtime::new_with_options(
+    let runtime = Runtime::new_with_options(
         Some(database.to_owned()),
         cmd.remote.remote_bin.as_deref(),
         cmd.remote.transport.as_deref(),
@@ -259,27 +250,5 @@ pub(crate) fn tui(cmd: TuiArgs) -> Result<(), ()> {
     ).map_err(|e| {
         eprintln!("Error: {}", e);
     })?;
-    let theme = CTP_MOCHA_THEME.clone();
-    let page = Page::Listing(ListingPage::new(&runtime, &theme));
-    let mut app = App {
-        runtime: &mut runtime,
-        page,
-        theme: theme.clone(),
-    };
-    if let Some(table_name) = cmd.table {
-        app.page = Page::Table(TablePage::new(&table_name, app.runtime, theme.clone()));
-    } 
-
-    let result: anyhow::Result<()> = ratatui::run(|terminal| loop {
-        terminal.draw(|frame| app.render(frame))?;
-        // Poll with short timeout to allow UI refresh during counting
-        if event::poll(Duration::from_millis(100))? {
-            if let Some(key) = event::read()?.as_key_press_event() {
-                if app.handle_key(key) {
-                    break Ok(());
-                }
-            }
-        }
-    });
-    result.map_err(|err| eprintln!("Error: {err}"))
+    run_app(&runtime, cmd.table.as_deref()).map_err(|err| eprintln!("Error: {err}"))
 }

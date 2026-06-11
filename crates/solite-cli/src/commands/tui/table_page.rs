@@ -17,9 +17,9 @@ use solite_core::sqlite::OwnedValue;
 use solite_core::Runtime;
 
 #[derive(Debug)]
-pub(crate) struct Data {
-    pub(crate) columns: Vec<String>,
-    pub(crate) rows: Vec<Vec<OwnedValue>>,
+pub struct Data {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<OwnedValue>>,
 }
 
 impl Data {
@@ -32,19 +32,19 @@ impl Data {
 }
 
 #[derive(Clone)]
-struct Order {
+pub struct Order {
     column_idx: usize,
     direction: SortDirection,
 }
 
 /// Result of loading table data
-struct LoadResult {
-    data: Data,
-    error: Option<String>,
+pub struct LoadResult {
+    pub data: Data,
+    pub error: Option<String>,
 }
 
 /// Configuration for windowed data loading
-const WINDOW_SIZE: usize = 200;
+pub const WINDOW_SIZE: usize = 200;
 const PREFETCH_THRESHOLD: usize = 50;
 
 /// Maximum number of rows a full-table copy will put on the clipboard.
@@ -59,11 +59,11 @@ const COUNT_BATCH_SIZE: usize = 60493;
 const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 /// Tracks row count with incremental discovery
-pub(crate) struct RowCount {
+pub struct RowCount {
     /// Minimum known row count (from loaded data)
     known: usize,
     /// Whether we've found the actual end
-    pub(crate) is_complete: bool,
+    pub is_complete: bool,
     /// Next offset to probe when counting
     probe_offset: usize,
     /// Spinner frame for animation
@@ -71,7 +71,7 @@ pub(crate) struct RowCount {
 }
 
 impl RowCount {
-    fn new(initial_known: usize) -> Self {
+    pub fn new(initial_known: usize) -> Self {
         Self {
             known: initial_known,
             is_complete: initial_known == 0, // Empty table is complete
@@ -93,7 +93,7 @@ impl RowCount {
     }
 
     /// Count a batch of rows to discover more. Returns true if still counting.
-    fn count_batch(&mut self, runtime: &Runtime, table: &str) -> bool {
+    pub fn count_batch(&mut self, runtime: &Runtime, table: &str) -> bool {
         if self.is_complete {
             return false;
         }
@@ -146,7 +146,7 @@ impl RowCount {
     }
 }
 
-fn load_table_data(
+pub fn load_table_data(
     runtime: &Runtime,
     table: &str,
     order: Option<Order>,
@@ -246,7 +246,7 @@ fn tsv_escape(s: String) -> String {
 }
 
 /// Generate TSV (header + rows) for the given data.
-fn data_to_tsv(data: &Data) -> String {
+pub fn data_to_tsv(data: &Data) -> String {
     let header = data
         .columns
         .iter()
@@ -267,7 +267,7 @@ fn data_to_tsv(data: &Data) -> String {
 }
 
 /// Generate INSERT statements for the given data.
-fn data_to_inserts(table_name: &str, data: &Data) -> String {
+pub fn data_to_inserts(table_name: &str, data: &Data) -> String {
     if data.rows.is_empty() {
         return format!("-- No data in table \"{}\"", table_name);
     }
@@ -333,7 +333,7 @@ pub struct TablePage<'a> {
 }
 
 impl<'a> TablePage<'a> {
-    pub(crate) fn new(
+    pub fn new(
         table_name: &str,
         runtime: &'a Runtime,
         theme: TuiTheme,
@@ -553,7 +553,7 @@ impl<'a> TablePage<'a> {
 }
 
 #[derive(Clone, Copy)]
-enum SortDirection {
+pub enum SortDirection {
     Ascending,
     Descending,
 }
@@ -763,7 +763,7 @@ impl TablePage<'_> {
         }
     }
 
-    pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let layout = Layout::vertical([
             Constraint::Fill(1),
             Constraint::Length(1),

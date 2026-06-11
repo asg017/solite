@@ -42,7 +42,7 @@ pub(crate) fn format_number(n: usize) -> String {
 
 use crate::cli::TuiArgs;
 
-enum NavigateToPage {
+pub(crate) enum NavigateToPage {
     Listing,
     Table(String),
     Row(RowPageData),
@@ -50,7 +50,7 @@ enum NavigateToPage {
 }
 
 /// Data needed to create a RowPage
-struct RowPageData {
+pub(crate) struct RowPageData {
     table_name: String,
     row_index: usize,
     columns: Vec<String>,
@@ -58,7 +58,7 @@ struct RowPageData {
     primary_keys: Vec<row_page::PrimaryKeyInfo>,
 }
 
-enum HandleKeyResult {
+pub(crate) enum HandleKeyResult {
     None,
     Quit,
     Navigate(NavigateToPage),
@@ -77,7 +77,7 @@ fn value_to_string(value: &OwnedValue) -> String {
 
 /// Destination for copy operations. Injectable so tests can assert what was
 /// copied without touching the real (headless-hostile) system clipboard.
-pub(crate) trait Clipboard {
+pub trait Clipboard {
     /// Copy text to the clipboard. Returns an error message if it fails.
     fn set_text(&mut self, text: String) -> std::result::Result<(), String>;
 }
@@ -95,7 +95,19 @@ impl Clipboard for SystemClipboard {
 }
 
 /// Shared clipboard handle passed to every page that can copy.
-pub(crate) type SharedClipboard = std::rc::Rc<std::cell::RefCell<dyn Clipboard>>;
+pub type SharedClipboard = std::rc::Rc<std::cell::RefCell<dyn Clipboard>>;
+
+/// Hidden re-exports for the criterion benches in `benches/tui.rs`.
+/// Not a public API; do not depend on this outside the benches.
+#[doc(hidden)]
+pub mod bench_support {
+    pub use super::table_page::{
+        data_to_inserts, data_to_tsv, load_table_data, Data, LoadResult, RowCount, TablePage,
+        WINDOW_SIZE,
+    };
+    pub use super::tui_theme::{CTP_MOCHA_THEME, TuiTheme};
+    pub use super::{Clipboard, SharedClipboard};
+}
 
 enum Page<'a> {
     Listing(ListingPage),

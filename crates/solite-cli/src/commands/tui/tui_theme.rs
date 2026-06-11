@@ -2,7 +2,7 @@ use crate::themes::SoliteColor;
 use std::sync::LazyLock;
 
 #[derive(Clone)]
-pub(crate) struct TuiTheme {
+pub struct TuiTheme {
   pub base: SoliteColor,
   pub keycap: SoliteColor,
   pub null: SoliteColor,
@@ -25,7 +25,7 @@ pub(crate) struct TuiTheme {
 
 use crate::themes::ctp_mocha_colors;
 
-pub(crate) static CTP_MOCHA_THEME: LazyLock<TuiTheme> = LazyLock::new(|| TuiTheme {
+pub static CTP_MOCHA_THEME: LazyLock<TuiTheme> = LazyLock::new(|| TuiTheme {
   base: ctp_mocha_colors::BASE.clone(),
   keycap: ctp_mocha_colors::GREEN.clone(),
 

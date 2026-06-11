@@ -38,9 +38,10 @@ endif
 	make test
 	@echo "SQLite bumped to $(VERSION). Review 'git diff' and 'git -C vendor/sqlite log -1', then commit."
 
-# Criterion benchmarks for the sqlite binding hot paths (dev-tooling, not CI).
+# Criterion benchmarks for the sqlite binding and TUI hot paths
+# (dev-tooling, not CI).
 bench:
-	cargo bench -p solite-core
+	cargo bench -p solite-core -p solite-cli
 
 .PHONY: test test-cargo test-pytest test-snap bump-sqlite bench
 

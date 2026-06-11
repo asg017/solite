@@ -4540,6 +4540,7 @@ dependencies = [
  "codespan-reporting",
  "color-eyre",
  "console",
+ "criterion",
  "crossterm",
  "ctrlc",
  "dotenvy",

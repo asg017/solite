@@ -4597,6 +4597,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "base64 0.22.1",
  "criterion",
  "csv",
  "dotenvy",

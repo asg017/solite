@@ -56,8 +56,6 @@ pub enum ExportError {
     Clipboard(String),
     /// Compression error.
     Compression(String),
-    /// Unsupported blob in format.
-    UnsupportedBlob,
 }
 
 impl fmt::Display for ExportError {
@@ -78,7 +76,6 @@ impl fmt::Display for ExportError {
             }
             ExportError::Clipboard(msg) => write!(f, "Clipboard error: {}", msg),
             ExportError::Compression(msg) => write!(f, "Compression error: {}", msg),
-            ExportError::UnsupportedBlob => write!(f, "BLOB values not supported in this format"),
         }
     }
 }
@@ -129,6 +126,19 @@ pub enum ExportFormat {
     Clipboard,
 }
 
+/// Encode a BLOB as a SQL-style hex literal, e.g. `x'DEADBEEF'`.
+/// Used by CSV/TSV/clipboard so blobs stay distinguishable from empty
+/// strings and NULLs (and round-trip losslessly).
+fn blob_to_hex_literal(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2 + 3);
+    out.push_str("x'");
+    for b in bytes {
+        out.push_str(&format!("{:02X}", b));
+    }
+    out.push('\'');
+    out
+}
+
 /// Convert a SQLite value to a string representation.
 fn value_to_string(value: &ValueRefX) -> Result<String, ExportError> {
     match &value.value {
@@ -140,7 +150,7 @@ fn value_to_string(value: &ValueRefX) -> Result<String, ExportError> {
                 .map(|s| s.to_owned())
                 .map_err(|_| ExportError::InvalidUtf8)
         }
-        ValueRefXValue::Blob(_) => Ok(String::new()),
+        ValueRefXValue::Blob(bytes) => Ok(blob_to_hex_literal(bytes)),
     }
 }
 
@@ -163,9 +173,13 @@ fn value_to_json(value: &ValueRefX) -> Result<serde_json::Value, ExportError> {
                 Ok(serde_json::Value::String(text.to_owned()))
             }
         }
-        // BLOBs can't be serialized to JSON easily
-        // TODO: maybe base64 option?
-        ValueRefXValue::Blob(_) => Ok(serde_json::Value::Null),
+        // BLOBs are emitted as plain base64 strings (lossless and easy to
+        // decode with jq/standard tooling)
+        ValueRefXValue::Blob(bytes) => {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            Ok(serde_json::Value::String(encoded))
+        }
     }
 }
 
@@ -544,6 +558,50 @@ mod tests {
             html_escape("<a href=\"test\">link & stuff</a>"),
             "&lt;a href=&quot;test&quot;&gt;link &amp; stuff&lt;/a&gt;"
         );
+    }
+
+    fn first_value_of(sql: &str) -> crate::sqlite::Statement {
+        let conn = crate::sqlite::Connection::open_in_memory().unwrap();
+        let (_, stmt) = conn.prepare(sql).unwrap();
+        stmt.unwrap()
+    }
+
+    #[test]
+    fn test_blob_to_hex_literal() {
+        assert_eq!(blob_to_hex_literal(&[]), "x''");
+        assert_eq!(blob_to_hex_literal(&[0xDE, 0xAD, 0xBE, 0xEF]), "x'DEADBEEF'");
+        assert_eq!(blob_to_hex_literal(&[0x00, 0x01]), "x'0001'");
+    }
+
+    #[test]
+    fn test_value_to_string_blob_is_hex_literal() {
+        let mut stmt = first_value_of("select x'DEADBEEF', zeroblob(2), '', null");
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(value_to_string(&row[0]).unwrap(), "x'DEADBEEF'");
+        assert_eq!(value_to_string(&row[1]).unwrap(), "x'0000'");
+        // blob, empty string, and NULL are all distinguishable
+        assert_eq!(value_to_string(&row[2]).unwrap(), "");
+        assert_eq!(value_to_string(&row[3]).unwrap(), "");
+        assert_ne!(
+            value_to_string(&row[1]).unwrap(),
+            value_to_string(&row[2]).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_value_to_json_blob_is_base64() {
+        let mut stmt = first_value_of("select x'DEADBEEF', zeroblob(2), null");
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(
+            value_to_json(&row[0]).unwrap(),
+            serde_json::Value::String("3q2+7w==".to_string())
+        );
+        assert_eq!(
+            value_to_json(&row[1]).unwrap(),
+            serde_json::Value::String("AAA=".to_string())
+        );
+        // blob is no longer conflated with NULL
+        assert_eq!(value_to_json(&row[2]).unwrap(), serde_json::Value::Null);
     }
 
     #[test]

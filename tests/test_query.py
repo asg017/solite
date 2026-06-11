@@ -1,3 +1,6 @@
+import json
+
+
 def test_query_output_formats(solite_cli, snapshot, tmp_path):
     sql = "select * from json_tree('[1,2,3,4]')"
     assert solite_cli(["q", sql]).stdout == snapshot(name="basic-default")
@@ -127,6 +130,30 @@ def test_query_parameters(solite_cli):
 
     assert add(1, 2).stdout == '[{":a + :b":3}]\n'
     assert add(1, 1).stdout == '[{":a + :b":2}]\n'
+
+
+def test_query_blob_output(solite_cli):
+    """BLOBs export losslessly: hex literal in csv/tsv, base64 in json."""
+    sql = "select x'DEADBEEF' as b, zeroblob(2) as z, '' as empty, null as n"
+
+    result = solite_cli(["q", sql, "-f", "csv"])
+    assert result.success, result.stderr
+    assert result.stdout == "b,z,empty,n\nx'DEADBEEF',x'0000',,\n"
+
+    result = solite_cli(["q", sql, "-f", "json"])
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == [
+        {"b": "3q2+7w==", "z": "AAA=", "empty": "", "n": None}
+    ]
+
+    result = solite_cli(["q", sql, "-f", "ndjson"])
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == {
+        "b": "3q2+7w==",
+        "z": "AAA=",
+        "empty": "",
+        "n": None,
+    }
 
 
 def test_query_parameter_types(solite_cli):

@@ -203,6 +203,17 @@ def test_unknown_dot_command_reports_error(solite_cli):
     assert "Unknown command" in out["stdout"] + out["stderr"]
 
 
+def test_pasted_prompts_are_stripped(solite_cli):
+    # Lines copied from another REPL session (prompts included) execute
+    # cleanly; every line of a multi-line paste is stripped.
+    out = repl(
+        solite_cli,
+        [".timer off", "❱ select", "❱ 40 + 2", "❱ as pasted;"],
+    )["stdout"]
+    assert "pasted" in out
+    assert "42" in out
+
+
 def test_param_list_empty(solite_cli):
     # `.param list` before any `.param set`: the temp table doesn't exist yet
     out = repl(solite_cli, [".timer off", ".param list"])

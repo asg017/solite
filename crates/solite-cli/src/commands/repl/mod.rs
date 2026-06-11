@@ -62,19 +62,9 @@ struct ReplHelper {
     colored_prompt: String,
 }
 
-/** TODO
- * - completer
- *   - SQL syntax
- *   - database, table, column names
- *   - SQL functions/table functions
- *   - if replacement scan, then files on disk
- *   - history, tables/columns/functions/urls?
- * - syntax colors
- *   - more complete SQL
- *   - strings
- *   - numbers
- *   - comments
- */
+// Completer/highlighter ideas not implemented yet:
+// - file-on-disk completion when a replacement scan is in play
+// - history-aware completion (tables/columns/functions/urls)
 impl Highlighter for ReplHelper {
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
@@ -423,6 +413,21 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str, last_input: &str
 const PROMPT: &str = "❱ ";
 const PROMPT_TRANSACTION: &str = "❱• ";
 
+/// Strip leading prompt markers from every line of the submitted input, so
+/// text copied from another REPL session (prompts included) paste-executes
+/// cleanly. Input that legitimately starts with `❱ ` is vanishingly rare.
+fn strip_prompt_prefixes(input: &str) -> String {
+    input
+        .lines()
+        .map(|line| {
+            line.strip_prefix(PROMPT)
+                .or_else(|| line.strip_prefix(PROMPT_TRANSACTION))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn launch_repl(args: ReplArgs) -> Result<()> {
     let runtime = Runtime::new_with_options(
         args.database
@@ -515,11 +520,8 @@ Enter \".help\" for usage hints.
         let readline = rl.readline(prompt);
         match readline {
             Ok(line) => {
-                let line = line
-                    .as_str()
-                    .strip_prefix(PROMPT)
-                    .or_else(|| line.as_str().strip_prefix(PROMPT_TRANSACTION))
-                    .unwrap_or(&line);
+                let line = strip_prompt_prefixes(&line);
+                let line = line.as_str();
                 let executed = {
                     let mut rt = runtime_ref.borrow_mut();
                     // Re-register every iteration: `.open` swaps the
@@ -562,4 +564,28 @@ Enter \".help\" for usage hints.
 }
 pub fn repl(args: ReplArgs) -> std::result::Result<(), ()> {
     launch_repl(args).map_err(|err| eprintln!("Error: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_prompt_prefixes;
+
+    #[test]
+    fn test_strip_prompt_prefixes() {
+        // single line, both prompt flavors
+        assert_eq!(strip_prompt_prefixes("❱ select 1;"), "select 1;");
+        assert_eq!(strip_prompt_prefixes("❱• commit;"), "commit;");
+        // untouched input passes through
+        assert_eq!(strip_prompt_prefixes("select 1;"), "select 1;");
+        // multi-line paste strips every line's prompt
+        assert_eq!(
+            strip_prompt_prefixes("❱ select\n❱ 1 + 1\n❱ as x;"),
+            "select\n1 + 1\nas x;"
+        );
+        // mixed prompted/unprompted lines
+        assert_eq!(
+            strip_prompt_prefixes("❱ begin;\ninsert into t values (1);\n❱• commit;"),
+            "begin;\ninsert into t values (1);\ncommit;"
+        );
+    }
 }

@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_highlight_dot_styles_all_known_commands() {
-        for name in crate::commands::repl::completer::DOT_COMMAND_NAMES {
+        for name in crate::commands::repl::completer::DOT_COMMAND_NAMES.iter() {
             let line = format!(".{name} arg");
             let highlighted = highlight_dot_str(&line);
             assert!(

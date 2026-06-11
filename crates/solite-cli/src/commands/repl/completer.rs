@@ -181,11 +181,12 @@ fn to_pair(item: CompletionItem) -> Pair {
     }
 }
 
-/// Dot command names offered by tab completion (REPL and Jupyter).
-pub(crate) const DOT_COMMAND_NAMES: &[&str] = &[
-    "ask", "bench", "call", "clear", "dotenv", "env", "export", "graphviz", "help", "load",
-    "open", "param", "print", "run", "schema", "sh", "tables", "timer", "tui", "vegalite",
-];
+/// Dot command names (primary names plus aliases) offered by tab completion
+/// (REPL and Jupyter) and styled by the REPL highlighter. Derived from the
+/// canonical registry in `solite_core::dot::help` so new commands and
+/// feature-gated ones (e.g. `stream`) appear automatically.
+pub(crate) static DOT_COMMAND_NAMES: std::sync::LazyLock<Vec<&'static str>> =
+    std::sync::LazyLock::new(solite_core::dot::command_names_with_aliases);
 
 /// Find the start position for completion replacement.
 /// Returns the byte position of the start of the current word being typed.

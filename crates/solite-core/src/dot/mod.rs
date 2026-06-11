@@ -78,6 +78,7 @@ pub use crate::dot::{
 };
 #[cfg(feature = "ritestream")]
 pub use stream::{StreamAction, StreamCommand, StreamSyncResult};
+pub use help::{command_names, command_names_with_aliases};
 pub use load::LoadCommandSource;
 
 use crate::Runtime;
@@ -470,6 +471,34 @@ mod tests {
                 assert!(msg.contains("requires a value"));
             }
             _ => panic!("Expected InvalidArgument error"),
+        }
+    }
+
+    #[test]
+    fn test_help_registry_names_round_trip_through_parser() {
+        // Every name (and alias) in the canonical help registry must be
+        // recognized by parse_dot. Commands that require arguments may fail
+        // with other errors, but never UnknownCommand.
+        let mut rt = crate::Runtime::new(None).unwrap();
+        for name in command_names_with_aliases() {
+            let result = parse_dot(name, "", "", &mut rt);
+            assert!(
+                !matches!(result, Err(ParseDotError::UnknownCommand(_))),
+                "help registry lists '{}' but parse_dot does not recognize it",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_command_names_subset_of_aliased_names() {
+        let with_aliases = command_names_with_aliases();
+        for name in command_names() {
+            assert!(with_aliases.contains(&name));
+        }
+        // Aliases from help.rs are present
+        for alias in ["gv", "vl", "loadenv", "parameter", "c"] {
+            assert!(with_aliases.contains(&alias), "missing alias {alias}");
         }
     }
 

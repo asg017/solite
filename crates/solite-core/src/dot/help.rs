@@ -139,6 +139,23 @@ const COMMANDS: &[HelpEntry] = &[
     },
 ];
 
+/// Primary names of all dot commands (no aliases).
+pub fn command_names() -> impl Iterator<Item = &'static str> {
+    COMMANDS.iter().map(|entry| entry.name)
+}
+
+/// Primary names plus aliases, sorted — the single source of truth for
+/// frontends offering or styling dot-command names (completion,
+/// highlighting). The parser accepts aliases, so they are offered too.
+pub fn command_names_with_aliases() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = COMMANDS
+        .iter()
+        .flat_map(|entry| std::iter::once(entry.name).chain(entry.aliases.iter().copied()))
+        .collect();
+    names.sort_unstable();
+    names
+}
+
 const SHORTHANDS: &str = "\
 Shorthands:
   !<command>    same as .sh <command>

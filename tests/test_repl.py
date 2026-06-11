@@ -83,6 +83,126 @@ def test_param_set_prefixed_key_still_binds(solite_cli):
     assert "prefixed" in out
 
 
+def test_dot_tables_and_schema(solite_cli):
+    out = repl(
+        solite_cli,
+        [
+            ".timer off",
+            "create table users(id integer, name text);",
+            ".tables",
+            ".schema",
+        ],
+    )["stdout"]
+    assert "users" in out
+    # .schema echoes the stored CREATE statement
+    assert "create table users" in out.lower()
+
+
+def test_dot_print(solite_cli):
+    out = repl(solite_cli, [".timer off", ".print hello world"])["stdout"]
+    assert "hello world" in out
+
+
+def test_dot_env_set_unset(solite_cli):
+    out = repl(
+        solite_cli,
+        [".timer off", ".env set MY_TEST_VAR myvalue", ".env unset MY_TEST_VAR"],
+    )["stdout"]
+    assert "✓ set environment variable 'MY_TEST_VAR'" in out
+    assert "✓ unset environment variable 'MY_TEST_VAR'" in out
+
+
+def test_dot_open_creates_and_uses_db(solite_cli, tmp_path):
+    out = solite_cli(
+        [],
+        communicate=[
+            b".timer off\n"
+            b".open mydb.db\n"
+            b"create table t(x);\n"
+            b"insert into t values (1), (2);\n"
+            b"select count(*) as n from t;\n"
+        ],
+        kill=True,
+        cwd=tmp_path,
+    ).stdout
+    assert "✓ opened database" in out
+    assert (tmp_path / "mydb.db").exists()
+    assert "n" in out and "2" in out
+
+
+def test_timer_defaults_on_and_toggles(solite_cli):
+    # The timer defaults to on: each statement is followed by a duration line
+    timer_re = re.compile(r"\d+(\.\d+)?(ms|s)")
+    on = repl(solite_cli, ["select 1;"])["stdout"]
+    assert timer_re.search(on), on
+    off = repl(solite_cli, [".timer off", "select 1;"])["stdout"]
+    assert not timer_re.search(off), off
+
+
+def test_multiline_sql_executes_once(solite_cli):
+    # A statement split over lines is buffered until input_complete
+    out = repl(solite_cli, [".timer off", "select", "1 + 1", "as answer;"])["stdout"]
+    assert "answer" in out
+    assert out.count("answer") == 1
+
+
+def test_multiline_export(solite_cli, tmp_path):
+    out = solite_cli(
+        [],
+        communicate=[b".timer off\n.export out.csv\nselect 1 as a, 2 as b;\n"],
+        kill=True,
+        cwd=tmp_path,
+    ).stdout
+    assert "exported to out.csv" in out
+    lines = (tmp_path / "out.csv").read_text().strip().splitlines()
+    assert lines[0] == "a,b"
+    assert lines[1] == "1,2"
+
+
+def test_procedure_definition_and_call(solite_cli):
+    out = repl(
+        solite_cli,
+        [
+            ".timer off",
+            "-- name: answer :value",
+            "select 42 as answer;",
+            ".call answer",
+        ],
+    )["stdout"]
+    assert "Registered procedure: answer" in out
+    assert "42" in out
+
+
+def test_error_then_recover(solite_cli):
+    # A prepare error doesn't wedge the REPL; the next statement runs
+    out = repl(solite_cli, [".timer off", "select nope();", "select 'recovered';"])
+    assert "no such function" in out["stdout"] + out["stderr"]
+    assert "recovered" in out["stdout"]
+
+
+def test_transaction_sequence_executes(solite_cli):
+    # The transaction prompt (`❱•`) needs a PTY to observe; this only checks
+    # that a begin/commit sequence executes cleanly through the REPL.
+    out = repl(
+        solite_cli,
+        [
+            ".timer off",
+            "create table t(x);",
+            "begin;",
+            "insert into t values (1);",
+            "commit;",
+            "select count(*) as n from t;",
+        ],
+    )
+    assert "1" in out["stdout"]
+    assert "error" not in out["stderr"].lower()
+
+
+def test_unknown_dot_command_reports_error(solite_cli):
+    out = repl(solite_cli, [".timer off", ".notacommand"])
+    assert "Unknown command" in out["stdout"] + out["stderr"]
+
+
 def test_param_list_empty(solite_cli):
     # `.param list` before any `.param set`: the temp table doesn't exist yet
     out = repl(solite_cli, [".timer off", ".param list"])

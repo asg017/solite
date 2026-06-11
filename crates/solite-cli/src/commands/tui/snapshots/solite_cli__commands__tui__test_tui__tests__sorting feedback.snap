@@ -3,10 +3,10 @@ source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
 "nums (3+ rows)                       Solite               ? help  q back  Q quit"
-"n                                        label                                  "
-"                                       3 three                                  "
-"                                       1 one                                    "
-"                                       2 two                                    "
+"n   label                                                                       "
+"  3 three                                                                       "
+"  1 one                                                                         "
+"  2 two                                                                         "
 "                                                                                "
 "                                                                                "
 "                                                                                "

@@ -3,10 +3,10 @@ source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
 "people (3+ rows)                     Solite               ? help  q back  Q quit"
-"id                         name                       score                     "
-"                         1 alice                                            90.5"
-"                         2 bob                                             80.25"
-"                         3 carol                                              70"
+"id  name  score                                                                 "
+"  1 alice  90.5                                                                 "
+"  2 bob   80.25                                                                 "
+"  3 carol    70                                                                 "
 "                                                                                "
 "                                                                                "
 "                                                                                "

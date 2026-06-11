@@ -4,7 +4,7 @@ expression: self.terminal.backend()
 ---
 "my "table" (1+ row)                  Solite               ? help  q back  Q quit"
 "x                                                                               "
-"                                                                              42"
+" 42                                                                             "
 "                                                                                "
 "                                                                                "
 "                                                                                "

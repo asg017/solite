@@ -3,7 +3,7 @@ source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
 "empty (0 rows)                       Solite               ? help  q back  Q quit"
-"a                                        b                                      "
+"a   b                                                                           "
 "                                                                                "
 "                                                                                "
 "                                                                                "

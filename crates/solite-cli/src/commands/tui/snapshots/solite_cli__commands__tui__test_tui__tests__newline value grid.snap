@@ -1,0 +1,16 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"notes (2+ rows)                      Solite               ? help  q back  Q quit"
+"id  note                                                                        "
+"  1 line one\nline two                                                          "
+"  2 tabbed\tvalue                                                               "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 Row 1 of 2+ ⠋                                  "
+"────────────────────────────────────────────────────────────────────────────────"
+" h/j/k/l navigate  Enter view row  [ sort asc  ] sort desc  y/c copy  q/Esc back"

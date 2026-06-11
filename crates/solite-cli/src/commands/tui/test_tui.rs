@@ -483,6 +483,88 @@ mod tests {
     }
 
     #[test]
+    fn test_wide_table_column_fit() {
+        // 100 columns: the number of visible columns adapts to the width
+        let columns: Vec<String> = (0..100).map(|i| format!("{} as col{i}", i * 11)).collect();
+        let script = format!("create table wide as select {}", columns.join(", "));
+
+        let mut runtime = Runtime::new(None).unwrap();
+        runtime.connection.execute_script(&script).unwrap();
+        {
+            let mut app = TestApp::new(&mut runtime, 80, 16);
+            app.send_key(KeyCode::Enter.into());
+            app.draw_and_snapshot("wide 100col at 80");
+            // L jumps toward the last column; the grid stays intact
+            app.send_char('L');
+            app.draw_and_snapshot("wide 100col at 80 last column");
+        }
+
+        let mut app = TestApp::new(&mut runtime, 200, 16);
+        app.send_key(KeyCode::Enter.into());
+        app.draw_and_snapshot("wide 100col at 200");
+    }
+
+    #[test]
+    fn test_newlines_do_not_break_the_grid() {
+        let mut runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(
+                "create table notes(id, note);\n\
+                 insert into notes values (1, 'line one' || char(10) || 'line two'), \
+                 (2, 'tabbed' || char(9) || 'value');",
+            )
+            .unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 12);
+        app.send_key(KeyCode::Enter.into());
+        // Each row stays one line high; \n and \t show as visible escapes
+        app.draw_and_snapshot("newline value grid");
+    }
+
+    #[test]
+    fn test_huge_values_truncated_in_window_but_copied_in_full() {
+        const HUGE_LEN: usize = 100_000;
+        let mut runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(&format!(
+                "create table blobs as \
+                 select 1 as id, hex(zeroblob({})) as big_text, zeroblob({}) as big_blob",
+                HUGE_LEN / 2,
+                HUGE_LEN
+            ))
+            .unwrap();
+        let mut app = TestApp::new(&mut runtime, 80, 12);
+        app.send_key(KeyCode::Enter.into());
+
+        // The window never materializes the full values…
+        if let Page::Table(table_page) = &app.app.page {
+            for value in &table_page.data.rows[0] {
+                let size = match value {
+                    solite_core::sqlite::OwnedValue::Text(s) => s.len(),
+                    solite_core::sqlite::OwnedValue::Blob(b) => b.len(),
+                    _ => 0,
+                };
+                assert!(size <= 1024, "window cell holds {} bytes", size);
+            }
+        } else {
+            panic!("expected table page");
+        }
+
+        // …but a cell copy fetches the full value on demand
+        app.send_char('l'); // select the big_text column
+        app.send_char('y');
+        app.send_char('1');
+        assert_eq!(app.last_copied().unwrap().len(), HUGE_LEN);
+
+        // and the row page receives full values (its display truncates)
+        app.send_key(KeyCode::Enter.into());
+        app.send_char('j'); // big_text
+        app.send_char('y');
+        assert_eq!(app.last_copied().unwrap().len(), HUGE_LEN);
+    }
+
+    #[test]
     fn test_quoted_table_name() {
         let mut runtime = Runtime::new(None).unwrap();
         runtime

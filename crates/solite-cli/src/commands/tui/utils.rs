@@ -15,31 +15,70 @@ pub fn popup_area_fixed(area: Rect, width: u16, height: u16) -> Rect {
     area
 }
 
+/// Replace characters that would corrupt a one-line-high cell: newlines,
+/// carriage returns, and tabs become visible escapes, other control
+/// characters become U+FFFD.
+fn sanitize_control_chars(text: &str) -> String {
+    if !text.chars().any(|c| c.is_control()) {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push('\u{FFFD}'),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Render an OwnedValue to a display string, truncating if necessary.
 ///
 /// The single value-to-display function shared by the table and row pages.
-/// (Clipboard copies go through `value_to_string` instead, which is
-/// intentionally different: no truncation, NULL as empty string.)
+/// Newlines and control characters are rendered as visible escapes so they
+/// can't break row alignment. (Clipboard copies go through
+/// `value_to_string` instead, which is intentionally different: no
+/// truncation, no escaping, NULL as empty string.)
 pub(crate) fn render_value_for_display(value: &OwnedValue) -> String {
+    render_value_for_display_capped(value, None)
+}
+
+/// Like [`render_value_for_display`], but aware that text/blob values may
+/// have been truncated at `fetch_cap` bytes by the SQL layer: a blob of
+/// exactly the cap displays as `[BLOB N+ bytes]` since its true size is
+/// unknown (truncated text already carries the `…` indicator).
+pub(crate) fn render_value_for_display_capped(
+    value: &OwnedValue,
+    fetch_cap: Option<usize>,
+) -> String {
     match value {
         OwnedValue::Null => "NULL".to_owned(),
         OwnedValue::Integer(i) => i.to_string(),
         OwnedValue::Double(f) => f.to_string(),
         OwnedValue::Text(s) => {
             let text = String::from_utf8_lossy(s);
+            // SQL substr() truncation counts characters for text
+            let truncated_at_cap = fetch_cap.is_some_and(|cap| text.chars().count() >= cap);
             if text.len() > MAX_CELL_DISPLAY_LEN {
                 // Find a valid character boundary at or before MAX_CELL_DISPLAY_LEN
                 let mut end = MAX_CELL_DISPLAY_LEN;
                 while end > 0 && !text.is_char_boundary(end) {
                     end -= 1;
                 }
-                format!("{}…", &text[..end])
+                format!("{}…", sanitize_control_chars(&text[..end]))
+            } else if truncated_at_cap {
+                format!("{}…", sanitize_control_chars(&text))
             } else {
-                text.into_owned()
+                sanitize_control_chars(&text)
             }
         }
         OwnedValue::Blob(b) => {
-            if b.len() > 20 {
+            if fetch_cap.is_some_and(|cap| b.len() >= cap) {
+                format!("[BLOB {}+ bytes]", b.len())
+            } else if b.len() > 20 {
                 format!("[BLOB {} bytes]", b.len())
             } else {
                 "[BLOB]".to_string()

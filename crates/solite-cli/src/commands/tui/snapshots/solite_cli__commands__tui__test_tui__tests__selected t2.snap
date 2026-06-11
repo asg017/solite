@@ -3,9 +3,9 @@ source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
 "t2 (2+ rows)                         Solite               ? help  q back  Q quit"
-"c1              c2              c3               c4              c5             "
-"              1               2                3               4               5"
-"a               b               c                d               e              "
+"c1  c2  c3  c4  c5  c6  c7  c8  c9  c10                                         "
+"  1   2   3   4   5   6   7   8   9  10                                         "
+"a   b   c   d   e   f   g   h   i   j                                           "
 "                                                                                "
 "                                                                                "
 "                                                                                "

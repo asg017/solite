@@ -3,7 +3,7 @@ use std::fmt::Write;
 use crate::commands::tui::copy_popup::{CopyOption, CopyPopup};
 use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, TABLE_KEYS};
 use crate::commands::tui::row_page::{get_primary_keys, PrimaryKeyInfo};
-use crate::commands::tui::utils::render_value_for_display;
+use crate::commands::tui::utils::render_value_for_display_capped;
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{
     value_to_string, Frame, HandleKeyResult, NavigateToPage, RowPageData, SharedClipboard,
@@ -51,6 +51,13 @@ const PREFETCH_THRESHOLD: usize = 50;
 /// Larger tables are truncated (with an honest footer message) — the
 /// clipboard is the wrong channel for huge tables; `.export` exists for that.
 const COPY_ROW_LIMIT: usize = 100_000;
+
+/// Maximum size of a single cell fetched into the window: characters for
+/// text, bytes for blobs (SQL `substr`/`length` semantics). Larger values
+/// are truncated at the SQL layer so a window crossing huge cells never
+/// materializes them; cell-copy and the row page fetch full values on
+/// demand. Comfortably larger than MAX_CELL_DISPLAY_LEN.
+const MAX_CELL_FETCH_LEN: usize = 1024;
 
 /// Rows to count per incremental batch
 const COUNT_BATCH_SIZE: usize = 60493;
@@ -248,6 +255,7 @@ fn count_rows(path: &str, table: &str) -> Result<usize, String> {
     Ok(row[0].as_int64().max(0) as usize)
 }
 
+/// Load rows with full, untruncated values (`SELECT *`).
 pub fn load_table_data(
     runtime: &Runtime,
     table: &str,
@@ -255,9 +263,27 @@ pub fn load_table_data(
     offset: usize,
     limit: usize,
 ) -> LoadResult {
+    load_table_data_with_select(runtime, table, "*", order, offset, limit)
+}
+
+/// Load rows with an explicit SELECT list (used by window loads to truncate
+/// oversized values at the SQL layer; see [`window_select_list`]).
+fn load_table_data_with_select(
+    runtime: &Runtime,
+    table: &str,
+    select_list: &str,
+    order: Option<Order>,
+    offset: usize,
+    limit: usize,
+) -> LoadResult {
     let mut sql: String = String::new();
     // Use quoted identifier to handle special table names
-    let _ = writeln!(&mut sql, "SELECT * FROM \"{}\"", table.replace('"', "\"\""));
+    let _ = writeln!(
+        &mut sql,
+        "SELECT {} FROM \"{}\"",
+        select_list,
+        table.replace('"', "\"\"")
+    );
     if let Some(order) = order {
         let _ = writeln!(
             &mut sql,
@@ -314,6 +340,47 @@ pub fn load_table_data(
     }
 }
 
+/// The table's column names, via `pragma_table_info`. Empty on failure.
+fn table_column_names(runtime: &Runtime, table: &str) -> Vec<String> {
+    let sql = format!(
+        "SELECT name FROM pragma_table_info('{}')",
+        table.replace('\'', "''")
+    );
+    let mut columns = vec![];
+    if let Ok((_, Some(mut stmt))) = runtime.connection.prepare(&sql) {
+        while let Ok(Some(row)) = stmt.next() {
+            columns.push(row[0].as_str().to_owned());
+        }
+    }
+    columns
+}
+
+/// Per-column SELECT expression that truncates oversized text/blob values
+/// at the SQL layer, so the window never materializes a huge cell.
+fn truncating_select_expr(column: &str) -> String {
+    let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+    format!(
+        "CASE WHEN typeof({q}) IN ('text','blob') AND length({q}) > {n} \
+         THEN substr({q}, 1, {n}) ELSE {q} END AS {q}",
+        q = quoted,
+        n = MAX_CELL_FETCH_LEN
+    )
+}
+
+/// SELECT list for window loads: truncating expressions when the column
+/// names are known, `*` otherwise (e.g. table_info failed).
+fn window_select_list(columns: &[String]) -> String {
+    if columns.is_empty() {
+        "*".to_owned()
+    } else {
+        columns
+            .iter()
+            .map(|c| truncating_select_expr(c))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 /// Whether keyset pagination on `rowid` is usable for this table: a real
 /// rowid table (not WITHOUT ROWID, not a view) with no user-defined column
 /// shadowing `rowid`.
@@ -346,18 +413,21 @@ fn rowid_keyset_usable(runtime: &Runtime, table: &str) -> bool {
     matches!(stmt.next(), Ok(Some(row)) if row[0].as_int64() == 0)
 }
 
-/// Load a window of `SELECT rowid, * FROM "table" {suffix}`, returning the
-/// rowids alongside the rows (rowid stripped from columns/rows). `reverse`
-/// flips the fetched order, for `ORDER BY rowid DESC` reads.
+/// Load a window of `SELECT rowid, {select_list} FROM "table" {suffix}`,
+/// returning the rowids alongside the rows (rowid stripped from
+/// columns/rows). `reverse` flips the fetched order, for
+/// `ORDER BY rowid DESC` reads.
 #[allow(clippy::type_complexity)]
 fn load_rowid_window(
     runtime: &Runtime,
     table: &str,
+    select_list: &str,
     suffix: &str,
     reverse: bool,
 ) -> Result<(Vec<String>, Vec<Vec<OwnedValue>>, Vec<i64>), String> {
     let sql = format!(
-        "SELECT rowid, * FROM \"{}\" {}",
+        "SELECT rowid, {} FROM \"{}\" {}",
+        select_list,
         table.replace('"', "\"\""),
         suffix
     );
@@ -516,6 +586,10 @@ pub struct TablePage<'a> {
     /// rowids for the loaded window (when loaded via the rowid path),
     /// used as keyset anchors
     rowids: Option<Vec<i64>>,
+    /// SELECT list for window loads (truncates oversized values)
+    select_list: String,
+    /// Measured display width per column for the loaded window
+    col_widths: Vec<u16>,
     /// Destination for copy operations
     clipboard: SharedClipboard,
 }
@@ -535,10 +609,12 @@ impl<'a> TablePage<'a> {
         clipboard: SharedClipboard,
     ) -> Self {
         let use_rowid = rowid_keyset_usable(runtime, table_name);
+        let select_list = window_select_list(&table_column_names(runtime, table_name));
         let (data, rowids, error) = if use_rowid {
             match load_rowid_window(
                 runtime,
                 table_name,
+                &select_list,
                 &format!("ORDER BY rowid LIMIT {}", WINDOW_SIZE),
                 false,
             ) {
@@ -546,7 +622,8 @@ impl<'a> TablePage<'a> {
                 Err(e) => (Data::empty(), None, Some(e)),
             }
         } else {
-            let result = load_table_data(runtime, table_name, None, 0, WINDOW_SIZE);
+            let result =
+                load_table_data_with_select(runtime, table_name, &select_list, None, 0, WINDOW_SIZE);
             (result.data, None, result.error)
         };
         let primary_keys = get_primary_keys(runtime, table_name);
@@ -556,7 +633,7 @@ impl<'a> TablePage<'a> {
             state.select_first_column();
         }
         let row_count = RowCount::start(data.rows.len(), runtime, table_name);
-        Self {
+        let mut page = Self {
             runtime,
             theme,
             state,
@@ -575,8 +652,37 @@ impl<'a> TablePage<'a> {
             pending_sort: None,
             use_rowid,
             rowids,
+            select_list,
+            col_widths: vec![],
             clipboard,
-        }
+        };
+        page.recompute_col_widths();
+        page
+    }
+
+    /// Measure per-column display widths for the loaded window: header width
+    /// vs the widest sampled cell, clamped to a sane range.
+    fn recompute_col_widths(&mut self) {
+        const MIN_COL_WIDTH: usize = 3;
+        const MAX_COL_WIDTH: usize = 40;
+        const SAMPLE_ROWS: usize = 50;
+        self.col_widths = self
+            .data
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(col_idx, name)| {
+                let mut width = name.chars().count();
+                for row in self.data.rows.iter().take(SAMPLE_ROWS) {
+                    if let Some(value) = row.get(col_idx) {
+                        let display =
+                            render_value_for_display_capped(value, Some(MAX_CELL_FETCH_LEN));
+                        width = width.max(display.chars().count());
+                    }
+                }
+                width.clamp(MIN_COL_WIDTH, MAX_COL_WIDTH) as u16
+            })
+            .collect();
     }
 
     /// Get the known row count (may be incomplete)
@@ -621,6 +727,7 @@ impl<'a> TablePage<'a> {
             match load_rowid_window(
                 self.runtime,
                 &self.table_name,
+                &self.select_list,
                 &format!("ORDER BY rowid LIMIT {} OFFSET {}", WINDOW_SIZE, new_start),
                 false,
             ) {
@@ -632,9 +739,10 @@ impl<'a> TablePage<'a> {
             return;
         }
 
-        let result = load_table_data(
+        let result = load_table_data_with_select(
             self.runtime,
             &self.table_name,
+            &self.select_list,
             self.current_order.clone(),
             new_start,
             WINDOW_SIZE,
@@ -652,6 +760,7 @@ impl<'a> TablePage<'a> {
         self.row_count.update_from_load(new_start, data.rows.len());
         self.data = data;
         self.rowids = rowids;
+        self.recompute_col_widths();
     }
 
     /// Try a keyset (rowid-anchored) load of the window at `new_start`.
@@ -672,6 +781,7 @@ impl<'a> TablePage<'a> {
             match load_rowid_window(
                 self.runtime,
                 &self.table_name,
+                &self.select_list,
                 &format!("WHERE rowid >= {} ORDER BY rowid LIMIT {}", anchor, WINDOW_SIZE),
                 false,
             ) {
@@ -690,6 +800,7 @@ impl<'a> TablePage<'a> {
             match load_rowid_window(
                 self.runtime,
                 &self.table_name,
+                &self.select_list,
                 &format!("WHERE rowid < {} ORDER BY rowid DESC LIMIT {}", anchor, gap),
                 true,
             ) {
@@ -719,6 +830,7 @@ impl<'a> TablePage<'a> {
             match load_rowid_window(
                 self.runtime,
                 &self.table_name,
+                &self.select_list,
                 &format!("ORDER BY rowid DESC LIMIT {}", n),
                 true,
             ) {
@@ -773,9 +885,10 @@ impl<'a> TablePage<'a> {
 
     /// Run the (blocking) sorted reload for `order`.
     fn apply_sort(&mut self, order: Order) {
-        let result = load_table_data(
+        let result = load_table_data_with_select(
             self.runtime,
             &self.table_name,
+            &self.select_list,
             Some(order.clone()),
             0,
             WINDOW_SIZE,
@@ -793,13 +906,71 @@ impl<'a> TablePage<'a> {
         self.data = result.data;
         // Sorted windows are loaded by OFFSET; rowid anchors no longer apply.
         self.rowids = None;
+        self.recompute_col_widths();
         // Reset selection to first row after sort
         self.state.select_first();
     }
 
-    /// Generate TSV for a single row
+    /// Fetch the full (untruncated) values of one row. Window values are
+    /// truncated at MAX_CELL_FETCH_LEN; copies and the row page need the
+    /// real thing.
+    fn fetch_full_row(&self, absolute_row: usize) -> Result<Vec<OwnedValue>, String> {
+        // Prefer the rowid anchor: an O(1) lookup.
+        if self.current_order.is_none() {
+            if let (Some(rowids), Some(window_idx)) =
+                (&self.rowids, self.absolute_to_window(absolute_row))
+            {
+                if let Some(rowid) = rowids.get(window_idx) {
+                    let sql = format!(
+                        "SELECT * FROM \"{}\" WHERE rowid = {}",
+                        self.table_name.replace('"', "\"\""),
+                        rowid
+                    );
+                    let mut stmt = match self.runtime.connection.prepare(&sql) {
+                        Ok((_, Some(stmt))) => stmt,
+                        Ok((_, None)) => return Err("Failed to prepare query".to_owned()),
+                        Err(e) => return Err(format!("Query error: {}", e)),
+                    };
+                    return match stmt.next() {
+                        Ok(Some(row)) => {
+                            Ok(row.iter().map(OwnedValue::from_value_ref).collect())
+                        }
+                        Ok(None) => Err("Row not found".to_owned()),
+                        Err(e) => Err(format!("Error reading row: {}", e)),
+                    };
+                }
+            }
+        }
+
+        // OFFSET fallback, respecting the active sort.
+        let result = load_table_data(
+            self.runtime,
+            &self.table_name,
+            self.current_order.clone(),
+            absolute_row,
+            1,
+        );
+        if let Some(err) = result.error {
+            return Err(err);
+        }
+        result
+            .data
+            .rows
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Row not found".to_owned())
+    }
+
+    /// Full values for the window row at `window_idx`: fetched on demand,
+    /// falling back to the (possibly truncated) window values on error.
+    fn full_row_or_window(&self, window_idx: usize) -> Vec<OwnedValue> {
+        self.fetch_full_row(self.window_to_absolute(window_idx))
+            .unwrap_or_else(|_| self.data.rows[window_idx].clone())
+    }
+
+    /// Generate TSV for a single row (full values, fetched on demand)
     fn row_to_tsv(&self, row_idx: usize) -> String {
-        self.data.rows[row_idx]
+        self.full_row_or_window(row_idx)
             .iter()
             .map(|v| tsv_escape(value_to_string(v)))
             .collect::<Vec<_>>()
@@ -840,8 +1011,15 @@ impl<'a> TablePage<'a> {
                 if let Some((row, col)) = self.state.selected_cell() {
                     let actual_col = col.saturating_add(self.column_idx_offset);
                     if row < self.data.rows.len() && actual_col < self.data.rows[row].len() {
-                        let value = &self.data.rows[row][actual_col];
-                        (value_to_string(value), "Copied cell to clipboard".to_owned())
+                        // Full value, fetched on demand: the window copy may
+                        // be truncated at MAX_CELL_FETCH_LEN.
+                        let values = self.full_row_or_window(row);
+                        match values.get(actual_col) {
+                            Some(value) => {
+                                (value_to_string(value), "Copied cell to clipboard".to_owned())
+                            }
+                            None => return,
+                        }
                     } else {
                         return;
                     }
@@ -1090,7 +1268,8 @@ impl TablePage<'_> {
                             table_name: self.table_name.clone(),
                             row_index: absolute_row,
                             columns: self.data.columns.clone(),
-                            values: self.data.rows[window_idx].clone(),
+                            // Full values: the window copies may be truncated
+                            values: self.full_row_or_window(window_idx),
                             primary_keys: self.primary_keys.clone(),
                         };
                         return HandleKeyResult::Navigate(NavigateToPage::Row(data));
@@ -1110,13 +1289,44 @@ impl TablePage<'_> {
         ]);
         let [table_rect, message_rect, help_rect] = area.layout(&layout);
 
+        // Fit as many columns as the area allows, using the measured widths
+        // (an id column no longer gets the same slot as a description one,
+        // and a 100-column table shows as many columns as actually fit).
+        let column_spacing: u16 = 1;
+        let mut visible_widths: Vec<u16> = vec![];
+        let mut used: u16 = 0;
+        for width in self.col_widths.iter().skip(self.column_idx_offset) {
+            let needed = *width
+                + if visible_widths.is_empty() {
+                    0
+                } else {
+                    column_spacing
+                };
+            if used.saturating_add(needed) > table_rect.width && !visible_widths.is_empty() {
+                break;
+            }
+            used = used.saturating_add(needed);
+            visible_widths.push(*width);
+        }
+        if visible_widths.is_empty() {
+            // No measured widths (e.g. load error): one full-width column
+            visible_widths.push(table_rect.width.max(1));
+        }
+        // Key handling (h/l/H/L) uses the latest fit
+        self.n_columns_show = visible_widths.len();
+        let widths: Vec<Constraint> = visible_widths
+            .iter()
+            .map(|width| Constraint::Length(*width))
+            .collect();
+
         let selected_header_idx = self
             .state
             .selected_column()
             .unwrap_or(0)
             .saturating_add(self.column_idx_offset);
 
-        let header = Row::new(self.data.columns.iter().skip(self.column_idx_offset).enumerate().map(
+        let n_columns_show = self.n_columns_show;
+        let header = Row::new(self.data.columns.iter().skip(self.column_idx_offset).take(n_columns_show).enumerate().map(
             |(idx, c)| {
                 Cell::from(Text::from(c.as_str())).style(
                     Style::new()
@@ -1139,8 +1349,9 @@ impl TablePage<'_> {
         );
 
         let rows = self.data.rows.iter().map(|r| {
-            Row::new(r.iter().skip(self.column_idx_offset).map(|value| {
-                let display_text = render_value_for_display(value);
+            Row::new(r.iter().skip(self.column_idx_offset).take(n_columns_show).map(|value| {
+                let display_text =
+                    render_value_for_display_capped(value, Some(MAX_CELL_FETCH_LEN));
                 let text = match value {
                     OwnedValue::Integer(_) | OwnedValue::Double(_) => {
                         Text::from(display_text).alignment(HorizontalAlignment::Right)
@@ -1161,18 +1372,9 @@ impl TablePage<'_> {
             }))
         });
 
-        let widths: Vec<Constraint> = self
-            .data
-            .columns
-            .iter()
-            .skip(self.column_idx_offset)
-            .take(self.n_columns_show)
-            .map(|_| Constraint::Fill(1))
-            .collect();
-
         let table = Table::new(rows, widths)
             .header(header)
-            .column_spacing(1)
+            .column_spacing(column_spacing)
             .style(Style::new().fg(self.theme.table_fg.clone().into()))
             .row_highlight_style(Style::new().bold().bg(self.theme.row_hl_bg.clone().into()))
             .cell_highlight_style(

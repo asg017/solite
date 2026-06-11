@@ -3,8 +3,8 @@ source: crates/solite-cli/src/commands/tui/test_tui.rs
 expression: self.terminal.backend()
 ---
 "t (1+ row)                           Solite               ? help  q back  Q quit"
-"a                          b                          c                         "
-"                         1 asdf                       9.9.9                     "
+"a   b    c                                                                      "
+"  1 asdf 9.9.9                                                                  "
 "                                                                                "
 "                                                                                "
 "                                                                                "

@@ -97,8 +97,18 @@ class CliResult:
 @pytest.fixture
 def solite_cli():
     def solite_cli(
-        args: List[str], communicate=None, kill=False, escape_ansi=True, cwd=None
+        args: List[str],
+        communicate=None,
+        kill=False,
+        escape_ansi=True,
+        cwd=None,
+        env=None,
     ):
+        # `env` is merged over the inherited environment
+        if env is not None:
+            import os
+
+            env = {**os.environ, **env}
         with TemporaryFile() as stdout:
             with TemporaryFile() as stderr:
                 p = Popen(
@@ -107,6 +117,7 @@ def solite_cli():
                     stdout=stdout,
                     stderr=stderr,
                     cwd=cwd,
+                    env=env,
                 )
                 if communicate is not None:
                     for line in communicate:

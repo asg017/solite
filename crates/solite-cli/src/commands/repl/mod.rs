@@ -370,19 +370,23 @@ fn step_loop(runtime: &mut Runtime, timer: &mut bool) {
 }
 
 // TODO: more special commands
-// TODO: \e should get previously ran SQL
 static REPL_SPECIAL_COMMANDS: [&str; 1] = ["\\e"];
 
-fn repl_editor_command() -> anyhow::Result<String> {
+/// Open `$EDITOR` (default `vi`) on a scratch buffer seeded with `initial`
+/// (the most recently executed input, psql-style). The buffer is a unique
+/// per-invocation temp file so concurrent REPL sessions don't clobber each
+/// other; it is removed afterwards.
+fn repl_editor_command(initial: &str) -> anyhow::Result<String> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-    let mut tmpfile = std::env::temp_dir();
-    tmpfile.push("solite_repl.sql");
-    std::fs::write(&tmpfile, "")?;
+    let tmpfile = tempfile::Builder::new()
+        .prefix("solite-repl-")
+        .suffix(".sql")
+        .tempfile()?;
+    std::fs::write(tmpfile.path(), initial)?;
     let status = std::process::Command::new(&editor)
-        .arg(&tmpfile)
+        .arg(tmpfile.path())
         .status()?;
-    let code = std::fs::read_to_string(&tmpfile);
-    let _ = std::fs::remove_file(&tmpfile);
+    let code = std::fs::read_to_string(tmpfile.path());
     if status.success() {
         Ok(code?)
     } else {
@@ -390,16 +394,19 @@ fn repl_editor_command() -> anyhow::Result<String> {
     }
 }
 
-fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
+/// Execute one submitted line. Returns the code that actually ran (the
+/// editor buffer's contents for `\e`) so the caller can record it in
+/// history, or `None` if nothing was executed.
+fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str, last_input: &str) -> Option<String> {
     // repl specific commands
     let mut code = code.to_owned();
     if REPL_SPECIAL_COMMANDS.contains(&code.trim()) {
         match code.trim() {
-            "\\e" => match repl_editor_command() {
+            "\\e" => match repl_editor_command(last_input) {
                 Ok(editor_code) => code = editor_code,
                 Err(e) => {
                     eprintln!("✗ editor command failed: {}", e);
-                    return;
+                    return None;
                 }
             },
             _ => unreachable!(),
@@ -407,6 +414,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str) {
     }
     runtime.enqueue("[repl]", &code, BlockSource::Repl);
     step_loop(runtime, timer);
+    Some(code)
 }
 
 // possible arrows: › ❱ ❯
@@ -476,6 +484,9 @@ Enter \".help\" for usage hints.
         let _ = ctrlc::set_handler(move || flag.store(true, Ordering::SeqCst));
     }
 
+    // Most recently executed input; seeds the `\e` editor scratch buffer.
+    let mut last_input = String::new();
+
     loop {
         let prompt = if runtime_ref.borrow().connection.in_transaction() {
             PROMPT_TRANSACTION
@@ -494,7 +505,7 @@ Enter \".help\" for usage hints.
                     .strip_prefix(PROMPT)
                     .or_else(|| line.as_str().strip_prefix(PROMPT_TRANSACTION))
                     .unwrap_or(&line);
-                {
+                let executed = {
                     let mut rt = runtime_ref.borrow_mut();
                     // Re-register every iteration: `.open` swaps the
                     // connection out, which drops any previous registration.
@@ -502,10 +513,15 @@ Enter \".help\" for usage hints.
                     let flag = Arc::clone(&interrupted);
                     rt.connection
                         .set_progress_handler(1000, move || flag.load(Ordering::SeqCst));
-                    execute(&mut rt, &mut timer, line);
+                    execute(&mut rt, &mut timer, line, &last_input)
+                };
+                // Record what actually ran (for `\e`, the editor buffer's
+                // SQL rather than the literal `\e`) so up-arrow recalls it.
+                if let Some(code) = executed {
+                    let _ = rl.add_history_entry(code.as_str());
+                    let _ = rl.append_history(&solite_history_path);
+                    last_input = code;
                 }
-                let _ = rl.add_history_entry(line);
-                let _ = rl.append_history(&solite_history_path);
             }
             Err(ReadlineError::Interrupted) => {
                 // Ctrl-C at the prompt discards the current input line and

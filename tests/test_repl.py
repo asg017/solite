@@ -174,6 +174,71 @@ def test_repl_run_procedure_params_scoped(solite_cli, tmp_path):
     assert "world" not in out.replace("WORLD", "")
 
 
+def _editor_script(tmp_path, body):
+    script = tmp_path / "editor.sh"
+    script.write_text(f"#!/bin/sh\n{body}\n")
+    script.chmod(0o755)
+    return script
+
+
+def test_editor_command_executes_buffer(solite_cli, tmp_path):
+    # \e runs $EDITOR on a scratch file; whatever it writes is executed
+    script = _editor_script(
+        tmp_path, 'printf "select 41+1 as forty_two;" > "$1"'
+    )
+    out = solite_cli(
+        [],
+        communicate=[b".timer off\n\\e\n"],
+        kill=True,
+        env={"EDITOR": str(script)},
+    ).stdout
+    assert "forty_two" in out
+
+
+def test_editor_command_preloads_last_input(solite_cli, tmp_path):
+    # The scratch buffer is seeded with the most recently executed input
+    side = tmp_path / "buffer-contents.txt"
+    script = _editor_script(
+        tmp_path, f'cat "$1" > {side}; printf "select 2;" > "$1"'
+    )
+    solite_cli(
+        [],
+        communicate=[b".timer off\nselect 'seeded-sql';\n\\e\n"],
+        kill=True,
+        env={"EDITOR": str(script)},
+    )
+    assert "seeded-sql" in side.read_text()
+
+
+def test_editor_command_records_sql_in_history(solite_cli, tmp_path):
+    # History records the SQL that ran, not the literal \e
+    script = _editor_script(
+        tmp_path, 'printf "select 99 as from_editor;" > "$1"'
+    )
+    solite_cli(
+        [],
+        communicate=[b".timer off\n\\e\n"],
+        kill=True,
+        env={"EDITOR": str(script), "HOME": str(tmp_path)},
+    )
+    history = (tmp_path / ".solite_history").read_text()
+    assert "from_editor" in history
+    assert "\\e" not in history
+
+
+def test_editor_command_abort_executes_nothing(solite_cli, tmp_path):
+    # A non-zero editor exit aborts without executing
+    script = _editor_script(tmp_path, 'printf "select 7 as aborted;" > "$1"; exit 1')
+    result = solite_cli(
+        [],
+        communicate=[b".timer off\n\\e\n"],
+        kill=True,
+        env={"EDITOR": str(script)},
+    )
+    assert "aborted" not in result.stdout
+    assert "editor command failed" in result.stderr
+
+
 def test_sigint_interrupts_query_without_exiting():
     """SIGINT (Ctrl-C) during a long-running query aborts the statement but
     keeps the REPL alive; a subsequent statement still executes."""

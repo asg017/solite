@@ -37,3 +37,8 @@ tokio = { version = "1", features = ["rt"], optional = true }
 rusqlite.workspace = true
 insta.workspace = true
 tempfile = "3"
+criterion.workspace = true
+
+[[bench]]
+name = "sqlite"
+harness = false

@@ -38,7 +38,11 @@ endif
 	make test
 	@echo "SQLite bumped to $(VERSION). Review 'git diff' and 'git -C vendor/sqlite log -1', then commit."
 
-.PHONY: test test-cargo test-pytest test-snap bump-sqlite
+# Criterion benchmarks for the sqlite binding hot paths (dev-tooling, not CI).
+bench:
+	cargo bench -p solite-core
+
+.PHONY: test test-cargo test-pytest test-snap bump-sqlite bench
 
 docs-dev:
 	npm -C site run dev

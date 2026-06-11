@@ -208,12 +208,29 @@ fn parse_arguments(args: &QueryArgs) -> Result<(Option<PathBuf>, String), QueryE
             } else if is_sql_file(Path::new(arg0)) {
                 // .sql file as first arg is SQL, second arg is database
                 Ok((Some(arg1.clone()), arg0.clone()))
+            } else if arg1_str == ":memory:" {
+                // SQLite opens `:memory:` natively as an in-memory database;
+                // it never exists on disk, so check before Path::exists()
+                Ok((Some(arg1.clone()), arg0.clone()))
+            } else if arg0 == ":memory:" {
+                Ok((Some(PathBuf::from(arg0)), arg1_str.to_string()))
             } else if arg1.exists() {
                 Ok((Some(arg1.clone()), arg0.clone()))
             } else {
                 let p = PathBuf::from(arg0);
                 if !p.exists() {
-                    return Err(QueryError::DatabaseNotFound(p));
+                    // Neither arg exists on disk: blame the one that looks
+                    // like a database. The database is the documented second
+                    // positional, so default to blaming it unless only the
+                    // first arg has a database-ish extension.
+                    let blamed = if crate::cli::is_database_path(&p)
+                        && !crate::cli::is_database_path(arg1)
+                    {
+                        p
+                    } else {
+                        arg1.clone()
+                    };
+                    return Err(QueryError::DatabaseNotFound(blamed));
                 }
                 let sql = arg1
                     .to_str()
@@ -420,6 +437,55 @@ mod tests {
         let (db, sql) = parse_arguments(&args).unwrap();
         assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
         assert_eq!(sql, "query.sql");
+    }
+
+    fn query_args(statement: &str, database: Option<&str>) -> QueryArgs {
+        QueryArgs {
+            statement: statement.to_string(),
+            database: database.map(PathBuf::from),
+            format: None,
+            output: None,
+            load_extension: None,
+            parameters: vec![],
+            remote: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_parse_arguments_memory_as_second_arg() {
+        let (db, sql) = parse_arguments(&query_args("select 1", Some(":memory:"))).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert_eq!(sql, "select 1");
+    }
+
+    #[test]
+    fn test_parse_arguments_memory_as_first_arg() {
+        let (db, sql) = parse_arguments(&query_args(":memory:", Some("select 1"))).unwrap();
+        assert_eq!(db.unwrap(), PathBuf::from(":memory:"));
+        assert_eq!(sql, "select 1");
+    }
+
+    #[test]
+    fn test_parse_arguments_missing_db_blames_db_arg() {
+        // The error must name the database-looking argument, not the SQL text
+        let err = parse_arguments(&query_args("select 1", Some("/tmp/solite_definitely_nonexistent.db")))
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("solite_definitely_nonexistent.db"), "{msg}");
+        assert!(!msg.contains("select 1"), "{msg}");
+    }
+
+    #[test]
+    fn test_parse_arguments_missing_db_first_arg_blamed() {
+        // db-ish extension on the first arg, plain SQL second: blame the db arg
+        let err = parse_arguments(&query_args(
+            "/tmp/solite_definitely_nonexistent.db",
+            Some("select 1"),
+        ))
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("solite_definitely_nonexistent.db"), "{msg}");
+        assert!(!msg.contains("select 1"), "{msg}");
     }
 
     #[test]

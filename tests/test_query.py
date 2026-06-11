@@ -39,6 +39,19 @@ def test_query_fails(solite_cli, snapshot):
     assert multi.stderr == snapshot(name="trailing SQL")
 
 
+def test_query_memory_database(solite_cli):
+    result = solite_cli(["q", "select 1", ":memory:"])
+    assert result.success, result.stderr
+    assert result.stdout == '[{"1":1}]\n'
+
+
+def test_query_missing_database_blames_db_arg(solite_cli):
+    result = solite_cli(["q", "select 1", "nope.db"])
+    assert not result.success
+    assert "nope.db" in result.stderr
+    assert "select 1" not in result.stderr
+
+
 def test_query_trailing_comment_ok(solite_cli):
     result = solite_cli(["q", "select 1; -- comment"])
     assert result.success

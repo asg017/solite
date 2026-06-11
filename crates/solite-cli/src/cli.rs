@@ -128,6 +128,7 @@ Examples:
   solite query \"SELECT * FROM 'data.csv' LIMIT 5\" # query a CSV/TSV file directly
   solite query \"SELECT name FROM users WHERE id = $id\" app.db -p id 42
   solite q \"SELECT 1\"                             # 'q' alias, in-memory database
+  solite q \"SELECT 1\" :memory:                    # explicit in-memory database
   solite query --allow-ssh \"SELECT 1\" ssh://user@host/app.db";
 
 #[derive(Args, Debug)]

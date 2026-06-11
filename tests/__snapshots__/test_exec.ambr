@@ -1,0 +1,12 @@
+# serializer version: 1
+# name: test_exec_bad_sql_stderr[bad sql stderr]
+  '''
+  error[1]: SQL logic error
+    ┌─ [input]:1:1
+    │
+  1 │ this is not sql
+    │ ^^^^ near "this": syntax error
+  
+  
+  '''
+# ---

@@ -117,6 +117,56 @@ def test_exec_error_output(solite_cli):
     assert "Error: SQL error" not in result.stderr
 
 
+def test_exec_in_memory_single_arg(solite_cli):
+    """A single SQL argument runs against an in-memory database."""
+    result = solite_cli(["exec", "create table t(a)"])
+    assert result.success, result.stderr
+    assert result.stdout == "0 rows affected\n"
+
+
+def test_exec_parameters(solite_cli, tmp_path):
+    db = str(tmp_path / "data.db")
+    assert solite_cli(
+        ["exec", db, "create table t(id integer, name text)"]
+    ).success
+
+    result = solite_cli(
+        ["exec", db, "insert into t values (:id, :name)", "-p", "id", "42", "-p", "name", "alex"]
+    )
+    assert result.success, result.stderr
+    assert result.stdout == "1 row affected\n"
+
+    rows = solite_cli(["q", "select id, name, typeof(id) as t from t", db, "-f", "json"])
+    assert json.loads(rows.stdout) == [{"id": 42, "name": "alex", "t": "integer"}]
+
+    result = solite_cli(["exec", db, "delete from t where id = :id", "-p", "id", "42"])
+    assert result.success, result.stderr
+    assert result.stdout == "1 row affected\n"
+
+
+def test_exec_bad_sql_stderr(solite_cli, snapshot):
+    result = solite_cli(["exec", "this is not sql"])
+    assert not result.success
+    assert result.stdout == ""
+    assert result.stderr == snapshot(name="bad sql stderr")
+
+
+def test_exec_no_sql_errors(solite_cli, tmp_path):
+    """A lone database arg without piped SQL fails with a clear error."""
+    db = tmp_path / "data.db"
+    db.touch()
+    # communicate=[b""] closes stdin immediately so nothing hangs
+    result = solite_cli(["exec", str(db)], communicate=[b""])
+    assert not result.success
+
+
+def test_exec_exit_codes(solite_cli, tmp_path):
+    db = str(tmp_path / "data.db")
+    assert solite_cli(["exec", db, "create table t(a)"]).success
+    assert not solite_cli(["exec", db, "insert into nope values (1)"]).success
+    assert not solite_cli(["exec", "a", "b"]).success
+
+
 def test_exec_rejects_output_and_format_flags(solite_cli, tmp_path):
     """The formerly-hidden reserved -o/-f flags are rejected, not ignored."""
     db = str(tmp_path / "data.db")

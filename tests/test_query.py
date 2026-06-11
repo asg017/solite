@@ -27,19 +27,73 @@ def test_query_output_formats(solite_cli, snapshot, tmp_path):
 
 
 def test_query_fails(solite_cli, snapshot):
-    assert solite_cli(["q", "create table t(a)"]).stderr == snapshot(name="write fails")
-    assert solite_cli(["q", "select xxx()"]).stderr == snapshot(name="function DNE")
-    assert solite_cli(["q", "select * from does_not_exist"]).stderr == snapshot(
-        name="table DNE"
-    )
-    assert solite_cli(["q", "select dne from pragma_function_list"]).stderr == snapshot(
-        name="column DNE"
-    )
+    write = solite_cli(["q", "create table t(a)"])
+    assert not write.success
+    assert write.stderr == snapshot(name="write fails")
+
+    func_dne = solite_cli(["q", "select xxx()"])
+    assert not func_dne.success
+    assert func_dne.stderr == snapshot(name="function DNE")
+
+    table_dne = solite_cli(["q", "select * from does_not_exist"])
+    assert not table_dne.success
+    assert table_dne.stderr == snapshot(name="table DNE")
+
+    column_dne = solite_cli(["q", "select dne from pragma_function_list"])
+    assert not column_dne.success
+    assert column_dne.stderr == snapshot(name="column DNE")
 
     # multiple statements are rejected, pointing the user at `solite run`
     multi = solite_cli(["q", "select 1; select 2"])
     assert not multi.success
     assert multi.stderr == snapshot(name="trailing SQL")
+
+
+def test_query_sql_file_input(solite_cli, tmp_path):
+    """A .sql positional is read as the SQL, end-to-end."""
+    db = tmp_path / "data.db"
+    assert solite_cli(
+        ["exec", str(db), "create table t(a); insert into t values (1),(2)"]
+    ).success
+
+    script = tmp_path / "report.sql"
+    script.write_text("select count(*) as n from t\n")
+
+    # sql-file first, db second
+    result = solite_cli(["q", str(script), str(db)])
+    assert result.success, result.stderr
+    assert result.stdout == '[{"n":2}]\n'
+
+    # db first, sql-file second (order-agnostic)
+    result = solite_cli(["q", str(db), str(script)])
+    assert result.success, result.stderr
+    assert result.stdout == '[{"n":2}]\n'
+
+    # missing .sql file is a read error, not literal SQL
+    result = solite_cli(["q", str(tmp_path / "missing.sql")])
+    assert not result.success
+    assert "missing.sql" in result.stderr
+
+
+def test_query_replacement_scan_csv(solite_cli, tmp_path):
+    """select * from 'file.csv' works via the replacement scan."""
+    (tmp_path / "students.csv").write_text("name,age\nalex,30\nbrian,40\n")
+
+    result = solite_cli(
+        ["q", "select * from 'students.csv' order by name"], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == [
+        {"name": "alex", "age": "30"},
+        {"name": "brian", "age": "40"},
+    ]
+
+
+def test_query_json_subtype_passthrough(solite_cli):
+    """json_object() results embed as JSON objects, not strings."""
+    result = solite_cli(["q", "select json_object('x', 1) as j"])
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == [{"j": {"x": 1}}]
 
 
 def test_query_memory_database(solite_cli):

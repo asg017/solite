@@ -83,6 +83,51 @@ def test_param_set_prefixed_key_still_binds(solite_cli):
     assert "prefixed" in out
 
 
+def test_param_list_empty(solite_cli):
+    # `.param list` before any `.param set`: the temp table doesn't exist yet
+    out = repl(solite_cli, [".timer off", ".param list"])
+    assert "No parameters set" in out["stdout"]
+    assert "not yet implemented" not in out["stdout"] + out["stderr"]
+
+
+def test_param_set_list_unset_clear(solite_cli):
+    out = repl(
+        solite_cli,
+        [
+            ".timer off",
+            ".param set a apple",
+            ".param set b banana",
+            ".param list",
+            ".param unset a",
+            "select :a is null as a_gone, :b as b_kept;",
+            ".param clear",
+            "select :b is null as b_gone;",
+        ],
+    )["stdout"]
+    assert "✓ set 'a' parameter" in out
+    assert "✓ set 'b' parameter" in out
+    # .param list shows both keys and values
+    for needle in ["a", "apple", "b", "banana"]:
+        assert needle in out
+    assert "✓ unset 'a' parameter" in out
+    assert "✓ cleared 1 parameter(s)" in out
+
+
+def test_run_mode_param_subcommands(solite_cli, tmp_path):
+    (tmp_path / "main.sql").write_text(
+        ".timer off\n"
+        ".param set x 1\n"
+        ".param list\n"
+        ".param unset x\n"
+        ".param clear\n"
+    )
+    result = solite_cli(["run", "main.sql"], cwd=tmp_path)
+    assert result.success
+    assert "not yet implemented" not in result.stdout + result.stderr
+    assert "parameter x unset" in result.stdout
+    assert "cleared 0 parameter(s)" in result.stdout
+
+
 def test_repl_run_procedure_params_scoped(solite_cli, tmp_path):
     # `.run file proc --k=v` in the REPL must not leak parameters
     (tmp_path / "procs.sql").write_text(

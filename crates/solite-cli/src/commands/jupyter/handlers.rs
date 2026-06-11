@@ -166,14 +166,7 @@ async fn handle_dot_command_inner(
                     .await?;
             }
             solite_core::dot::ParameterCommand::List => {
-                // The temp.sqlite_parameters table only exists once a
-                // parameter has been set; treat a missing table as empty.
-                let stmt = runtime
-                    .connection
-                    .prepare("SELECT key, value FROM temp.sqlite_parameters ORDER BY key")
-                    .ok()
-                    .and_then(|(_, stmt)| stmt);
-                match stmt {
+                match solite_core::dot::param::list_parameters_statement(runtime) {
                     Some(stmt) => {
                         send_statement_result(stmt, sender, parent, false).await?;
                     }
@@ -183,27 +176,7 @@ async fn handle_dot_command_inner(
                 }
             }
             solite_core::dot::ParameterCommand::Clear => {
-                // Statement::execute() counts steps, not changed rows, so
-                // count before deleting.
-                let cleared = runtime
-                    .connection
-                    .prepare("SELECT count(*) FROM temp.sqlite_parameters")
-                    .ok()
-                    .and_then(|(_, stmt)| stmt)
-                    .and_then(|mut stmt| {
-                        stmt.next()
-                            .ok()
-                            .flatten()
-                            .and_then(|row| row.first().map(|v| v.as_int64()))
-                    })
-                    .unwrap_or(0);
-                if cleared > 0 {
-                    if let Ok((_, Some(stmt))) =
-                        runtime.connection.prepare("DELETE FROM temp.sqlite_parameters")
-                    {
-                        stmt.execute().ok();
-                    }
-                }
+                let cleared = solite_core::dot::param::clear_parameters(runtime);
                 sender
                     .send_plain(format!("Cleared {} parameter(s)", cleared), parent)
                     .await?;

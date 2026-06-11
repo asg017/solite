@@ -260,13 +260,23 @@ fn handle_parameter_command(runtime: &mut Runtime, cmd: &solite_core::dot::Param
             }
         }
         solite_core::dot::ParameterCommand::Unset(key) => {
-            eprintln!("Warning: .parameter unset {} not yet implemented", key);
+            runtime.delete_parameter(key);
+            println!("{} parameter {} unset", colors::green("✓"), key);
         }
         solite_core::dot::ParameterCommand::List => {
-            eprintln!("Warning: .parameter list not yet implemented");
+            match solite_core::dot::param::list_parameters_statement(runtime) {
+                Some(mut stmt) => {
+                    let config = solite_table::TableConfig::terminal();
+                    if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
+                        eprintln!("Error listing parameters: {}", e);
+                    }
+                }
+                None => println!("No parameters set"),
+            }
         }
         solite_core::dot::ParameterCommand::Clear => {
-            eprintln!("Warning: .parameter clear not yet implemented");
+            let cleared = solite_core::dot::param::clear_parameters(runtime);
+            println!("{} cleared {} parameter(s)", colors::green("✓"), cleared);
         }
     }
 }

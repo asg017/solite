@@ -179,13 +179,23 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                 }
             }
             solite_core::dot::ParameterCommand::Unset(key) => {
-                eprintln!("Unset parameter not yet implemented: {}", key);
+                runtime.delete_parameter(&key);
+                println!("✓ unset '{key}' parameter");
             }
             solite_core::dot::ParameterCommand::List => {
-                eprintln!("List parameters not yet implemented");
+                match solite_core::dot::param::list_parameters_statement(runtime) {
+                    Some(mut stmt) => {
+                        let config = TableConfig::terminal();
+                        if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
+                            eprintln!("✗ failed to list parameters: {}", e);
+                        }
+                    }
+                    None => println!("No parameters set"),
+                }
             }
             solite_core::dot::ParameterCommand::Clear => {
-                eprintln!("Clear parameters not yet implemented");
+                let cleared = solite_core::dot::param::clear_parameters(runtime);
+                println!("✓ cleared {cleared} parameter(s)");
             }
         },
         DotCommand::Env(env_cmd) => {

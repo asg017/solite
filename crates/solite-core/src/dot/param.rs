@@ -4,7 +4,8 @@
 
 use serde::Serialize;
 
-use crate::ParseDotError;
+use crate::sqlite::Statement;
+use crate::{ParseDotError, Runtime};
 
 /// Parameter command variants.
 #[derive(Serialize, Debug, PartialEq)]
@@ -17,6 +18,46 @@ pub enum ParameterCommand {
     List,
     /// Clear all parameters.
     Clear,
+}
+
+/// Prepare a `SELECT key, value` statement over the defined parameters,
+/// shared by the `.param list` implementations (REPL, run mode, Jupyter).
+/// Returns `None` when no parameter has ever been set: the
+/// `temp.sqlite_parameters` table only exists after the first `.param set`,
+/// so a missing table means "no parameters".
+pub fn list_parameters_statement(runtime: &Runtime) -> Option<Statement> {
+    runtime
+        .connection
+        .prepare("SELECT key, value FROM temp.sqlite_parameters ORDER BY key")
+        .ok()
+        .and_then(|(_, stmt)| stmt)
+}
+
+/// Delete all defined parameters, returning how many were removed. Shared by
+/// the `.param clear` implementations. `Statement::execute()` counts steps
+/// rather than changed rows, so count before deleting.
+pub fn clear_parameters(runtime: &Runtime) -> usize {
+    let cleared = runtime
+        .connection
+        .prepare("SELECT count(*) FROM temp.sqlite_parameters")
+        .ok()
+        .and_then(|(_, stmt)| stmt)
+        .and_then(|mut stmt| {
+            stmt.next()
+                .ok()
+                .flatten()
+                .and_then(|row| row.first().map(|v| v.as_int64()))
+        })
+        .unwrap_or(0);
+    if cleared > 0 {
+        if let Ok((_, Some(stmt))) = runtime
+            .connection
+            .prepare("DELETE FROM temp.sqlite_parameters")
+        {
+            stmt.execute().ok();
+        }
+    }
+    cleared as usize
 }
 
 /// Parse a parameter command from input.

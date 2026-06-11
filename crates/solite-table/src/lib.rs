@@ -49,12 +49,27 @@ pub struct RenderResult {
     pub shown_columns: usize,
 }
 
-/// Render a SQLite statement result to a string.
+/// Statement results buffered for rendering: column metadata plus the
+/// retained head/tail rows. Produced by [`buffer_statement`]; render with
+/// [`render_buffered`] — possibly several times in different output modes,
+/// without re-executing the statement.
+pub struct BufferedStatement {
+    columns: Vec<ColumnInfo>,
+    head: Vec<Vec<CellValue>>,
+    tail: Vec<Vec<CellValue>>,
+    total_rows: usize,
+}
+
+/// Stream through a statement's results once, retaining the first
+/// `head_rows` and last `tail_rows` rows.
 ///
-/// This is the main entry point for table rendering. It streams through
-/// the statement results, collecting rows into a buffer that retains
-/// head and tail rows, then renders the table.
-pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<RenderResult, SQLiteError> {
+/// Returns `None` for column-less statements (e.g. CREATE TABLE), which are
+/// still stepped to completion so they execute.
+pub fn buffer_statement(
+    stmt: &Statement,
+    head_rows: usize,
+    tail_rows: usize,
+) -> Result<Option<BufferedStatement>, SQLiteError> {
     let column_names = stmt.column_names().map_err(|_| SQLiteError {
         result_code: 1,
         code_description: "SQLITE_ERROR".to_string(),
@@ -65,13 +80,7 @@ pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<Render
     if column_names.is_empty() {
         // Still need to step through the statement to execute it (e.g., CREATE TABLE)
         while stmt.next()?.is_some() {}
-        return Ok(RenderResult {
-            output: String::new(),
-            total_rows: 0,
-            shown_rows: 0,
-            total_columns: 0,
-            shown_columns: 0,
-        });
+        return Ok(None);
     }
 
     // Initialize column info
@@ -81,7 +90,7 @@ pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<Render
         .collect();
 
     // Create row buffer
-    let mut buffer = RowBuffer::new(config.head_rows, config.tail_rows);
+    let mut buffer = RowBuffer::new(head_rows, tail_rows);
 
     // Stream through results
     loop {
@@ -108,40 +117,72 @@ pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<Render
     }
 
     let total_rows = buffer.total_count();
+    let (head, tail) = buffer.into_parts();
+
+    Ok(Some(BufferedStatement {
+        columns,
+        head,
+        tail,
+        total_rows,
+    }))
+}
+
+/// Render previously buffered statement results with the given config.
+///
+/// The config's `head_rows`/`tail_rows` only affect the reported
+/// `shown_rows`; which rows were retained was decided by
+/// [`buffer_statement`].
+pub fn render_buffered(buffered: &BufferedStatement, config: &TableConfig) -> RenderResult {
+    let BufferedStatement {
+        columns,
+        head,
+        tail,
+        total_rows,
+    } = buffered;
+    let total_rows = *total_rows;
     let total_columns = columns.len();
 
     // Compute layout
     let max_width = config.effective_width();
-    let layout = compute_layout(&columns, max_width, config.max_cell_width);
-
-    // Get rows from buffer
-    let (head_rows, tail_rows) = buffer.into_parts();
+    let layout = compute_layout(columns, max_width, config.max_cell_width);
 
     // Render based on output mode
     let output = match config.output_mode {
-        OutputMode::Terminal => {
-            render_terminal(&columns, &head_rows, &tail_rows, &layout, config, total_rows)
-        }
-        OutputMode::StringAnsi => {
-            render_string(&columns, &head_rows, &tail_rows, &layout, config, total_rows)
-        }
+        OutputMode::Terminal => render_terminal(columns, head, tail, &layout, config, total_rows),
+        OutputMode::StringAnsi => render_string(columns, head, tail, &layout, config, total_rows),
         OutputMode::StringPlain => {
-            render_string_plain(&columns, &head_rows, &tail_rows, &layout, config, total_rows)
+            render_string_plain(columns, head, tail, &layout, config, total_rows)
         }
-        OutputMode::Html => {
-            render_html(&columns, &head_rows, &tail_rows, &layout, config, total_rows)
-        }
+        OutputMode::Html => render_html(columns, head, tail, &layout, config, total_rows),
     };
 
     let shown_rows = (config.head_rows + config.tail_rows).min(total_rows);
 
-    Ok(RenderResult {
+    RenderResult {
         output,
         total_rows,
         shown_rows,
         total_columns,
         shown_columns: layout.shown_columns(),
-    })
+    }
+}
+
+/// Render a SQLite statement result to a string.
+///
+/// This is the main entry point for table rendering. It streams through
+/// the statement results, collecting rows into a buffer that retains
+/// head and tail rows, then renders the table.
+pub fn render_statement(stmt: &Statement, config: &TableConfig) -> Result<RenderResult, SQLiteError> {
+    match buffer_statement(stmt, config.head_rows, config.tail_rows)? {
+        Some(buffered) => Ok(render_buffered(&buffered, config)),
+        None => Ok(RenderResult {
+            output: String::new(),
+            total_rows: 0,
+            shown_rows: 0,
+            total_columns: 0,
+            shown_columns: 0,
+        }),
+    }
 }
 
 /// Print a SQLite statement result to stdout.

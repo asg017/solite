@@ -6,33 +6,33 @@ use solite_table::TableConfig;
 
 /// Response containing both text and HTML representations of a result.
 pub struct UiResponse {
-    #[allow(dead_code)]
     pub text: String,
     pub html: String,
 }
 
-/// Render a SQL statement result as both text and HTML.
+/// Render a SQL statement result as both text and HTML, from a single pass
+/// over the rows (a `Statement` can't be iterated twice).
 pub fn render_statement(stmt: &Statement) -> Result<UiResponse> {
-    // Render HTML version
     let html_config = TableConfig::html();
-    let html_result = solite_table::render_statement(stmt, &html_config)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let buffered =
+        solite_table::buffer_statement(stmt, html_config.head_rows, html_config.tail_rows)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // For text, we need to reset the statement and render again
-    // Since Statement doesn't support reset for iteration, we'll use the HTML output
-    // with a plain text fallback from the same data
+    // Column-less statements (e.g. CREATE TABLE) have nothing to render.
+    let Some(buffered) = buffered else {
+        return Ok(UiResponse {
+            text: String::new(),
+            html: String::new(),
+        });
+    };
 
-    // Create plain text version from the HTML render result metadata
-    let text = format!(
-        "{} column{} × {} row{}",
-        html_result.total_columns,
-        if html_result.total_columns != 1 { "s" } else { "" },
-        html_result.total_rows,
-        if html_result.total_rows != 1 { "s" } else { "" },
-    );
+    let html = solite_table::render_buffered(&buffered, &html_config).output;
 
-    Ok(UiResponse {
-        text,
-        html: html_result.output,
-    })
+    // Plain-text fallback for nbconvert, terminal clients, copy-as-text.
+    // Same retained rows as the HTML rendering.
+    let plain_config =
+        TableConfig::plain().with_row_limits(html_config.head_rows, html_config.tail_rows);
+    let text = solite_table::render_buffered(&buffered, &plain_config).output;
+
+    Ok(UiResponse { text, html })
 }

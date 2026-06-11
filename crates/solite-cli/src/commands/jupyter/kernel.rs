@@ -611,7 +611,7 @@ pub(super) async fn send_statement_result(
             response
                 .send_display(
                     DisplayData::new(
-                        vec![MediaType::Plain(stmt.sql()), MediaType::Html(tbl.html)].into(),
+                        vec![MediaType::Plain(tbl.text), MediaType::Html(tbl.html)].into(),
                     ),
                     parent,
                 )

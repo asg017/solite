@@ -1,4 +1,4 @@
-mod completer;
+pub(crate) mod completer;
 mod highlighter;
 use crate::cli::ReplArgs;
 use crate::commands::repl::completer::ReplCompleter;

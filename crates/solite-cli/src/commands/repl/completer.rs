@@ -9,12 +9,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A SchemaSource implementation that queries a live SQLite database connection.
-struct LiveSchemaSource<'a> {
+/// Shared with the Jupyter kernel's complete_request handler.
+pub(crate) struct LiveSchemaSource<'a> {
     runtime: &'a Runtime,
 }
 
 impl<'a> LiveSchemaSource<'a> {
-    fn new(runtime: &'a Runtime) -> Self {
+    pub(crate) fn new(runtime: &'a Runtime) -> Self {
         Self { runtime }
     }
 }
@@ -180,9 +181,15 @@ fn to_pair(item: CompletionItem) -> Pair {
     }
 }
 
+/// Dot command names offered by tab completion (REPL and Jupyter).
+pub(crate) const DOT_COMMAND_NAMES: &[&str] = &[
+    "ask", "bench", "call", "clear", "dotenv", "env", "export", "graphviz", "help", "load",
+    "open", "param", "print", "run", "schema", "sh", "tables", "timer", "tui", "vegalite",
+];
+
 /// Find the start position for completion replacement.
-/// Returns the position of the start of the current word being typed.
-fn find_completion_start(line: &str, pos: usize) -> usize {
+/// Returns the byte position of the start of the current word being typed.
+pub(crate) fn find_completion_start(line: &str, pos: usize) -> usize {
     let line_before_cursor = &line[..pos];
 
     // Find the last whitespace or operator before cursor
@@ -207,17 +214,12 @@ impl ReplCompleter {
         _pos: usize,
         _ctx: &rustyline::Context<'_>,
     ) -> Result<(usize, Vec<Pair>)> {
-        let dots = [
-            "ask", "bench", "call", "clear", "dotenv", "env", "export", "graphviz", "help",
-            "load", "open", "param", "print", "run", "schema", "sh", "tables", "timer", "tui",
-            "vegalite",
-        ];
         if line.contains(' ') || !line.starts_with('.') {
             return Ok((0, vec![]));
         }
         let prefix = &line[1..];
 
-        let candidates = dots
+        let candidates = DOT_COMMAND_NAMES
             .iter()
             .filter_map(|v| {
                 if v.starts_with(prefix) {

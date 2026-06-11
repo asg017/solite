@@ -37,6 +37,42 @@ def test_is_complete(solite_kernel):
     assert status_of(".export out.csv\nselect 1;") == "complete"
 
 
+def test_complete(solite_kernel):
+    client = solite_kernel.client
+
+    def complete(code, cursor_pos=None):
+        client.complete(code, cursor_pos if cursor_pos is not None else len(code))
+        reply = solite_kernel.get_non_kernel_info_reply()
+        assert reply["header"]["msg_type"] == "complete_reply"
+        return reply["content"]
+
+    # keyword completion at statement start
+    content = complete("sel")
+    assert "select" in content["matches"]
+    assert content["cursor_start"] == 0
+    assert content["cursor_end"] == 3
+
+    # table-name completion after FROM, against the live schema
+    solite_kernel.execute("create table students(name text, age int);")
+    content = complete("select * from stu")
+    assert "students" in content["matches"]
+    assert content["cursor_start"] == len("select * from ")
+
+    # column completion in a WHERE clause
+    content = complete("select * from students where ")
+    assert "name" in content["matches"]
+    assert "age" in content["matches"]
+
+    # dot command name completion
+    content = complete(".ta")
+    assert content["matches"] == ["tables"]
+    assert content["cursor_start"] == 1
+
+    # nothing sensible to complete still gets a reply
+    content = complete("select 1;")
+    assert content["status"] == "ok"
+
+
 def test_shutdown(solite_kernel):
     """shutdown_request on the control channel gets a reply and the kernel exits."""
     client = solite_kernel.client

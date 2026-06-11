@@ -5,10 +5,11 @@
 
 use anyhow::{Context as _, Result};
 use jupyter_protocol::{
-    CodeMirrorMode, CommInfoReply, ConnectionInfo, DisplayData, ErrorOutput, ExecuteReply,
-    ExecutionCount, HelpLink, HistoryReply, InspectReply, InterruptReply, IsCompleteReply,
-    IsCompleteReplyStatus, JupyterMessage, JupyterMessageContent, KernelInfoReply, LanguageInfo,
-    Media, MediaType, ReplyError, ReplyStatus, ShutdownReply, Status,
+    CodeMirrorMode, CommInfoReply, CompleteReply, ConnectionInfo, DisplayData, ErrorOutput,
+    ExecuteReply, ExecutionCount, HelpLink, HistoryReply, InspectReply, InterruptReply,
+    IsCompleteReply, IsCompleteReplyStatus, JupyterMessage, JupyterMessageContent,
+    KernelInfoReply, LanguageInfo, Media, MediaType, ReplyError, ReplyStatus, ShutdownReply,
+    Status,
 };
 
 /// Messages sent from the runtime task back to the shell handler.
@@ -18,6 +19,23 @@ pub enum ExecutionMessage {
     Display(JupyterMessage),
     /// An error occurred during execution.
     Error { ename: String, evalue: String },
+}
+
+/// Requests sent from the shell handler to the runtime task, which owns the
+/// `Runtime` (and its non-`Sync` connection).
+#[allow(clippy::large_enum_variant)]
+enum RuntimeRequest {
+    Execute {
+        code: String,
+        parent: JupyterMessage,
+        response: mpsc::Sender<ExecutionMessage>,
+    },
+    Complete {
+        code: String,
+        /// Cursor position in unicode code points, per the Jupyter spec.
+        cursor_pos: usize,
+        reply: tokio::sync::oneshot::Sender<CompleteReply>,
+    },
 }
 use runtimelib::{KernelIoPubConnection, KernelShellConnection};
 use solite_core::sqlite::InterruptHandle;
@@ -35,7 +53,7 @@ use super::render::render_statement;
 pub struct SoliteKernel {
     execution_count: ExecutionCount,
     iopub: KernelIoPubConnection,
-    runtime: mpsc::Sender<(String, JupyterMessage, mpsc::Sender<ExecutionMessage>)>,
+    runtime: mpsc::Sender<RuntimeRequest>,
 }
 
 impl SoliteKernel {
@@ -55,8 +73,7 @@ impl SoliteKernel {
         let iopub_connection =
             runtimelib::create_kernel_iopub_connection(connection_info, &session_id).await?;
 
-        let (tx, mut rx) =
-            mpsc::channel::<(String, JupyterMessage, mpsc::Sender<ExecutionMessage>)>(10);
+        let (tx, mut rx) = mpsc::channel::<RuntimeRequest>(10);
 
         // Shared handle for interrupting the in-flight statement from outside
         // the runtime task. Refreshed by the runtime task whenever the
@@ -77,7 +94,23 @@ impl SoliteKernel {
         let runtime_interrupt = Arc::clone(&interrupt_handle);
         tokio::spawn(async move {
             let mut rt = runtime;
-            while let Some((code, parent, response)) = rx.recv().await {
+            while let Some(request) = rx.recv().await {
+                let (code, parent, response) = match request {
+                    RuntimeRequest::Complete {
+                        code,
+                        cursor_pos,
+                        reply,
+                    } => {
+                        let _ = reply.send(completions(&rt, &code, cursor_pos));
+                        continue;
+                    }
+                    RuntimeRequest::Execute {
+                        code,
+                        parent,
+                        response,
+                    } => (code, parent, response),
+                };
+
                 // Debugging mode: prefix code with @@ to see message details
                 if code.starts_with("@@") {
                     let r = format!("{}\n{:?}", parent.metadata["cellId"], parent);
@@ -206,7 +239,12 @@ impl SoliteKernel {
         let parent = request.clone();
         let handle = tokio::spawn(async move {
             let (resp_tx, resp_rx) = mpsc::channel(10);
-            if let Err(e) = cmd_tx.send((code, parent, resp_tx)).await {
+            let request = RuntimeRequest::Execute {
+                code,
+                parent,
+                response: resp_tx,
+            };
+            if let Err(e) = cmd_tx.send(request).await {
                 eprintln!("Failed to send code to runtime: {}", e);
             }
             resp_rx
@@ -309,6 +347,26 @@ impl SoliteKernel {
                 shell.send(reply).await?;
             }
 
+            JupyterMessageContent::CompleteRequest(req) => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.runtime
+                    .send(RuntimeRequest::Complete {
+                        code: req.code.clone(),
+                        cursor_pos: req.cursor_pos,
+                        reply: tx,
+                    })
+                    .await?;
+                let reply = rx.await.unwrap_or_else(|_| CompleteReply {
+                    matches: vec![],
+                    cursor_start: req.cursor_pos,
+                    cursor_end: req.cursor_pos,
+                    metadata: Default::default(),
+                    status: ReplyStatus::Ok,
+                    error: None,
+                });
+                shell.send(reply.as_child_of(parent)).await?;
+            }
+
             JupyterMessageContent::HistoryRequest(_) => {
                 let reply = HistoryReply {
                     history: Default::default(),
@@ -387,6 +445,63 @@ impl SoliteKernel {
     fn one_up_execution_count(&mut self) -> ExecutionCount {
         self.execution_count.0 += 1;
         self.execution_count
+    }
+}
+
+/// Compute completions for a complete_request. Runs on the runtime task,
+/// which owns the connection used for live schema lookups.
+fn completions(runtime: &Runtime, code: &str, cursor_pos: usize) -> CompleteReply {
+    use crate::commands::repl::completer::{
+        find_completion_start, LiveSchemaSource, DOT_COMMAND_NAMES,
+    };
+    use solite_completion::{detect_context, get_completions};
+
+    // Jupyter cursor_pos is in unicode code points; the engine wants bytes.
+    let byte_offset = code
+        .char_indices()
+        .nth(cursor_pos)
+        .map(|(i, _)| i)
+        .unwrap_or(code.len());
+    let to_char_pos = |byte: usize| code[..byte].chars().count();
+
+    // Dot command name completion, when the cursor's line is `.<partial>`.
+    let line_start = code[..byte_offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line = &code[line_start..byte_offset];
+    if line.starts_with('.') && !line.contains(' ') {
+        let prefix = &line[1..];
+        let matches: Vec<String> = DOT_COMMAND_NAMES
+            .iter()
+            .filter(|name| name.starts_with(prefix))
+            .map(|name| name.to_string())
+            .collect();
+        return CompleteReply {
+            matches,
+            cursor_start: to_char_pos(line_start + 1),
+            cursor_end: cursor_pos,
+            metadata: Default::default(),
+            status: ReplyStatus::Ok,
+            error: None,
+        };
+    }
+
+    let context = detect_context(code, byte_offset);
+    let start = find_completion_start(code, byte_offset);
+    let prefix = &code[start..byte_offset];
+    let prefix_opt = if prefix.is_empty() { None } else { Some(prefix) };
+
+    let schema = LiveSchemaSource::new(runtime);
+    let matches: Vec<String> = get_completions(&context, Some(&schema), prefix_opt)
+        .into_iter()
+        .map(|item| item.insert_text.unwrap_or(item.label))
+        .collect();
+
+    CompleteReply {
+        matches,
+        cursor_start: to_char_pos(start),
+        cursor_end: cursor_pos,
+        metadata: Default::default(),
+        status: ReplyStatus::Ok,
+        error: None,
     }
 }
 

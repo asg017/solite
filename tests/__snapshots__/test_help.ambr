@@ -84,9 +84,11 @@
   Usage: solite jupyter [OPTIONS] <COMMAND>
   
   Commands:
-    install  Install the Solite kernelspec so Jupyter can find the kernel
-    up       Start the kernel from a Jupyter connection file (invoked by Jupyter, not directly by users)
-    help     Print this message or the help of the given subcommand(s)
+    install    Install the Solite kernelspec so Jupyter can find the kernel
+    uninstall  Remove an installed Solite kernelspec
+    list       List installed Jupyter kernelspecs
+    up         Start the kernel from a Jupyter connection file (invoked by Jupyter, not directly by users)
+    help       Print this message or the help of the given subcommand(s)
   
   Options:
         --allow-ssh  Allow connecting to ssh:// database URLs and custom --transport commands

@@ -326,7 +326,10 @@ pub struct JupyterNamespace {
 pub enum JupyterCommand {
     /// Install the Solite kernelspec so Jupyter can find the kernel
     Install(JupyterInstallArgs),
-    //Uninstall(JupyterUninstallArgs),
+    /// Remove an installed Solite kernelspec
+    Uninstall(JupyterUninstallArgs),
+    /// List installed Jupyter kernelspecs
+    List,
     /// Start the kernel from a Jupyter connection file (invoked by Jupyter,
     /// not directly by users)
     Up(JupyterUpArgs),
@@ -345,6 +348,13 @@ pub struct JupyterInstallArgs {
     /// Overwrite an existing kernelspec
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct JupyterUninstallArgs {
+    /// Kernelspec directory name [default: solite]
+    #[arg(long)]
+    pub name: Option<String>,
 }
 
 #[derive(Args, Debug)]

@@ -1,0 +1,24 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"nums (3+ rows)                       Solite                       ? help  q quit"
+"n                                        label                                  "
+"                                       1 one                                    "
+"                                       2 two                                    "
+"                                       3 three                                  "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 Row 1 of 3+ ⠋                                  "
+"────────────────────────────────────────────────────────────────────────────────"
+"   h/j/k/l navigate  Enter view row  [ sort asc  ] desc  │    y/c copy  q back  "

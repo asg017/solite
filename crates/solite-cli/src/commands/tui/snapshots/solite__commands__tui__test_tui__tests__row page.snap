@@ -1,0 +1,24 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"people > row 1                       Solite                       ? help  q quit"
+"                                   people id=1                                  "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"› id                   PK  1                                                    "
+"  name                  alice                                                   "
+"  score                 90.5                                                    "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"      j/k navigate  y/Enter copy value  p copy PK  J copy JSON  │    q back     "

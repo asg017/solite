@@ -12,7 +12,7 @@ use solite_core::Runtime;
 use crate::commands::tui::help_bar::HelpBar;
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::utils::render_value_for_display;
-use crate::commands::tui::{copy_to_clipboard, value_to_string, HandleKeyResult, NavigateToPage};
+use crate::commands::tui::{value_to_string, HandleKeyResult, NavigateToPage, SharedClipboard};
 
 /// Information about a primary key column
 #[derive(Clone)]
@@ -101,6 +101,7 @@ pub struct RowPage {
     pub primary_keys: Vec<PrimaryKeyInfo>,
     pub state: ListState,
     pub footer_message: Option<String>,
+    clipboard: SharedClipboard,
 }
 
 impl RowPage {
@@ -111,6 +112,7 @@ impl RowPage {
         values: Vec<OwnedValue>,
         primary_keys: Vec<PrimaryKeyInfo>,
         theme: TuiTheme,
+        clipboard: SharedClipboard,
     ) -> Self {
         let mut state = ListState::default();
         if !columns.is_empty() {
@@ -125,7 +127,13 @@ impl RowPage {
             primary_keys,
             state,
             footer_message: None,
+            clipboard,
         }
+    }
+
+    /// Copy text to the injected clipboard.
+    fn copy_to_clipboard(&self, content: String) -> Result<(), String> {
+        self.clipboard.borrow_mut().set_text(content)
     }
 
     /// Format the primary key display string
@@ -158,7 +166,7 @@ impl RowPage {
         if let Some(idx) = self.state.selected() {
             if idx < self.values.len() {
                 let content = value_to_string(&self.values[idx]);
-                match copy_to_clipboard(&content) {
+                match self.copy_to_clipboard(content) {
                     Ok(()) => {
                         self.footer_message = Some(format!(
                             "Copied {} to clipboard",
@@ -203,7 +211,7 @@ impl RowPage {
             pk_values.join(", ")
         };
 
-        match copy_to_clipboard(&content) {
+        match self.copy_to_clipboard(content.clone()) {
             Ok(()) => {
                 self.footer_message = Some(format!("Copied primary key: {}", content));
             }
@@ -217,7 +225,7 @@ impl RowPage {
     fn copy_as_json(&mut self) {
         let json = row_to_json(&self.columns, &self.values);
 
-        match copy_to_clipboard(&json) {
+        match self.copy_to_clipboard(json) {
             Ok(()) => {
                 self.footer_message = Some("Copied row as JSON".to_owned());
             }

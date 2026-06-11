@@ -1,0 +1,24 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"big (500 rows)                       Solite                       ? help  q quit"
+"n                                                                               "
+"                                                                             486"
+"                                                                             487"
+"                                                                             488"
+"                                                                             489"
+"                                                                             490"
+"                                                                             491"
+"                                                                             492"
+"                                                                             493"
+"                                                                             494"
+"                                                                             495"
+"                                                                             496"
+"                                                                             497"
+"                                                                             498"
+"                                                                             499"
+"                                                                             500"
+"                                 Row 500 of 500                                 "
+"────────────────────────────────────────────────────────────────────────────────"
+"   h/j/k/l navigate  Enter view row  [ sort asc  ] desc  │    y/c copy  q back  "

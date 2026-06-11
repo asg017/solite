@@ -6,7 +6,7 @@ use crate::commands::tui::row_page::{get_primary_keys, PrimaryKeyInfo};
 use crate::commands::tui::utils::render_value_for_display;
 use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{
-    copy_to_clipboard, value_to_string, Frame, HandleKeyResult, NavigateToPage, RowPageData,
+    value_to_string, Frame, HandleKeyResult, NavigateToPage, RowPageData, SharedClipboard,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Rect};
@@ -327,10 +327,17 @@ pub struct TablePage<'a> {
     window_start: usize,
     /// Current sort order (if any)
     current_order: Option<Order>,
+    /// Destination for copy operations
+    clipboard: SharedClipboard,
 }
 
 impl<'a> TablePage<'a> {
-    pub(crate) fn new(table_name: &str, runtime: &'a Runtime, theme: TuiTheme) -> Self {
+    pub(crate) fn new(
+        table_name: &str,
+        runtime: &'a Runtime,
+        theme: TuiTheme,
+        clipboard: SharedClipboard,
+    ) -> Self {
         let result = load_table_data(runtime, table_name, None, 0, WINDOW_SIZE);
         let primary_keys = get_primary_keys(runtime, table_name);
         let mut state = TableState::default();
@@ -354,6 +361,7 @@ impl<'a> TablePage<'a> {
             row_count,
             window_start: 0,
             current_order: None,
+            clipboard,
         }
     }
 
@@ -531,7 +539,7 @@ impl<'a> TablePage<'a> {
             },
         };
 
-        match copy_to_clipboard(&content) {
+        match self.clipboard.borrow_mut().set_text(content) {
             Ok(()) => {
                 self.footer_message = Some(message);
             }
@@ -960,5 +968,57 @@ mod tests {
         let runtime = Runtime::new(None).unwrap();
         let err = load_table_for_copy(&runtime, "no_such_table", None, 10).unwrap_err();
         assert!(err.contains("no_such_table"));
+    }
+
+    #[test]
+    fn test_row_count_new() {
+        // an empty initial load means the table is empty: counting is done
+        let empty = RowCount::new(0);
+        assert!(empty.is_complete);
+        assert_eq!(empty.known, 0);
+
+        // a full initial window means there may be more rows
+        let partial = RowCount::new(WINDOW_SIZE);
+        assert!(!partial.is_complete);
+        assert_eq!(partial.known, WINDOW_SIZE);
+    }
+
+    #[test]
+    fn test_row_count_update_from_load() {
+        let mut rc = RowCount::new(WINDOW_SIZE);
+
+        // a full window deeper in the table extends the known count
+        rc.update_from_load(WINDOW_SIZE, WINDOW_SIZE);
+        assert_eq!(rc.known, 2 * WINDOW_SIZE);
+        assert!(!rc.is_complete);
+
+        // a short window means the end was found
+        rc.update_from_load(2 * WINDOW_SIZE, 50);
+        assert_eq!(rc.known, 2 * WINDOW_SIZE + 50);
+        assert!(rc.is_complete);
+
+        // stale loads never shrink the known count
+        rc.update_from_load(0, WINDOW_SIZE);
+        assert_eq!(rc.known, 2 * WINDOW_SIZE + 50);
+    }
+
+    #[test]
+    fn test_row_count_count_batch_discovers_total() {
+        let runtime = runtime_with_rows(500);
+        let mut rc = RowCount::new(WINDOW_SIZE);
+        let more = rc.count_batch(&runtime, "nums");
+        // 500 rows fit in one batch: counting finished in a single call
+        assert!(!more);
+        assert!(rc.is_complete);
+        assert_eq!(rc.known, 500);
+    }
+
+    #[test]
+    fn test_row_count_count_batch_handles_missing_table() {
+        let runtime = Runtime::new(None).unwrap();
+        let mut rc = RowCount::new(WINDOW_SIZE);
+        let more = rc.count_batch(&runtime, "no_such_table");
+        assert!(!more);
+        assert!(rc.is_complete);
     }
 }

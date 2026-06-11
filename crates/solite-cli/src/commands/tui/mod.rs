@@ -74,13 +74,27 @@ fn value_to_string(value: &OwnedValue) -> String {
     }
 }
 
-/// Copy text to the system clipboard. Returns an error message if it fails.
-fn copy_to_clipboard(content: &str) -> std::result::Result<(), String> {
-    arboard::Clipboard::new()
-        .map_err(|e| format!("Failed to access clipboard: {}", e))?
-        .set_text(content.to_owned())
-        .map_err(|e| format!("Failed to copy: {}", e))
+/// Destination for copy operations. Injectable so tests can assert what was
+/// copied without touching the real (headless-hostile) system clipboard.
+pub(crate) trait Clipboard {
+    /// Copy text to the clipboard. Returns an error message if it fails.
+    fn set_text(&mut self, text: String) -> std::result::Result<(), String>;
 }
+
+/// The system clipboard, via arboard.
+struct SystemClipboard;
+
+impl Clipboard for SystemClipboard {
+    fn set_text(&mut self, text: String) -> std::result::Result<(), String> {
+        arboard::Clipboard::new()
+            .map_err(|e| format!("Failed to access clipboard: {}", e))?
+            .set_text(text)
+            .map_err(|e| format!("Failed to copy: {}", e))
+    }
+}
+
+/// Shared clipboard handle passed to every page that can copy.
+pub(crate) type SharedClipboard = std::rc::Rc<std::cell::RefCell<dyn Clipboard>>;
 
 enum Page<'a> {
     Listing(ListingPage),
@@ -92,6 +106,7 @@ pub(crate) struct App<'a> {
     runtime: &'a Runtime,
     page: Page<'a>,
     theme: TuiTheme,
+    clipboard: SharedClipboard,
 }
 impl<'a> App<'a> {
     /// Returns true if the application should quit.
@@ -111,8 +126,12 @@ impl<'a> App<'a> {
                     self.page = Page::Listing(page);
                 }
                 NavigateToPage::Table(table_name) => {
-                    self.page =
-                        Page::Table(TablePage::new(&table_name, self.runtime, self.theme.clone()));
+                    self.page = Page::Table(TablePage::new(
+                        &table_name,
+                        self.runtime,
+                        self.theme.clone(),
+                        self.clipboard.clone(),
+                    ));
                 }
                 NavigateToPage::Row(data) => {
                     let row_page = RowPage::new(
@@ -122,6 +141,7 @@ impl<'a> App<'a> {
                         data.values,
                         data.primary_keys,
                         self.theme.clone(),
+                        self.clipboard.clone(),
                     );
                     self.page = Page::Row(row_page);
                 }
@@ -133,6 +153,7 @@ impl<'a> App<'a> {
                             &table_name,
                             self.runtime,
                             self.theme.clone(),
+                            self.clipboard.clone(),
                         ));
                     }
                 }
@@ -209,11 +230,22 @@ impl<'a> App<'a> {
 /// Opens directly on `initial_table` when given (skipping the listing query).
 fn run_app(runtime: &Runtime, initial_table: Option<&str>) -> anyhow::Result<()> {
     let theme = CTP_MOCHA_THEME.clone();
+    let clipboard: SharedClipboard = std::rc::Rc::new(std::cell::RefCell::new(SystemClipboard));
     let page = match initial_table {
-        Some(table_name) => Page::Table(TablePage::new(table_name, runtime, theme.clone())),
+        Some(table_name) => Page::Table(TablePage::new(
+            table_name,
+            runtime,
+            theme.clone(),
+            clipboard.clone(),
+        )),
         None => Page::Listing(ListingPage::new(runtime, &theme)),
     };
-    let mut app = App { runtime, page, theme };
+    let mut app = App {
+        runtime,
+        page,
+        theme,
+        clipboard,
+    };
 
     ratatui::run(|terminal| loop {
         terminal.draw(|frame| app.render(frame))?;

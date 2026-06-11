@@ -1,0 +1,24 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"people (3+ rows)                     Solite                       ? help  q quit"
+"id                         name                       score                     "
+"                         1 alice                                            90.5"
+"                         2 bob                                             80.25"
+"                         3 carol                                              70"
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 Row 1 of 3+ ⠋                                  "
+"────────────────────────────────────────────────────────────────────────────────"
+"   h/j/k/l navigate  Enter view row  [ sort asc  ] desc  │    y/c copy  q back  "

@@ -1,0 +1,24 @@
+---
+source: crates/solite-cli/src/commands/tui/test_tui.rs
+expression: self.terminal.backend()
+---
+"t (2+ rows)                          Solite                       ? help  q quit"
+"a                                        b                                      "
+"                                       1 x                                      "
+"                                       2 y                                      "
+"                                                                                "
+"                                                                                "
+"                    ┌ Copy to Clipboard ───────────────────┐                    "
+"                    │›  1 Copy cell                        │                    "
+"                    │   2 Copy row (TSV)                   │                    "
+"                    │   3 Copy table (TSV)                 │                    "
+"                    │   4 Copy as SELECT                   │                    "
+"                    │   5 Copy as INSERT                   │                    "
+"                    │                                      │                    "
+"                    │                                      │                    "
+"                    │    j/k nav  Enter copy  Esc cancel   │                    "
+"                    └──────────────────────────────────────┘                    "
+"                                                                                "
+"                                 Row 1 of 2+ ⠋                                  "
+"────────────────────────────────────────────────────────────────────────────────"
+"   h/j/k/l navigate  Enter view row  [ sort asc  ] desc  │    y/c copy  q back  "

@@ -18,6 +18,25 @@ def test_hello(solite_kernel, snapshot):
 
 
 
+def test_is_complete(solite_kernel):
+    client = solite_kernel.client
+
+    def status_of(code):
+        client.is_complete(code)
+        reply = solite_kernel.get_non_kernel_info_reply()
+        assert reply["header"]["msg_type"] == "is_complete_reply"
+        return reply["content"]["status"]
+
+    assert status_of("select 1;") == "complete"
+    assert status_of("select 1 +") == "incomplete"
+    assert status_of("select 'unterminated") == "incomplete"
+    assert status_of("") == "complete"
+    assert status_of(".tables") == "complete"
+    assert status_of("!ls") == "complete"
+    assert status_of(".export out.csv") == "incomplete"
+    assert status_of(".export out.csv\nselect 1;") == "complete"
+
+
 def test_shutdown(solite_kernel):
     """shutdown_request on the control channel gets a reply and the kernel exits."""
     client = solite_kernel.client

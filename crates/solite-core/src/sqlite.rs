@@ -1446,6 +1446,35 @@ pub fn complete(sql: &str) -> bool {
     unsafe { sqlite3_complete(sql.as_ptr()) != 0 }
 }
 
+/// Whether `input` forms a complete unit of interactive input (REPL line or
+/// Jupyter cell): a semicolon-terminated SQL statement, a dot command
+/// (including the `!`/`?` shorthands), or a multi-line dot command
+/// (`.export`/`.vegalite`/`.bench`) whose trailing SQL body is itself
+/// complete. Empty/whitespace-only input counts as complete (a no-op).
+pub fn input_complete(input: &str) -> bool {
+    let trimmed = input.trim_start();
+    if trimmed.is_empty() || complete(input) {
+        return true;
+    }
+    if trimmed.starts_with(['.', '!', '?']) {
+        let (first_line, body) = match trimmed.split_once('\n') {
+            Some((first_line, body)) => (first_line, Some(body)),
+            None => (trimmed, None),
+        };
+        let command = first_line.split_whitespace().next().unwrap_or("");
+        // These dot commands consume a SQL body from the following lines,
+        // so the body's completeness decides.
+        if matches!(command, ".export" | ".vegalite" | ".vl" | ".bench") {
+            return match body {
+                Some(body) => complete(body),
+                None => false,
+            };
+        }
+        return true;
+    }
+    false
+}
+
 pub fn sqlite_version() -> Cow<'static, str> {
     unsafe { CStr::from_ptr(sqlite3_libversion()).to_string_lossy() }
 }
@@ -1453,6 +1482,33 @@ pub fn sqlite_version() -> Cow<'static, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_input_complete() {
+        // plain SQL: semicolon decides
+        assert!(input_complete("select 1;"));
+        assert!(!input_complete("select 1"));
+        assert!(!input_complete("select 'unterminated"));
+
+        // empty input is a no-op, thus complete
+        assert!(input_complete(""));
+        assert!(input_complete("  \n "));
+
+        // dot commands and shorthands are single-line
+        assert!(input_complete(".tables"));
+        assert!(input_complete("  .open foo.db"));
+        assert!(input_complete("!ls"));
+        assert!(input_complete("?what is a vtab"));
+
+        // multi-line dot commands need a complete SQL body
+        assert!(!input_complete(".export out.csv"));
+        assert!(!input_complete(".export out.csv\nselect 1"));
+        assert!(input_complete(".export out.csv\nselect 1;"));
+        assert!(!input_complete(".bench"));
+        assert!(input_complete(".bench\nselect 1;"));
+        assert!(!input_complete(".vegalite bar"));
+        assert!(input_complete(".vl bar\nselect 1;"));
+    }
 
     /// TODO: why does tihs panic?
     #[ignore]

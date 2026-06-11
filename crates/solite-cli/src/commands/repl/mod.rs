@@ -21,10 +21,6 @@ use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
-fn is_all_whitespace(s: &str) -> bool {
-    s.chars().all(char::is_whitespace)
-}
-
 /// Simple matching bracket validator.
 #[derive(Default)]
 pub struct ReplValidator {
@@ -42,31 +38,10 @@ impl ReplValidator {
 impl Validator for ReplValidator {
     fn validate(&self, ctx: &mut ValidationContext) -> Result<ValidationResult> {
         let input = ctx.input();
-        if is_all_whitespace(input) {
-            return Ok(ValidationResult::Valid(None));
-        }
         if REPL_SPECIAL_COMMANDS.contains(&input.trim()) {
             return Ok(ValidationResult::Valid(None));
         }
-        if solite_core::sqlite::complete(input) {
-            return Ok(ValidationResult::Valid(None));
-        }
-        if input.trim_start().starts_with(".export") {
-            match input.trim_start().split_once('\n') {
-                Some((_, rest)) => {
-                    if solite_core::sqlite::complete(rest) {
-                        return Ok(ValidationResult::Valid(None));
-                    } else {
-                        return Ok(ValidationResult::Incomplete);
-                    }
-                }
-                None => {
-                    return Ok(ValidationResult::Incomplete);
-                }
-            }
-        }
-        // dot commands and special prefixes
-        if input.trim_start().starts_with(['.', '!', '?']) {
+        if solite_core::sqlite::input_complete(input) {
             return Ok(ValidationResult::Valid(None));
         }
         Ok(ValidationResult::Incomplete)

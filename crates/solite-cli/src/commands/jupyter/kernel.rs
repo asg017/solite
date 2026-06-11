@@ -331,9 +331,14 @@ impl SoliteKernel {
                 shell.send(reply).await?;
             }
 
-            JupyterMessageContent::IsCompleteRequest(_) => {
+            JupyterMessageContent::IsCompleteRequest(req) => {
+                let status = if solite_core::sqlite::input_complete(&req.code) {
+                    IsCompleteReplyStatus::Complete
+                } else {
+                    IsCompleteReplyStatus::Incomplete
+                };
                 let reply = IsCompleteReply {
-                    status: IsCompleteReplyStatus::Complete,
+                    status,
                     indent: String::new(),
                 }
                 .as_child_of(parent);

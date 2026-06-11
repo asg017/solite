@@ -773,6 +773,10 @@ impl RemoteTransport {
     }
 }
 
+/// Double-boxed progress handler: the outer box gives a thin pointer that can
+/// cross the C `void*` boundary.
+type ProgressHandlerBox = Box<dyn FnMut() -> bool + Send>;
+
 /// https://www.sqlite.org/c3ref/sqlite3.html
 pub struct Connection {
     inner: ConnectionInner,
@@ -780,6 +784,9 @@ pub struct Connection {
     /// Nulled (under the lock) before the database is closed so a handle can
     /// never interrupt a freed connection.
     interrupt_db: Arc<StdMutex<*mut sqlite3>>,
+    /// The currently registered progress handler, if any. Owned here so it can
+    /// be freed on replace/clear/drop (SQLite only holds the raw pointer).
+    progress_handler: std::cell::Cell<Option<*mut ProgressHandlerBox>>,
 }
 
 enum ConnectionInner {
@@ -835,6 +842,7 @@ impl Connection {
                 _owned: owned,
             },
             interrupt_db: Arc::new(StdMutex::new(connection)),
+            progress_handler: std::cell::Cell::new(None),
         }
     }
 
@@ -844,6 +852,7 @@ impl Connection {
                 transport: RefCell::new(transport),
             },
             interrupt_db: Arc::new(StdMutex::new(ptr::null_mut())),
+            progress_handler: std::cell::Cell::new(None),
         }
     }
 
@@ -1161,38 +1170,57 @@ impl Connection {
         }
     }
 
-    pub fn set_progress_handler<F, T>(&self, ops: i32, handle: Option<F>, aux: T)
+    /// Register a progress handler, replacing (and freeing) any previous one.
+    /// Returning `true` from the handler interrupts the running statement
+    /// (SQLITE_INTERRUPT).
+    ///
+    /// Safety of the registration: the handler runs on whatever thread is
+    /// stepping a statement (hence the `Send` bound; the connection is opened
+    /// with `SQLITE_OPEN_FULLMUTEX`), and the boxed closure stored on `self`
+    /// lives as long as the registration — it is freed only on replace,
+    /// [`Connection::clear_progress_handler`], or drop, each of which first
+    /// points SQLite elsewhere.
+    pub fn set_progress_handler<F>(&self, ops: i32, handler: F)
     where
-        F: FnMut(&T) -> bool + Send + 'static,
+        F: FnMut() -> bool + Send + 'static,
     {
         match &self.inner {
             ConnectionInner::Local { connection, .. } => {
-                unsafe extern "C" fn call_boxed_closure<F, T>(p_arg: *mut c_void) -> c_int
-                where
-                    F: FnMut(&T) -> bool,
-                {
-                    let x = p_arg.cast::<(*mut F, *mut T)>();
-                    let r = (*((*x).0))(&(*(*x).1));
-                    if r { 1 } else { 0 }
-                }
-                if let Some(handle) = handle {
-                    unsafe {
-                        let x: *mut F = Box::into_raw(Box::new(handle));
-                        let y: *mut T = Box::into_raw(Box::new(aux));
-                        let boxed_handler = Box::into_raw(Box::new((x, y)));
-                        sqlite3_progress_handler(
-                            *connection,
-                            ops,
-                            Some(call_boxed_closure::<F, T>),
-                            boxed_handler.cast(),
-                        );
+                unsafe extern "C" fn call_boxed_closure(p_arg: *mut c_void) -> c_int {
+                    let handler = unsafe { &mut *p_arg.cast::<ProgressHandlerBox>() };
+                    if handler() {
+                        1
+                    } else {
+                        0
                     }
                 }
+                let raw = Box::into_raw(Box::new(Box::new(handler) as ProgressHandlerBox));
+                unsafe {
+                    sqlite3_progress_handler(*connection, ops, Some(call_boxed_closure), raw.cast());
+                }
+                self.replace_progress_handler(Some(raw));
             }
             ConnectionInner::Remote { .. } => {
                 // Progress handlers don't apply to remote connections.
                 // The server executes fully and returns results.
             }
+        }
+    }
+
+    /// Unregister the progress handler, if any, and free it.
+    pub fn clear_progress_handler(&self) {
+        if let ConnectionInner::Local { connection, .. } = &self.inner {
+            unsafe {
+                sqlite3_progress_handler(*connection, 0, None, ptr::null_mut());
+            }
+            self.replace_progress_handler(None);
+        }
+    }
+
+    fn replace_progress_handler(&self, new: Option<*mut ProgressHandlerBox>) {
+        if let Some(prev) = self.progress_handler.replace(new) {
+            // SQLite no longer holds this pointer; reclaim the allocation.
+            drop(unsafe { Box::from_raw(prev) });
         }
     }
 
@@ -1378,6 +1406,15 @@ impl Drop for Connection {
     fn drop(&mut self) {
         match &mut self.inner {
             ConnectionInner::Local { connection, _owned } => {
+                // Unregister and free our progress handler, if we registered
+                // one. Skipped when None so a borrowed (non-owned) Connection
+                // never clears a handler its owner registered.
+                if let Some(prev) = self.progress_handler.take() {
+                    unsafe {
+                        sqlite3_progress_handler(*connection, 0, None, ptr::null_mut());
+                        drop(Box::from_raw(prev));
+                    }
+                }
                 // Hold the lock across close so an InterruptHandle on another
                 // thread can't interrupt mid-close; afterwards handles see null.
                 let mut interrupt_db = self.interrupt_db.lock().unwrap();
@@ -1594,6 +1631,45 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_progress_handler() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        const BUSY: &str = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 100000) SELECT count(*) FROM c";
+        let conn = Connection::open_in_memory().unwrap();
+
+        // handler fires during a busy query
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&calls);
+        conn.set_progress_handler(10, move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            false
+        });
+        let (_, stmt) = conn.prepare(BUSY).unwrap();
+        stmt.unwrap().execute().unwrap();
+        assert!(calls.load(Ordering::SeqCst) > 0);
+
+        // returning true interrupts the query; re-registering frees the
+        // previous handler (leak path covered by review/asan, not assertable)
+        conn.set_progress_handler(10, move || true);
+        let (_, stmt) = conn.prepare(BUSY).unwrap();
+        let err = stmt.unwrap().execute().unwrap_err();
+        assert_eq!(err.result_code, SQLITE_INTERRUPT);
+
+        // after clearing, the handler no longer fires
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&calls);
+        conn.set_progress_handler(10, move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            false
+        });
+        conn.clear_progress_handler();
+        let (_, stmt) = conn.prepare(BUSY).unwrap();
+        stmt.unwrap().execute().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn test_bytecode_steps() {
         let conn = Connection::open_in_memory().unwrap();

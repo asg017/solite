@@ -34,18 +34,16 @@ pub fn handle_sql(
     };
 
     let start = jiff::Timestamp::now();
-    let p = stmt.pointer();
+    // Captured as usize so the closure is Send; the handler is cleared below
+    // before the statement is dropped.
+    let p = stmt.pointer() as usize;
     let r = step_reference.to_string();
     let pbx = pb.clone();
 
     // Set up progress handler
-    runtime.connection.set_progress_handler(
-        500_000,
-        Some(move |(stmt_ptr, start_time): &(*mut solite_core::sqlite::sqlite3_stmt, Timestamp)| {
-            handle_progress(*stmt_ptr, *start_time, &pbx, &r)
-        }),
-        (p, start),
-    );
+    runtime.connection.set_progress_handler(500_000, move || {
+        handle_progress(p as *mut solite_core::sqlite::sqlite3_stmt, start, &pbx, &r)
+    });
 
     let execution_start = std::time::Instant::now();
     pb.finish_and_clear();
@@ -68,6 +66,10 @@ pub fn handle_sql(
     if let Some(trace_id) = trace_stmt_id {
         record_trace_steps(runtime, stmt, trace_id);
     }
+
+    // The handler captures this statement's raw pointer; unregister before the
+    // statement can be dropped.
+    runtime.connection.clear_progress_handler();
 }
 
 /// Create a styled progress bar.

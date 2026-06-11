@@ -564,8 +564,13 @@ impl Statement {
                 let n = sqlite3_bind_parameter_count(*statement);
                 let mut bind_parameters = vec![];
                 for i in 0..n {
+                    // NULL for anonymous positional parameters (bare `?`)
                     let name = sqlite3_bind_parameter_name(*statement, i + 1);
-                    let name = CStr::from_ptr(name).to_string_lossy().to_string();
+                    let name = if name.is_null() {
+                        String::new()
+                    } else {
+                        CStr::from_ptr(name).to_string_lossy().to_string()
+                    };
                     bind_parameters.push(name);
                 }
                 bind_parameters
@@ -1535,6 +1540,17 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_bind_parameters_positional() {
+        let conn = Connection::open_in_memory().unwrap();
+        // bare `?` has no name; `?5` and `:named` do
+        let (rest, stmt) = conn.prepare("select ?, :named, ?5").unwrap();
+        assert_eq!(rest, None);
+        let stmt = stmt.unwrap();
+        let params = stmt.bind_parameters();
+        assert_eq!(params, vec!["", ":named", "", "", "?5"]);
+    }
+
     #[test]
     fn test_multiple_statements() {
         let connection = Connection::open_in_memory().unwrap();

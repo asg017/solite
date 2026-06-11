@@ -73,6 +73,25 @@ def test_complete(solite_kernel):
     assert content["status"] == "ok"
 
 
+def test_execute_input_broadcast(solite_kernel):
+    client = solite_kernel.client
+    code = "select 42"
+    client.execute(code=code, silent=False, store_history=False, stop_on_error=False)
+    reply = solite_kernel.get_non_kernel_info_reply()
+    assert reply is not None
+
+    saw_execute_input = False
+    while True:
+        msg = ensure_sync(client.iopub_channel.get_msg)(timeout=5)
+        if msg["msg_type"] == "execute_input":
+            assert msg["content"]["code"] == code
+            assert msg["content"]["execution_count"] >= 1
+            saw_execute_input = True
+        if msg["msg_type"] == "status" and msg["content"]["execution_state"] == "idle":
+            break
+    assert saw_execute_input
+
+
 def test_param_dot_commands(solite_kernel):
     k = solite_kernel
 

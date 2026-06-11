@@ -6,10 +6,10 @@
 use anyhow::{Context as _, Result};
 use jupyter_protocol::{
     CodeMirrorMode, CommInfoReply, CompleteReply, ConnectionInfo, DisplayData, ErrorOutput,
-    ExecuteReply, ExecutionCount, HelpLink, HistoryReply, InspectReply, InterruptReply,
-    IsCompleteReply, IsCompleteReplyStatus, JupyterMessage, JupyterMessageContent,
-    KernelInfoReply, LanguageInfo, Media, MediaType, ReplyError, ReplyStatus, ShutdownReply,
-    Status,
+    ExecuteInput, ExecuteReply, ExecutionCount, HelpLink, HistoryReply, InspectReply,
+    InterruptReply, IsCompleteReply, IsCompleteReplyStatus, JupyterMessage,
+    JupyterMessageContent, KernelInfoReply, LanguageInfo, Media, MediaType, ReplyError,
+    ReplyStatus, ShutdownReply, Status,
 };
 
 /// Messages sent from the runtime task back to the shell handler.
@@ -127,9 +127,14 @@ impl SoliteKernel {
                     } => (code, parent, response),
                 };
 
-                // Debugging mode: prefix code with @@ to see message details
-                if code.starts_with("@@") {
-                    let r = format!("{}\n{:?}", parent.metadata["cellId"], parent);
+                // Debugging backdoor: with SOLITE_KERNEL_DEBUG set, prefix a
+                // cell with @@ to dump the raw execute_request message.
+                if code.starts_with("@@") && std::env::var_os("SOLITE_KERNEL_DEBUG").is_some() {
+                    let cell_id = parent
+                        .metadata
+                        .get("cellId")
+                        .unwrap_or(&serde_json::Value::Null);
+                    let r = format!("{}\n{:?}", cell_id, parent);
                     let _ = response
                         .send(ExecutionMessage::Display(
                             DisplayData::new(vec![MediaType::Plain(r)].into())
@@ -292,7 +297,6 @@ impl SoliteKernel {
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         Ok(error_info)
     }
 
@@ -325,8 +329,20 @@ impl SoliteKernel {
                 shell.send(reply).await?;
             }
 
-            JupyterMessageContent::ExecuteRequest(_) => {
+            JupyterMessageContent::ExecuteRequest(req) => {
                 let execution_count = self.one_up_execution_count();
+
+                // Broadcast what is about to run, so other attached clients
+                // see it and the cell's In[n] counter updates promptly.
+                self.iopub
+                    .send(
+                        ExecuteInput {
+                            code: req.code.clone(),
+                            execution_count,
+                        }
+                        .as_child_of(parent),
+                    )
+                    .await?;
 
                 // Execute code first, then send reply with appropriate status
                 let (status, error) = match self.execute(parent).await {

@@ -266,13 +266,34 @@ fn load_table_for_copy(
     Ok((data, truncated))
 }
 
+/// Escape a string for use as a TSV field: embedded tabs and newlines would
+/// silently shift columns/rows in the pasted output, so render them as
+/// visible `\t`/`\n`/`\r` escapes instead.
+fn tsv_escape(s: String) -> String {
+    if s.contains(['\t', '\n', '\r']) {
+        s.replace('\t', "\\t").replace('\n', "\\n").replace('\r', "\\r")
+    } else {
+        s
+    }
+}
+
 /// Generate TSV (header + rows) for the given data.
 fn data_to_tsv(data: &Data) -> String {
-    let header = data.columns.join("\t");
+    let header = data
+        .columns
+        .iter()
+        .map(|c| tsv_escape(c.clone()))
+        .collect::<Vec<_>>()
+        .join("\t");
     let rows: Vec<String> = data
         .rows
         .iter()
-        .map(|row| row.iter().map(value_to_string).collect::<Vec<_>>().join("\t"))
+        .map(|row| {
+            row.iter()
+                .map(|v| tsv_escape(value_to_string(v)))
+                .collect::<Vec<_>>()
+                .join("\t")
+        })
         .collect();
     format!("{}\n{}", header, rows.join("\n"))
 }
@@ -283,7 +304,13 @@ fn data_to_inserts(table_name: &str, data: &Data) -> String {
         return format!("-- No data in table \"{}\"", table_name);
     }
 
-    let cols = data.columns.join("\", \"");
+    // Double-quote escaping for identifiers, same idiom as the table name.
+    let cols = data
+        .columns
+        .iter()
+        .map(|c| c.replace('"', "\"\""))
+        .collect::<Vec<_>>()
+        .join("\", \"");
     data.rows
         .iter()
         .map(|row| {
@@ -294,6 +321,9 @@ fn data_to_inserts(table_name: &str, data: &Data) -> String {
                     OwnedValue::Integer(i) => i.to_string(),
                     OwnedValue::Double(f) => f.to_string(),
                     OwnedValue::Text(s) => {
+                        // Single-quote doubling is the correct SQL escaping.
+                        // Invalid UTF-8 in TEXT values is silently replaced by
+                        // from_utf8_lossy; BLOBs round-trip exactly via hex.
                         let text = String::from_utf8_lossy(s);
                         format!("'{}'", text.replace('\'', "''"))
                     }
@@ -454,7 +484,7 @@ impl<'a> TablePage<'a> {
     fn row_to_tsv(&self, row_idx: usize) -> String {
         self.data.rows[row_idx]
             .iter()
-            .map(value_to_string)
+            .map(|v| tsv_escape(value_to_string(v)))
             .collect::<Vec<_>>()
             .join("\t")
     }
@@ -981,6 +1011,34 @@ mod tests {
         let (data, truncated) = load_table_for_copy(&runtime, "nums", None, 30).unwrap();
         assert!(truncated);
         assert_eq!(data.rows.len(), 30);
+    }
+
+    #[test]
+    fn test_inserts_escape_quoted_column_names() {
+        let data = Data {
+            columns: vec!["a\"b".to_owned(), "plain".to_owned()],
+            rows: vec![vec![OwnedValue::Integer(1), OwnedValue::Text(b"x".to_vec())]],
+        };
+        let inserts = data_to_inserts("t", &data);
+        assert_eq!(inserts, "INSERT INTO \"t\" (\"a\"\"b\", \"plain\") VALUES (1, 'x');");
+    }
+
+    #[test]
+    fn test_tsv_escapes_tabs_and_newlines() {
+        let data = Data {
+            columns: vec!["col\ta".to_owned(), "b".to_owned()],
+            rows: vec![vec![
+                OwnedValue::Text(b"has\ttab".to_vec()),
+                OwnedValue::Text(b"has\nnewline\rcr".to_vec()),
+            ]],
+        };
+        let tsv = data_to_tsv(&data);
+        let lines: Vec<&str> = tsv.lines().collect();
+        // One header line + one row line: embedded newlines never split rows
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "col\\ta\tb");
+        // Each line has exactly one (separator) tab: embedded tabs are escaped
+        assert_eq!(lines[1], "has\\ttab\thas\\nnewline\\rcr");
     }
 
     #[test]

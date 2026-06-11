@@ -64,6 +64,33 @@ pub fn get_primary_keys(runtime: &Runtime, table_name: &str) -> Vec<PrimaryKeyIn
     pks
 }
 
+/// Serialize a row as a JSON object string.
+///
+/// Built with serde_json so control characters, quotes, and column names are
+/// all escaped correctly. Deliberate choices:
+/// - non-finite doubles (NaN/±inf) are not representable in JSON and
+///   serialize as `null` (serde_json's behavior for `Number::from_f64`)
+/// - blobs serialize as a `"<blob N bytes>"` placeholder string
+/// - invalid UTF-8 in text values is replaced via `from_utf8_lossy`
+fn row_to_json(columns: &[String], values: &[OwnedValue]) -> String {
+    let mut map = serde_json::Map::new();
+    for (col, val) in columns.iter().zip(values.iter()) {
+        let json_value = match val {
+            OwnedValue::Null => serde_json::Value::Null,
+            OwnedValue::Integer(i) => serde_json::Value::from(*i),
+            OwnedValue::Double(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            OwnedValue::Text(s) => {
+                serde_json::Value::String(String::from_utf8_lossy(s).into_owned())
+            }
+            OwnedValue::Blob(b) => serde_json::Value::String(format!("<blob {} bytes>", b.len())),
+        };
+        map.insert(col.clone(), json_value);
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
 pub struct RowPage {
     pub theme: TuiTheme,
     pub table_name: String,
@@ -187,24 +214,7 @@ impl RowPage {
 
     /// Copy the entire row as JSON
     fn copy_as_json(&mut self) {
-        let mut json = String::from("{");
-        for (i, (col, val)) in self.columns.iter().zip(self.values.iter()).enumerate() {
-            if i > 0 {
-                json.push_str(", ");
-            }
-            let val_str = match val {
-                OwnedValue::Null => "null".to_owned(),
-                OwnedValue::Integer(i) => i.to_string(),
-                OwnedValue::Double(f) => f.to_string(),
-                OwnedValue::Text(s) => {
-                    let text = String::from_utf8_lossy(s);
-                    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
-                }
-                OwnedValue::Blob(b) => format!("\"<blob {} bytes>\"", b.len()),
-            };
-            json.push_str(&format!("\"{}\": {}", col, val_str));
-        }
-        json.push('}');
+        let json = row_to_json(&self.columns, &self.values);
 
         match copy_to_clipboard(&json) {
             Ok(()) => {
@@ -389,5 +399,66 @@ impl RowPage {
             .separator()
             .item("q", " back")
             .render(frame, help_rect);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cols(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_row_to_json_escapes_control_chars_and_quotes() {
+        let columns = cols(&["msg", "quoted"]);
+        let values = vec![
+            OwnedValue::Text(b"line1\nline2\ttabbed".to_vec()),
+            OwnedValue::Text(b"say \"hi\"".to_vec()),
+        ];
+        let json = row_to_json(&columns, &values);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["msg"], "line1\nline2\ttabbed");
+        assert_eq!(parsed["quoted"], "say \"hi\"");
+    }
+
+    #[test]
+    fn test_row_to_json_escapes_column_names() {
+        let columns = cols(&["say \"hi\"", "new\nline"]);
+        let values = vec![OwnedValue::Integer(1), OwnedValue::Integer(2)];
+        let json = row_to_json(&columns, &values);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["say \"hi\""], 1);
+        assert_eq!(parsed["new\nline"], 2);
+    }
+
+    #[test]
+    fn test_row_to_json_nonfinite_doubles_are_null() {
+        let columns = cols(&["nan", "inf", "neg_inf", "finite"]);
+        let values = vec![
+            OwnedValue::Double(f64::NAN),
+            OwnedValue::Double(f64::INFINITY),
+            OwnedValue::Double(f64::NEG_INFINITY),
+            OwnedValue::Double(1.5),
+        ];
+        let json = row_to_json(&columns, &values);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["nan"].is_null());
+        assert!(parsed["inf"].is_null());
+        assert!(parsed["neg_inf"].is_null());
+        assert_eq!(parsed["finite"], 1.5);
+    }
+
+    #[test]
+    fn test_row_to_json_null_blob_and_order() {
+        let columns = cols(&["z", "a"]);
+        let values = vec![OwnedValue::Null, OwnedValue::Blob(vec![0; 16])];
+        let json = row_to_json(&columns, &values);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["z"].is_null());
+        assert_eq!(parsed["a"], "<blob 16 bytes>");
+        // serde_json's preserve_order feature keeps column order
+        assert_eq!(json, r#"{"z":null,"a":"<blob 16 bytes>"}"#);
     }
 }

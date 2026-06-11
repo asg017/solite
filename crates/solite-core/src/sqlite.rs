@@ -1690,30 +1690,209 @@ mod tests {
         assert!(input_complete(".vl bar\nselect 1;"));
     }
 
-    /// TODO: why does tihs panic?
-    #[ignore]
+    /// Was `#[ignore]`d with "TODO: why does tihs panic?" — the panic
+    /// predated this workstream's expanded_sql/bind reworks and no longer
+    /// reproduces.
     #[test]
-    fn test_connnection() {
+    fn test_connection() {
         let connection = Connection::open_in_memory().unwrap();
         assert!(!connection.is_interrupted());
 
         let (rest, stmt) = connection.prepare("select :p").unwrap();
         assert_eq!(rest, None);
-        let stmt = stmt.unwrap();
+        let mut stmt = stmt.unwrap();
         assert_eq!(stmt.expanded_sql().unwrap(), "select NULL");
 
-        /*assert!(matches!(
-            stmt.next().unwrap().unwrap().get(0).unwrap(),
+        assert!(matches!(
+            stmt.next().unwrap().unwrap().first().unwrap().value,
             ValueRefXValue::Null
-        ));*/
+        ));
 
         stmt.reset();
         stmt.bind_int64(1, 100).unwrap();
         assert_eq!(stmt.expanded_sql().unwrap(), "select 100");
-        /*assert!(matches!(
-            stmt.next().unwrap().unwrap().get(0).unwrap(),
-            ValueRefXValue::Int(_)
-        ));*/
+        assert!(matches!(
+            stmt.next().unwrap().unwrap().first().unwrap().value,
+            ValueRefXValue::Int(100)
+        ));
+    }
+
+    #[test]
+    fn test_escape_string() {
+        assert_eq!(escape_string("abc"), "'abc'");
+        assert_eq!(escape_string(""), "''");
+        assert_eq!(escape_string("it's"), "'it''s'");
+        assert_eq!(escape_string("a''b"), "'a''''b'");
+    }
+
+    #[test]
+    fn test_owned_value_round_trip() {
+        let conn = Connection::open_in_memory().unwrap();
+        let (_, stmt) = conn.prepare("select null, 1, 1.5, 'txt', x'0102'").unwrap();
+        let mut stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        let owned: Vec<OwnedValue> = row.iter().map(OwnedValue::from_value_ref).collect();
+        assert!(matches!(owned[0], OwnedValue::Null));
+        assert!(matches!(owned[1], OwnedValue::Integer(1)));
+        assert!(matches!(owned[2], OwnedValue::Double(v) if v == 1.5));
+        assert!(matches!(&owned[3], OwnedValue::Text(v) if v == b"txt"));
+        assert!(matches!(&owned[4], OwnedValue::Blob(v) if v == &[1u8, 2]));
+    }
+
+    #[test]
+    fn test_value_subtype() {
+        let conn = Connection::open_in_memory().unwrap();
+        let (_, stmt) = conn.prepare("select json('{}'), 'plain'").unwrap();
+        let mut stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(row[0].subtype(), Some(JSON_SUBTYPE));
+        assert_eq!(row[1].subtype(), None);
+    }
+
+    fn sample_query_result() -> crate::rpc::QueryResult {
+        let column = |name: &str| ColumnMeta {
+            name: name.to_string(),
+            origin_database: None,
+            origin_table: None,
+            origin_column: None,
+            decltype: None,
+            nullable: None,
+        };
+        crate::rpc::QueryResult {
+            sql: "select a".to_string(),
+            columns: vec![column("a")],
+            rows: vec![
+                vec![crate::rpc::WireValue {
+                    value: OwnedValue::Integer(1),
+                    subtype: None,
+                }],
+                vec![crate::rpc::WireValue {
+                    value: OwnedValue::Text(b"two".to_vec()),
+                    subtype: None,
+                }],
+            ],
+            readonly: true,
+            is_explain: None,
+        }
+    }
+
+    #[test]
+    fn test_buffered_statement() {
+        let (rest, stmt) = buffered_statement(sample_query_result());
+        assert_eq!(rest, None);
+        let mut stmt = stmt.unwrap();
+
+        assert_eq!(stmt.sql(), "select a");
+        assert!(stmt.readonly());
+        assert_eq!(stmt.column_names().unwrap(), vec!["a"]);
+        assert_eq!(stmt.column_meta()[0].name, "a");
+
+        // next() walks the materialized rows, reset() rewinds the cursor
+        assert_eq!(stmt.next().unwrap().unwrap()[0].as_int64(), 1);
+        assert_eq!(stmt.next().unwrap().unwrap()[0].as_str(), "two");
+        assert!(stmt.next().unwrap().is_none());
+        stmt.reset();
+        assert_eq!(stmt.next().unwrap().unwrap()[0].as_int64(), 1);
+
+        // nextx() has no raw statement pointer to wrap
+        let err = match stmt.nextx() {
+            Err(e) => e,
+            Ok(_) => panic!("expected UNSUPPORTED error"),
+        };
+        assert_eq!(err.code_description, "UNSUPPORTED");
+
+        // execute() reports the materialized row count
+        assert_eq!(stmt.execute().unwrap(), 2);
+
+        // an empty result means nothing was prepared
+        let empty = crate::rpc::QueryResult {
+            sql: String::new(),
+            columns: vec![],
+            rows: vec![],
+            readonly: true,
+            is_explain: None,
+        };
+        assert!(buffered_statement(empty).1.is_none());
+    }
+
+    #[test]
+    fn test_prepare_error_offset() {
+        let conn = Connection::open_in_memory().unwrap();
+        // "no such column" errors carry a byte offset pointing at the token
+        // ("no such table" ones don't)
+        let sql = "select nope";
+        let err = conn.prepare(sql).unwrap_err();
+        assert_ne!(err.result_code, 0);
+        assert!(!err.message.is_empty());
+        let offset = err.offset.unwrap();
+        assert_eq!(&sql[offset..], "nope");
+
+        let err = conn.prepare("select * from nowhere").unwrap_err();
+        assert_eq!(err.offset, None);
+        assert_eq!(err.message, "no such table: nowhere");
+    }
+
+    #[test]
+    fn test_prepare_comment_only() {
+        let conn = Connection::open_in_memory().unwrap();
+        let (rest, stmt) = conn.prepare("-- nothing here").unwrap();
+        assert_eq!(rest, None);
+        assert!(stmt.is_none());
+    }
+
+    #[test]
+    fn test_interrupt_handle() {
+        let conn = Connection::open_in_memory().unwrap();
+        let handle = conn.interrupt_handle();
+        let h = handle.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            h.interrupt();
+        });
+        let (_, stmt) = conn
+            .prepare(
+                "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 1000000000) SELECT count(*) FROM c",
+            )
+            .unwrap();
+        let err = stmt.unwrap().execute().unwrap_err();
+        assert_eq!(err.result_code, SQLITE_INTERRUPT);
+        t.join().unwrap();
+
+        // handle outliving the connection is a no-op, not a crash
+        drop(conn);
+        handle.interrupt();
+    }
+
+    #[test]
+    fn test_in_transaction() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(!conn.in_transaction());
+        conn.execute_script("BEGIN").unwrap();
+        assert!(conn.in_transaction());
+        conn.execute_script("COMMIT").unwrap();
+        assert!(!conn.in_transaction());
+    }
+
+    #[test]
+    fn test_serialize_header() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_script("CREATE TABLE t(a); INSERT INTO t VALUES (1)")
+            .unwrap();
+        let bytes = conn.serialize().unwrap();
+        assert!(bytes.starts_with(b"SQLite format 3\0"));
+    }
+
+    #[test]
+    fn test_host_separator_edge_cases() {
+        assert_eq!(host_separator("host:/path"), Some(4));
+        assert_eq!(host_separator("user@host:/path"), Some(9));
+        assert_eq!(host_separator("a:b"), None); // path must start with /
+        assert_eq!(host_separator(":/x"), None); // empty host
+        assert_eq!(host_separator("a/b:/x"), None); // slash before colon = local
+        assert_eq!(host_separator("a\\b:/x"), None); // backslash before colon
+        // scp semantics: on unix, `C:/x` is host `C`, absolute path `/x`
+        #[cfg(not(windows))]
+        assert_eq!(host_separator("C:/x"), Some(1));
     }
     #[test]
     fn test_remote_transport_connect_failure() {

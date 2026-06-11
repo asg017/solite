@@ -142,7 +142,8 @@ pub fn highlight_sql(sql: &str) -> String {
     let mut iter = tokens.iter().peekable();
     let mut prevs: Vec<&Token> = vec![];
     let mut prev_end = 0usize;
-    let theme = CTP_MOCHA_THEME.clone();
+    // LazyLock'd precisely so per-keystroke calls can share it — don't clone.
+    let theme: &SqlTheme = &CTP_MOCHA_THEME;
 
     while let Some(token) = iter.next() {
         // Emit any whitespace/characters between tokens as plain text
@@ -234,15 +235,31 @@ pub fn highlight_sql(sql: &str) -> String {
     }
     hl
 }
+/// Style the leading `.command` token of a dot-command line, leaving
+/// arguments untouched. Only known command names are styled, so an unknown
+/// command reads as unrecognized while typing.
+///
+/// Command names come from `DOT_COMMAND_NAMES` (shared with tab completion);
+/// ticket 07 derives that list from the canonical help registry.
 pub fn highlight_dot(copy: &mut String) {
-    let keywords = ["load", "tables", "open", "export"];
-    for kw in keywords.iter() {
-        if let Some(s) = copy.find(kw) {
-            copy.replace_range(
-                s..s + kw.len(),
-                CTP_MOCHA_THEME.style_dot(kw).as_str(),
-            );
-        }
+    let Some(rest) = copy.strip_prefix('.') else {
+        return;
+    };
+    // The command word spans from after the `.` to the first whitespace.
+    let end = rest
+        .find(char::is_whitespace)
+        .map(|idx| idx + 1)
+        .unwrap_or(copy.len());
+    let word = &copy[1..end];
+    if word.is_empty() {
+        return;
+    }
+    if super::completer::DOT_COMMAND_NAMES
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(word))
+    {
+        let styled = CTP_MOCHA_THEME.style_dot(word);
+        copy.replace_range(1..end, styled.as_str());
     }
 }
 
@@ -305,6 +322,72 @@ mod tests {
     fn strip_ansi(s: &str) -> String {
         let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
         re.replace_all(s, "").to_string()
+    }
+
+    fn highlight_dot_str(input: &str) -> String {
+        let mut copy = input.to_owned();
+        highlight_dot(&mut copy);
+        copy
+    }
+
+    #[test]
+    fn test_highlight_dot_preserves_text() {
+        // ANSI-stripped output must always equal the input
+        let inputs = [
+            ".open download.db",
+            ".print loading...",
+            ".sh cat tables.txt",
+            ".tables",
+            ".export out.csv",
+            ".unknowncommand args",
+            ".",
+            ". leading space",
+            ".timer on",
+        ];
+        for input in inputs {
+            let highlighted = highlight_dot_str(input);
+            assert_eq!(
+                strip_ansi(&highlighted),
+                input,
+                "text not preserved for {:?}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn test_highlight_dot_styles_only_command_token() {
+        // `.open download.db`: only `open` is styled; the argument is
+        // untouched (previously `load` inside `download.db` got styled).
+        let highlighted = highlight_dot_str(".open download.db");
+        assert!(
+            highlighted.contains(" download.db"),
+            "argument was mangled: {:?}",
+            highlighted
+        );
+        assert!(highlighted.contains("\x1b["), "command token not styled");
+        let styled_token = CTP_MOCHA_THEME.style_dot("open");
+        assert!(highlighted.contains(styled_token.as_str()));
+    }
+
+    #[test]
+    fn test_highlight_dot_styles_all_known_commands() {
+        for name in crate::commands::repl::completer::DOT_COMMAND_NAMES {
+            let line = format!(".{name} arg");
+            let highlighted = highlight_dot_str(&line);
+            assert!(
+                highlighted.contains("\x1b["),
+                "command {:?} not styled",
+                name
+            );
+            assert_eq!(strip_ansi(&highlighted), line);
+        }
+    }
+
+    #[test]
+    fn test_highlight_dot_unknown_command_unstyled() {
+        let highlighted = highlight_dot_str(".nope args");
+        assert_eq!(highlighted, ".nope args");
     }
 
     #[test]

@@ -58,9 +58,9 @@ impl SQLiteError {
         }
     }
 
-    /// An error synthesized by this crate rather than reported by a SQLite API
-    /// call (e.g. input that cannot cross the FFI boundary).
-    pub(crate) fn custom(result_code: i32, message: String) -> Self {
+    /// An error synthesized by this crate with a real SQLite result code
+    /// (e.g. input that cannot cross the FFI boundary).
+    pub(crate) fn from_code(result_code: i32, message: String) -> Self {
         let code_description = unsafe {
             CStr::from_ptr(sqlite3_errstr(result_code))
                 .to_string_lossy()
@@ -74,8 +74,19 @@ impl SQLiteError {
         }
     }
 
+    /// An error from outside SQLite itself (remote transport, RPC protocol,
+    /// unsupported operations); `result_code` is -1.
+    pub(crate) fn custom(code_description: &str, message: impl Into<String>) -> Self {
+        Self {
+            result_code: -1,
+            code_description: code_description.to_string(),
+            message: message.into(),
+            offset: None,
+        }
+    }
+
     pub(crate) fn interior_nul(what: &str) -> Self {
-        Self::custom(SQLITE_MISUSE, format!("{what} contains an interior NUL byte"))
+        Self::from_code(SQLITE_MISUSE, format!("{what} contains an interior NUL byte"))
     }
 }
 
@@ -493,13 +504,10 @@ impl Statement {
             StatementInner::Buffered { .. } => {
                 // nextx returns a Row that wraps a raw pointer — not compatible with buffered.
                 // Callers should use next() for buffered statements.
-                Err(SQLiteError {
-                    result_code: -1,
-                    code_description: "UNSUPPORTED".to_string(),
-                    message: "nextx() is not supported on buffered statements. Use next() instead."
-                        .to_string(),
-                    offset: None,
-                })
+                Err(SQLiteError::custom(
+                    "UNSUPPORTED",
+                    "nextx() is not supported on buffered statements. Use next() instead.",
+                ))
             }
         }
     }
@@ -707,7 +715,7 @@ pub unsafe fn bytecode_steps(pstmt: *mut sqlite3_stmt) -> Result<Vec<BytecodeSte
         )? {
             (_, Some(stmt)) => stmt,
             (_, None) => {
-                return Err(SQLiteError::custom(
+                return Err(SQLiteError::from_code(
                     SQLITE_ERROR,
                     "bytecode query prepared to no statement".to_string(),
                 ))
@@ -743,21 +751,65 @@ pub struct RemoteTransport {
 unsafe impl std::marker::Send for RemoteTransport {}
 
 impl RemoteTransport {
+    /// Take the child's pipes and verify the connection with a ping request.
+    /// Catches transport failures (bad hostname, auth rejected, remote binary
+    /// not found). `error_label` becomes the error's code description
+    /// (e.g. "SSH_ERROR", "TRANSPORT_ERROR").
+    fn connect(mut child: std::process::Child, error_label: &str) -> Result<Self, SQLiteError> {
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+
+        let mut transport = RemoteTransport {
+            child,
+            reader: std::io::BufReader::new(stdout),
+            writer: std::io::BufWriter::new(stdin),
+        };
+
+        match transport.send_request(&crate::rpc::Request::InTransaction) {
+            Ok(crate::rpc::Response::InTransaction { .. }) => Ok(transport),
+            Ok(other) => {
+                // Wait for the child to finish so we don't leave zombies
+                let _ = transport.child.wait();
+                Err(SQLiteError::custom(
+                    error_label,
+                    format!("Unexpected response from remote: {:?}", other),
+                ))
+            }
+            Err(e) => {
+                let _ = transport.child.wait();
+                Err(SQLiteError::custom(
+                    error_label,
+                    format!("Failed to connect to remote database: {}", e.message),
+                ))
+            }
+        }
+    }
+
     fn send_request(&mut self, request: &crate::rpc::Request) -> Result<crate::rpc::Response, SQLiteError> {
-        crate::rpc::write_frame(&mut self.writer, request)
-            .map_err(|e| SQLiteError {
-                result_code: -1,
-                code_description: "IO_ERROR".to_string(),
-                message: format!("Failed to send request to remote: {}", e),
-                offset: None,
-            })?;
-        crate::rpc::read_frame(&mut self.reader)
-            .map_err(|e| SQLiteError {
-                result_code: -1,
-                code_description: "IO_ERROR".to_string(),
-                message: format!("Failed to read response from remote: {}", e),
-                offset: None,
-            })
+        crate::rpc::write_frame(&mut self.writer, request).map_err(|e| {
+            SQLiteError::custom("IO_ERROR", format!("Failed to send request to remote: {}", e))
+        })?;
+        crate::rpc::read_frame(&mut self.reader).map_err(|e| {
+            SQLiteError::custom("IO_ERROR", format!("Failed to read response from remote: {}", e))
+        })
+    }
+}
+
+/// Map a remote query result to `prepare()`'s return shape: an empty result
+/// (no columns, no rows) means there was nothing to prepare.
+fn buffered_statement(result: crate::rpc::QueryResult) -> (Option<usize>, Option<Statement>) {
+    if result.columns.is_empty() && result.rows.is_empty() {
+        (None, None)
+    } else {
+        (
+            None,
+            Some(Statement {
+                inner: StatementInner::Buffered {
+                    result,
+                    cursor: std::cell::Cell::new(0),
+                },
+            }),
+        )
     }
 }
 
@@ -865,7 +917,7 @@ impl Connection {
     fn open_with_flags(path: &str, flags: i32) -> Result<Self, SQLiteError> {
         let mut connection: *mut sqlite3 = ptr::null_mut();
         let filename = CString::new(path)
-            .map_err(|_| SQLiteError::custom(SQLITE_CANTOPEN, format!("database path contains an interior NUL byte: {path:?}")))?;
+            .map_err(|_| SQLiteError::from_code(SQLITE_CANTOPEN, format!("database path contains an interior NUL byte: {path:?}")))?;
         let rc =
             unsafe { sqlite3_open_v2(filename.as_ptr(), &mut connection, flags, ptr::null_mut()) };
         if rc == SQLITE_OK {
@@ -912,12 +964,8 @@ impl Connection {
     }
 
     pub fn open_remote_with_bin(url: &str, remote_bin: Option<&str>) -> Result<Self, SQLiteError> {
-        let (user, host, port, db_path) = parse_remote_path(url).map_err(|msg| SQLiteError {
-            result_code: -1,
-            code_description: "SSH_ERROR".to_string(),
-            message: msg,
-            offset: None,
-        })?;
+        let (user, host, port, db_path) = parse_remote_path(url)
+            .map_err(|msg| SQLiteError::custom("SSH_ERROR", msg))?;
 
         let mut cmd = std::process::Command::new("ssh");
         if let Some(port) = port {
@@ -936,48 +984,11 @@ impl Connection {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit());
 
-        let mut child = cmd.spawn().map_err(|e| SQLiteError {
-            result_code: -1,
-            code_description: "SSH_ERROR".to_string(),
-            message: format!("Failed to spawn ssh: {}", e),
-            offset: None,
+        let child = cmd.spawn().map_err(|e| {
+            SQLiteError::custom("SSH_ERROR", format!("Failed to spawn ssh: {}", e))
         })?;
 
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-
-        let mut transport = RemoteTransport {
-            child,
-            reader: std::io::BufReader::new(stdout),
-            writer: std::io::BufWriter::new(stdin),
-        };
-
-        // Verify the connection works by sending a ping request.
-        // This catches SSH failures (bad hostname, auth rejected, remote binary not found).
-        let response = transport.send_request(&crate::rpc::Request::InTransaction);
-        match response {
-            Ok(crate::rpc::Response::InTransaction { .. }) => {}
-            Ok(other) => {
-                let _ = transport.child.wait();
-                return Err(SQLiteError {
-                    result_code: -1,
-                    code_description: "SSH_ERROR".to_string(),
-                    message: format!("Unexpected response from remote: {:?}", other),
-                    offset: None,
-                });
-            }
-            Err(e) => {
-                // Wait for the child to finish so we don't leave zombies
-                let _ = transport.child.wait();
-                return Err(SQLiteError {
-                    result_code: -1,
-                    code_description: "SSH_ERROR".to_string(),
-                    message: format!("Failed to connect to remote database: {}", e.message),
-                    offset: None,
-                });
-            }
-        }
-
+        let transport = RemoteTransport::connect(child, "SSH_ERROR")?;
         Ok(Connection::from_remote(transport))
     }
 
@@ -989,52 +1000,21 @@ impl Connection {
         let bin = remote_bin.unwrap_or("solite");
         let full_cmd = format!("{} {} serve {}", transport_cmd, bin, db_path);
 
-        let mut child = std::process::Command::new("sh")
+        let child = std::process::Command::new("sh")
             .arg("-c")
             .arg(&full_cmd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
             .spawn()
-            .map_err(|e| SQLiteError {
-                result_code: -1,
-                code_description: "TRANSPORT_ERROR".to_string(),
-                message: format!("Failed to spawn transport '{}': {}", full_cmd, e),
-                offset: None,
+            .map_err(|e| {
+                SQLiteError::custom(
+                    "TRANSPORT_ERROR",
+                    format!("Failed to spawn transport '{}': {}", full_cmd, e),
+                )
             })?;
 
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-
-        let mut transport = RemoteTransport {
-            child,
-            reader: std::io::BufReader::new(stdout),
-            writer: std::io::BufWriter::new(stdin),
-        };
-
-        let response = transport.send_request(&crate::rpc::Request::InTransaction);
-        match response {
-            Ok(crate::rpc::Response::InTransaction { .. }) => {}
-            Ok(other) => {
-                let _ = transport.child.wait();
-                return Err(SQLiteError {
-                    result_code: -1,
-                    code_description: "TRANSPORT_ERROR".to_string(),
-                    message: format!("Unexpected response from remote: {:?}", other),
-                    offset: None,
-                });
-            }
-            Err(e) => {
-                let _ = transport.child.wait();
-                return Err(SQLiteError {
-                    result_code: -1,
-                    code_description: "TRANSPORT_ERROR".to_string(),
-                    message: format!("Failed to connect via transport: {}", e.message),
-                    offset: None,
-                });
-            }
-        }
-
+        let transport = RemoteTransport::connect(child, "TRANSPORT_ERROR")?;
         Ok(Connection::from_remote(transport))
     }
 
@@ -1143,12 +1123,10 @@ impl Connection {
                 match response {
                     crate::rpc::Response::ScriptOk => Ok(()),
                     crate::rpc::Response::Error(e) => Err(e),
-                    other => Err(SQLiteError {
-                        result_code: -1,
-                        code_description: "PROTOCOL_ERROR".to_string(),
-                        message: format!("Unexpected response: {:?}", other),
-                        offset: None,
-                    }),
+                    other => Err(SQLiteError::custom(
+                        "PROTOCOL_ERROR",
+                        format!("Unexpected response: {:?}", other),
+                    )),
                 }
             }
         }
@@ -1230,12 +1208,10 @@ impl Connection {
                 match response {
                     crate::rpc::Response::Serialized { data } => Ok(data),
                     crate::rpc::Response::Error(e) => Err(e),
-                    other => Err(SQLiteError {
-                        result_code: -1,
-                        code_description: "PROTOCOL_ERROR".to_string(),
-                        message: format!("Unexpected response: {:?}", other),
-                        offset: None,
-                    }),
+                    other => Err(SQLiteError::custom(
+                        "PROTOCOL_ERROR",
+                        format!("Unexpected response: {:?}", other),
+                    )),
                 }
             }
         }
@@ -1285,43 +1261,13 @@ impl Connection {
                     Err(unsafe { SQLiteError::from_latest(*connection, rc) })
                 }
             }
-            ConnectionInner::Remote { transport } => {
-                let request = crate::rpc::Request::Query {
-                    sql: sql.to_string(),
-                    params: vec![],
-                };
-                let response = transport.borrow_mut().send_request(&request)?;
-                match response {
-                    crate::rpc::Response::Query(result) => {
-                        if result.columns.is_empty() && result.rows.is_empty() {
-                            Ok((None, None))
-                        } else {
-                            Ok((
-                                None,
-                                Some(Statement {
-                                    inner: StatementInner::Buffered {
-                                        result,
-                                        cursor: std::cell::Cell::new(0),
-                                    },
-                                }),
-                            ))
-                        }
-                    }
-                    crate::rpc::Response::Error(e) => Err(e),
-                    other => Err(SQLiteError {
-                        result_code: -1,
-                        code_description: "PROTOCOL_ERROR".to_string(),
-                        message: format!("Unexpected response: {:?}", other),
-                        offset: None,
-                    }),
-                }
-            }
+            ConnectionInner::Remote { .. } => self.prepare_remote(sql, vec![]),
         }
     }
 
-    /// Prepare and execute a query on a remote connection, returning a buffered statement.
-    /// This is the main entry point for remote SQL execution.
-    /// Prepare and execute a query on a remote connection with parameters, returning a buffered statement.
+    /// Prepare and execute a query on a remote connection with parameters,
+    /// returning a buffered statement. This is the main entry point for remote
+    /// SQL execution. For local connections, delegates to `prepare()`.
     pub fn prepare_remote(&self, sql: &str, params: Vec<(String, OwnedValue)>) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {
         match &self.inner {
             ConnectionInner::Remote { transport } => {
@@ -1331,28 +1277,12 @@ impl Connection {
                 };
                 let response = transport.borrow_mut().send_request(&request)?;
                 match response {
-                    crate::rpc::Response::Query(result) => {
-                        if result.columns.is_empty() && result.rows.is_empty() {
-                            Ok((None, None))
-                        } else {
-                            Ok((
-                                None,
-                                Some(Statement {
-                                    inner: StatementInner::Buffered {
-                                        result,
-                                        cursor: std::cell::Cell::new(0),
-                                    },
-                                }),
-                            ))
-                        }
-                    }
+                    crate::rpc::Response::Query(result) => Ok(buffered_statement(result)),
                     crate::rpc::Response::Error(e) => Err(e),
-                    other => Err(SQLiteError {
-                        result_code: -1,
-                        code_description: "PROTOCOL_ERROR".to_string(),
-                        message: format!("Unexpected response: {:?}", other),
-                        offset: None,
-                    }),
+                    other => Err(SQLiteError::custom(
+                        "PROTOCOL_ERROR",
+                        format!("Unexpected response: {:?}", other),
+                    )),
                 }
             }
             ConnectionInner::Local { .. } => {
@@ -1615,6 +1545,17 @@ mod tests {
             ValueRefXValue::Int(_)
         ));*/
     }
+    #[test]
+    fn test_remote_transport_connect_failure() {
+        // `false` exits immediately, so the handshake ping fails
+        let err = match Connection::open_transport("false", "/tmp/nope.db", None) {
+            Err(e) => e,
+            Ok(_) => panic!("expected connect failure"),
+        };
+        assert_eq!(err.code_description, "TRANSPORT_ERROR");
+        assert!(err.message.contains("Failed to connect"), "{}", err.message);
+    }
+
     #[test]
     fn test_sql_load_extension_disabled() {
         // Extension loading is enabled for the C API only; the SQL

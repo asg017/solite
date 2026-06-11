@@ -190,12 +190,10 @@ impl Runtime {
             || path.as_ref().map_or(false, |p| sqlite::is_remote_path(p));
 
         if is_remote && !allow_ssh {
-            return Err(SQLiteError {
-                result_code: -1,
-                code_description: "SSH_DENIED".to_string(),
-                message: "Remote connections require --allow-ssh flag".to_string(),
-                offset: None,
-            });
+            return Err(SQLiteError::custom(
+                "SSH_DENIED",
+                "Remote connections require --allow-ssh flag",
+            ));
         }
 
         let connection = if let Some(ref transport_cmd) = transport {

@@ -595,8 +595,41 @@ fn inspect(runtime: &Runtime, code: &str, cursor_pos: usize) -> InspectReply {
     }
 }
 
-/// Handle code execution within a cell.
-async fn handle_code(
+/// Render a statement's results and send them as DisplayData, or report a
+/// RenderError. Returns whether rendering succeeded.
+///
+/// Takes the statement by value: `&Statement` is not `Send` (the type is
+/// `Send` but not `Sync`), so holding a reference across the sends would
+/// make the calling futures non-`Send`.
+pub(super) async fn send_statement_result(
+    stmt: solite_core::sqlite::Statement,
+    response: &mpsc::Sender<ExecutionMessage>,
+    parent: &JupyterMessage,
+) -> Result<bool> {
+    match render_statement(&stmt) {
+        Ok(tbl) => {
+            response
+                .send_display(
+                    DisplayData::new(
+                        vec![MediaType::Plain(stmt.sql()), MediaType::Html(tbl.html)].into(),
+                    ),
+                    parent,
+                )
+                .await?;
+            Ok(true)
+        }
+        Err(err) => {
+            response
+                .send_error("RenderError", &format!("{:?}", err))
+                .await?;
+            Ok(false)
+        }
+    }
+}
+
+/// Step the runtime to completion, rendering each step's output. Used for
+/// cell execution and (via the `.run` dot command) for whole-file runs.
+pub(super) async fn handle_code(
     runtime: &mut Runtime,
     response: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
@@ -608,30 +641,13 @@ async fn handle_code(
         *interrupt_handle.lock().unwrap() = runtime.connection.interrupt_handle();
         match runtime.next_stepx() {
             Some(Ok(step)) => match step.result {
-                StepResult::SqlStatement { stmt, .. } => match render_statement(&stmt) {
-                    Ok(tbl) => {
-                        response
-                            .send_display(
-                                DisplayData::new(
-                                    vec![
-                                        MediaType::Plain(stmt.sql()),
-                                        MediaType::Html(tbl.html.unwrap()),
-                                    ]
-                                    .into(),
-                                ),
-                                parent,
-                            )
-                            .await?;
-                    }
-                    Err(err) => {
-                        response
-                            .send_error("RenderError", &format!("{:?}", err))
-                            .await?;
+                StepResult::SqlStatement { stmt, .. } => {
+                    if !send_statement_result(stmt, response, parent).await? {
                         return Ok(());
                     }
-                },
+                }
                 StepResult::DotCommand(cmd) => {
-                    handle_dot_command(cmd, runtime, response, parent).await?;
+                    handle_dot_command(cmd, runtime, response, parent, interrupt_handle).await?;
                 }
                 StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
             },

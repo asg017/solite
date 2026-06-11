@@ -8,7 +8,7 @@ use solite_table::TableConfig;
 pub struct UiResponse {
     #[allow(dead_code)]
     pub text: String,
-    pub html: Option<String>,
+    pub html: String,
 }
 
 /// Render a SQL statement result as both text and HTML.
@@ -33,6 +33,6 @@ pub fn render_statement(stmt: &Statement) -> Result<UiResponse> {
 
     Ok(UiResponse {
         text,
-        html: Some(html_result.output),
+        html: html_result.output,
     })
 }

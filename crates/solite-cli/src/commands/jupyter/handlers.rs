@@ -7,14 +7,16 @@ use anyhow::Result;
 use jupyter_protocol::{DisplayData, JupyterMessage, MediaType};
 use solite_core::{
     dot::{sh::ShellResult, DotCommand, LoadCommandSource},
+    sqlite::InterruptHandle,
     Runtime,
 };
 use std::fmt::Write;
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-use super::kernel::ExecutionMessage;
+use super::kernel::{handle_code, send_statement_result, ExecutionMessage};
 use super::protocol::JupyterSender;
-use super::render::{render_sql_html, render_statement};
+use super::render::render_sql_html;
 
 /// Handle a dot command and send appropriate output to the frontend.
 pub fn handle_dot_command<'a>(
@@ -22,8 +24,15 @@ pub fn handle_dot_command<'a>(
     runtime: &'a mut Runtime,
     sender: &'a mpsc::Sender<ExecutionMessage>,
     parent: &'a JupyterMessage,
+    interrupt_handle: &'a Mutex<InterruptHandle>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
-    Box::pin(handle_dot_command_inner(cmd, runtime, sender, parent))
+    Box::pin(handle_dot_command_inner(
+        cmd,
+        runtime,
+        sender,
+        parent,
+        interrupt_handle,
+    ))
 }
 
 async fn handle_dot_command_inner(
@@ -31,6 +40,7 @@ async fn handle_dot_command_inner(
     runtime: &mut Runtime,
     sender: &mpsc::Sender<ExecutionMessage>,
     parent: &JupyterMessage,
+    interrupt_handle: &Mutex<InterruptHandle>,
 ) -> Result<()> {
     match cmd {
         DotCommand::Ask(_) => {
@@ -302,27 +312,7 @@ async fn handle_dot_command_inner(
                 };
                 match runtime.prepare_with_parameters(&proc.sql) {
                     Ok((_, Some(stmt))) => {
-                        match render_statement(&stmt) {
-                            Ok(tbl) => {
-                                sender
-                                    .send_display(
-                                        DisplayData::new(
-                                            vec![
-                                                MediaType::Plain(stmt.sql()),
-                                                MediaType::Html(tbl.html.unwrap()),
-                                            ]
-                                            .into(),
-                                        ),
-                                        parent,
-                                    )
-                                    .await?;
-                            }
-                            Err(err) => {
-                                sender
-                                    .send_plain(format!("Error: {:?}", err), parent)
-                                    .await?;
-                            }
-                        }
+                        send_statement_result(stmt, sender, parent).await?;
                     }
                     Ok((_, None)) => {
                         sender
@@ -343,47 +333,11 @@ async fn handle_dot_command_inner(
                         return Ok(());
                     }
                 };
-                loop {
-                    match runtime.next_stepx() {
-                        None => break,
-                        Some(Ok(step)) => match step.result {
-                            solite_core::StepResult::SqlStatement { stmt, .. } => {
-                                match render_statement(&stmt) {
-                                    Ok(tbl) => {
-                                        sender
-                                            .send_display(
-                                                DisplayData::new(
-                                                    vec![
-                                                        MediaType::Plain(stmt.sql()),
-                                                        MediaType::Html(tbl.html.unwrap()),
-                                                    ]
-                                                    .into(),
-                                                ),
-                                                parent,
-                                            )
-                                            .await?;
-                                    }
-                                    Err(err) => {
-                                        sender
-                                            .send_plain(format!("Error: {:?}", err), parent)
-                                            .await?;
-                                    }
-                                }
-                            }
-                            solite_core::StepResult::DotCommand(cmd) => {
-                                handle_dot_command(cmd, runtime, sender, parent).await?;
-                            }
-                            solite_core::StepResult::ProcedureDefinition(_) => {}
-                        },
-                        Some(Err(e)) => {
-                            sender
-                                .send_plain(format!("Error in .run file: {}", e), parent)
-                                .await?;
-                            break;
-                        }
-                    }
-                }
+                // run_file_begin swapped in a stack containing only the run
+                // file's block, so the shared stepping loop drains exactly it.
+                let result = handle_code(runtime, sender, parent, interrupt_handle).await;
                 runtime.run_file_end(saved);
+                result?;
             }
         }
         DotCommand::Bench(mut cmd) => {

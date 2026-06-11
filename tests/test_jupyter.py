@@ -73,6 +73,34 @@ def test_complete(solite_kernel):
     assert content["status"] == "ok"
 
 
+def test_run_dot_command(solite_kernel, tmp_path):
+    sql_file = tmp_path / "queries.sql"
+    sql_file.write_text(
+        "create table nums(n int);\n"
+        "insert into nums values (1), (2);\n"
+        "select sum(n) as total from nums;\n"
+    )
+    reply, output_msgs = solite_kernel.execute(f".run {sql_file}")
+    assert reply["content"]["status"] == "ok"
+    htmls = [
+        m["content"]["data"]["text/html"]
+        for m in output_msgs
+        if m["msg_type"] == "display_data" and "text/html" in m["content"]["data"]
+    ]
+    assert any(">3<" in html for html in htmls)
+
+    # a prepare error inside the run file errors the cell, with source context
+    bad_file = tmp_path / "bad.sql"
+    bad_file.write_text("select * from no_such_table;\n")
+    reply, output_msgs = solite_kernel.execute(f".run {bad_file}")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in output_msgs if m["msg_type"] == "error"]
+    assert len(errors) == 1
+    evalue = escape_ansi_codes(errors[0]["content"]["evalue"])
+    assert "no such table: no_such_table" in evalue
+    assert "bad.sql" in evalue
+
+
 def test_inspect(solite_kernel):
     client = solite_kernel.client
 

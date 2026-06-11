@@ -16,6 +16,7 @@ use ratatui::widgets::{Cell, Row, Table, TableState};
 use solite_core::sqlite::OwnedValue;
 use solite_core::Runtime;
 
+#[derive(Debug)]
 pub(crate) struct Data {
     pub(crate) columns: Vec<String>,
     pub(crate) rows: Vec<Vec<OwnedValue>>,
@@ -45,6 +46,11 @@ struct LoadResult {
 /// Configuration for windowed data loading
 const WINDOW_SIZE: usize = 200;
 const PREFETCH_THRESHOLD: usize = 50;
+
+/// Maximum number of rows a full-table copy will put on the clipboard.
+/// Larger tables are truncated (with an honest footer message) — the
+/// clipboard is the wrong channel for huge tables; `.export` exists for that.
+const COPY_ROW_LIMIT: usize = 100_000;
 
 /// Maximum characters to display in a cell before truncating
 const MAX_CELL_DISPLAY_LEN: usize = 200;
@@ -238,6 +244,73 @@ fn load_table_data(
     }
 }
 
+/// Load up to `cap` rows of the whole table (respecting the active sort
+/// order) for a full-table copy. Returns the data plus whether the table was
+/// truncated at `cap`.
+fn load_table_for_copy(
+    runtime: &Runtime,
+    table: &str,
+    order: Option<Order>,
+    cap: usize,
+) -> Result<(Data, bool), String> {
+    // Fetch one extra row so truncation can be detected without a count.
+    let result = load_table_data(runtime, table, order, 0, cap + 1);
+    if let Some(err) = result.error {
+        return Err(err);
+    }
+    let mut data = result.data;
+    let truncated = data.rows.len() > cap;
+    if truncated {
+        data.rows.truncate(cap);
+    }
+    Ok((data, truncated))
+}
+
+/// Generate TSV (header + rows) for the given data.
+fn data_to_tsv(data: &Data) -> String {
+    let header = data.columns.join("\t");
+    let rows: Vec<String> = data
+        .rows
+        .iter()
+        .map(|row| row.iter().map(value_to_string).collect::<Vec<_>>().join("\t"))
+        .collect();
+    format!("{}\n{}", header, rows.join("\n"))
+}
+
+/// Generate INSERT statements for the given data.
+fn data_to_inserts(table_name: &str, data: &Data) -> String {
+    if data.rows.is_empty() {
+        return format!("-- No data in table \"{}\"", table_name);
+    }
+
+    let cols = data.columns.join("\", \"");
+    data.rows
+        .iter()
+        .map(|row| {
+            let values: Vec<String> = row
+                .iter()
+                .map(|v| match v {
+                    OwnedValue::Null => "NULL".to_owned(),
+                    OwnedValue::Integer(i) => i.to_string(),
+                    OwnedValue::Double(f) => f.to_string(),
+                    OwnedValue::Text(s) => {
+                        let text = String::from_utf8_lossy(s);
+                        format!("'{}'", text.replace('\'', "''"))
+                    }
+                    OwnedValue::Blob(b) => format!("X'{}'", hex::encode(b)),
+                })
+                .collect();
+            format!(
+                "INSERT INTO \"{}\" (\"{}\") VALUES ({});",
+                table_name.replace('"', "\"\""),
+                cols,
+                values.join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub struct TablePage<'a> {
     runtime: &'a Runtime,
     pub(crate) theme: TuiTheme,
@@ -386,67 +459,42 @@ impl<'a> TablePage<'a> {
             .join("\t")
     }
 
-    /// Generate TSV for the entire table
-    fn table_to_tsv(&self) -> String {
-        let header = self.data.columns.join("\t");
-        let rows: Vec<String> = self
-            .data
-            .rows
-            .iter()
-            .map(|row| row.iter().map(value_to_string).collect::<Vec<_>>().join("\t"))
-            .collect();
-        format!("{}\n{}", header, rows.join("\n"))
-    }
-
     /// Generate a SELECT statement for this table
     fn generate_select(&self) -> String {
         format!("SELECT * FROM \"{}\";", self.table_name.replace('"', "\"\""))
     }
 
-    /// Generate INSERT statements for the data
-    fn generate_inserts(&self) -> String {
-        if self.data.rows.is_empty() {
-            return format!("-- No data in table \"{}\"", self.table_name);
-        }
-
-        let cols = self.data.columns.join("\", \"");
-        self.data
-            .rows
-            .iter()
-            .map(|row| {
-                let values: Vec<String> = row
-                    .iter()
-                    .map(|v| match v {
-                        OwnedValue::Null => "NULL".to_owned(),
-                        OwnedValue::Integer(i) => i.to_string(),
-                        OwnedValue::Double(f) => f.to_string(),
-                        OwnedValue::Text(s) => {
-                            let text = String::from_utf8_lossy(s);
-                            format!("'{}'", text.replace('\'', "''"))
-                        }
-                        OwnedValue::Blob(b) => format!("X'{}'", hex::encode(b)),
-                    })
-                    .collect();
-                format!(
-                    "INSERT INTO \"{}\" (\"{}\") VALUES ({});",
-                    self.table_name.replace('"', "\"\""),
-                    cols,
-                    values.join(", ")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+    /// Load the full table (up to COPY_ROW_LIMIT rows, respecting the active
+    /// sort) for a whole-table copy. Returns the data plus the success
+    /// message describing what was copied.
+    fn load_for_full_copy(&self, what: &str) -> Result<(Data, String), String> {
+        let (data, truncated) = load_table_for_copy(
+            self.runtime,
+            &self.table_name,
+            self.current_order.clone(),
+            COPY_ROW_LIMIT,
+        )?;
+        let message = if truncated {
+            format!(
+                "Copied first {} rows as {} (table larger than copy limit)",
+                super::format_number(COPY_ROW_LIMIT),
+                what
+            )
+        } else {
+            format!("Copied table as {} to clipboard", what)
+        };
+        Ok((data, message))
     }
 
     /// Execute a copy operation based on the selected option
     fn execute_copy(&mut self, option: CopyOption) {
-        let (content, description) = match option {
+        let (content, message) = match option {
             CopyOption::Cell => {
                 if let Some((row, col)) = self.state.selected_cell() {
                     let actual_col = col.saturating_add(self.column_idx_offset);
                     if row < self.data.rows.len() && actual_col < self.data.rows[row].len() {
                         let value = &self.data.rows[row][actual_col];
-                        (value_to_string(value), "cell")
+                        (value_to_string(value), "Copied cell to clipboard".to_owned())
                     } else {
                         return;
                     }
@@ -457,7 +505,7 @@ impl<'a> TablePage<'a> {
             CopyOption::Row => {
                 if let Some((row, _)) = self.state.selected_cell() {
                     if row < self.data.rows.len() {
-                        (self.row_to_tsv(row), "row")
+                        (self.row_to_tsv(row), "Copied row to clipboard".to_owned())
                     } else {
                         return;
                     }
@@ -465,14 +513,29 @@ impl<'a> TablePage<'a> {
                     return;
                 }
             }
-            CopyOption::Table => (self.table_to_tsv(), "table"),
-            CopyOption::SqlSelect => (self.generate_select(), "SELECT"),
-            CopyOption::SqlInsert => (self.generate_inserts(), "INSERT statements"),
+            CopyOption::Table => match self.load_for_full_copy("TSV") {
+                Ok((data, message)) => (data_to_tsv(&data), message),
+                Err(e) => {
+                    self.footer_message = Some(format!("Copy failed: {}", e));
+                    return;
+                }
+            },
+            CopyOption::SqlSelect => (
+                self.generate_select(),
+                "Copied SELECT to clipboard".to_owned(),
+            ),
+            CopyOption::SqlInsert => match self.load_for_full_copy("INSERT statements") {
+                Ok((data, message)) => (data_to_inserts(&self.table_name, &data), message),
+                Err(e) => {
+                    self.footer_message = Some(format!("Copy failed: {}", e));
+                    return;
+                }
+            },
         };
 
         match copy_to_clipboard(&content) {
             Ok(()) => {
-                self.footer_message = Some(format!("Copied {} to clipboard", description));
+                self.footer_message = Some(message);
             }
             Err(e) => {
                 self.footer_message = Some(e);
@@ -856,6 +919,75 @@ mod tests {
     fn test_render_value_integer() {
         let result = render_value_for_display(&OwnedValue::Integer(12345));
         assert_eq!(result, "12345");
+    }
+
+    /// In-memory runtime with a `nums(n)` table of `count` rows (1..=count).
+    fn runtime_with_rows(count: usize) -> Runtime {
+        let runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(&format!(
+                "CREATE TABLE nums AS WITH RECURSIVE c(n) AS \
+                 (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT {}) SELECT n FROM c",
+                count
+            ))
+            .unwrap();
+        runtime
+    }
+
+    #[test]
+    fn test_full_table_copy_covers_more_than_one_window() {
+        let count = WINDOW_SIZE * 2 + 50;
+        let runtime = runtime_with_rows(count);
+        let (data, truncated) =
+            load_table_for_copy(&runtime, "nums", None, COPY_ROW_LIMIT).unwrap();
+        assert!(!truncated);
+        assert_eq!(data.rows.len(), count);
+
+        // TSV: header + every row, not just the 200-row window
+        let tsv = data_to_tsv(&data);
+        assert_eq!(tsv.lines().count(), count + 1);
+        assert_eq!(tsv.lines().next().unwrap(), "n");
+        assert_eq!(tsv.lines().last().unwrap(), count.to_string());
+
+        // INSERT statements: one per row
+        let inserts = data_to_inserts("nums", &data);
+        assert_eq!(inserts.lines().count(), count);
+        assert!(inserts
+            .lines()
+            .last()
+            .unwrap()
+            .contains(&format!("VALUES ({})", count)));
+    }
+
+    #[test]
+    fn test_full_table_copy_respects_sort_order() {
+        let count = WINDOW_SIZE + 10;
+        let runtime = runtime_with_rows(count);
+        let order = Order {
+            column_idx: 0,
+            direction: SortDirection::Descending,
+        };
+        let (data, truncated) =
+            load_table_for_copy(&runtime, "nums", Some(order), COPY_ROW_LIMIT).unwrap();
+        assert!(!truncated);
+        assert!(matches!(data.rows[0][0], OwnedValue::Integer(i) if i == count as i64));
+        assert!(matches!(data.rows[count - 1][0], OwnedValue::Integer(1)));
+    }
+
+    #[test]
+    fn test_full_table_copy_truncates_at_cap() {
+        let runtime = runtime_with_rows(50);
+        let (data, truncated) = load_table_for_copy(&runtime, "nums", None, 30).unwrap();
+        assert!(truncated);
+        assert_eq!(data.rows.len(), 30);
+    }
+
+    #[test]
+    fn test_full_table_copy_reports_query_errors() {
+        let runtime = Runtime::new(None).unwrap();
+        let err = load_table_for_copy(&runtime, "no_such_table", None, 10).unwrap_err();
+        assert!(err.contains("no_such_table"));
     }
 
     #[test]

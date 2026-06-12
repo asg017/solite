@@ -12,7 +12,10 @@
 //! # Output
 //!
 //! Returns all CREATE TABLE, CREATE VIEW, CREATE INDEX, and CREATE TRIGGER
-//! statements from the database's sqlite_master table.
+//! statements from the database's sqlite_master table, in creation order
+//! (sqlite_master rowid order, matching sqlite3's `.schema`). Creation
+//! order guarantees the dump is replayable: tables always precede the
+//! indexes, triggers, and views that reference them.
 
 use crate::dot::DotError;
 use crate::Runtime;
@@ -38,7 +41,7 @@ impl SchemaCommand {
             SELECT sql
             FROM sqlite_master
             WHERE sql IS NOT NULL
-            ORDER BY type, name
+            ORDER BY rowid
             "#,
         )?;
 
@@ -121,5 +124,38 @@ mod tests {
         assert_eq!(schemas.len(), 2);
         assert!(schemas.iter().any(|s| s.contains("CREATE TABLE")));
         assert!(schemas.iter().any(|s| s.contains("CREATE VIEW")));
+    }
+
+    #[test]
+    fn test_schema_creation_order() {
+        let runtime = create_test_runtime();
+
+        // Deliberately create objects so that alphabetical type ordering
+        // (index < table < trigger < view) would NOT match creation order.
+        for sql in [
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
+            "CREATE INDEX idx_users_name ON users(name)",
+            "CREATE VIEW v_users AS SELECT * FROM users",
+            "CREATE TRIGGER trg AFTER INSERT ON users BEGIN SELECT 1; END",
+        ] {
+            let (_, stmt) = runtime.connection.prepare(sql).unwrap();
+            stmt.unwrap().execute().unwrap();
+        }
+
+        let cmd = SchemaCommand {};
+        let schemas = cmd.execute(&runtime).unwrap();
+        assert_eq!(schemas.len(), 4);
+
+        let pos = |needle: &str| {
+            schemas
+                .iter()
+                .position(|s| s.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle}"))
+        };
+        // CREATE TABLE must come before the index/view/trigger that
+        // reference it, so the dump is replayable.
+        assert!(pos("CREATE TABLE users") < pos("CREATE INDEX idx_users_name"));
+        assert!(pos("CREATE INDEX idx_users_name") < pos("CREATE VIEW v_users"));
+        assert!(pos("CREATE VIEW v_users") < pos("CREATE TRIGGER trg"));
     }
 }

@@ -149,7 +149,7 @@ fn introspected_to_analyzer_schema(
         );
     }
 
-    // Add triggers. The event is parsed from the CREATE TRIGGER header
+    // Add triggers. The event is derived by parsing the CREATE TRIGGER SQL
     // during introspection; default to Insert when it is unavailable.
     for trigger in introspected.triggers.values() {
         use crate::introspect::TriggerEvent;

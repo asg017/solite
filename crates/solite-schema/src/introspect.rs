@@ -84,7 +84,8 @@ pub struct ViewInfo {
     pub sql: Option<String>,
 }
 
-/// The event a trigger fires on, parsed from the CREATE TRIGGER header.
+/// The event a trigger fires on, derived from the parsed CREATE TRIGGER
+/// statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerEvent {
     /// Fires on INSERT.
@@ -102,65 +103,36 @@ pub struct TriggerInfo {
     pub name: String,
     /// Table this trigger is on.
     pub table_name: String,
-    /// The event the trigger fires on, parsed from the CREATE TRIGGER
-    /// header (None when the SQL is unavailable or unparseable).
+    /// The event the trigger fires on, derived by parsing the CREATE
+    /// TRIGGER SQL with `solite_parser` (None when the SQL is unavailable
+    /// or unparseable; consumers default to Insert in that case).
     pub event: Option<TriggerEvent>,
     /// The original CREATE TRIGGER SQL statement.
     pub sql: Option<String>,
 }
 
-/// Parse the firing event out of a CREATE TRIGGER statement header.
+/// Determine the firing event of a CREATE TRIGGER statement.
 ///
-/// Only the header (everything before the `ON <table>` clause) is
-/// considered, so an `AFTER INSERT` trigger whose *body* contains a
-/// DELETE statement (the common audit-log pattern) is not misclassified.
-/// Quoted identifiers and string literals are skipped so a trigger or
-/// table named e.g. `"delete"` cannot be mistaken for the event keyword.
+/// The SQL is parsed with `solite_parser::parse_program` and the event is
+/// taken from the resulting `CreateTrigger` AST node, so only the trigger
+/// definition itself decides the event: an `AFTER INSERT` trigger whose
+/// *body* contains a DELETE statement (the common audit-log pattern) is
+/// not misclassified, and a trigger or table named e.g. `"delete"` cannot
+/// be mistaken for the event keyword.
+///
+/// Degrades gracefully: if the SQL cannot be parsed (or does not parse to
+/// a CREATE TRIGGER statement), this returns `None` and consumers default
+/// the event to Insert.
 fn parse_trigger_event(sql: &str) -> Option<TriggerEvent> {
-    // Strip quoted regions ('...', "...", `...`, [...]), replacing them
-    // with a space so surrounding tokens stay separated.
-    let mut stripped = String::with_capacity(sql.len());
-    let mut chars = sql.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' | '"' | '`' => {
-                while let Some(c2) = chars.next() {
-                    if c2 == c {
-                        // doubled quote chars escape themselves
-                        if chars.peek() == Some(&c) {
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                stripped.push(' ');
-            }
-            '[' => {
-                for c2 in chars.by_ref() {
-                    if c2 == ']' {
-                        break;
-                    }
-                }
-                stripped.push(' ');
-            }
-            _ => stripped.push(c.to_ascii_uppercase()),
-        }
+    let program = solite_parser::parse_program(sql).ok()?;
+    match program.statements.first()? {
+        solite_ast::Statement::CreateTrigger(stmt) => match stmt.event {
+            solite_ast::TriggerEvent::Insert => Some(TriggerEvent::Insert),
+            solite_ast::TriggerEvent::Update { .. } => Some(TriggerEvent::Update),
+            solite_ast::TriggerEvent::Delete => Some(TriggerEvent::Delete),
+        },
+        _ => None,
     }
-
-    // In a CREATE TRIGGER header the event keyword always precedes the
-    // first unquoted ON: CREATE TRIGGER name [BEFORE|AFTER|INSTEAD OF]
-    // [INSERT|UPDATE [OF cols]|DELETE] ON table ...
-    for token in stripped.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_') {
-        match token {
-            "INSERT" => return Some(TriggerEvent::Insert),
-            "UPDATE" => return Some(TriggerEvent::Update),
-            "DELETE" => return Some(TriggerEvent::Delete),
-            "ON" => break,
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Schema information extracted from a SQLite database.
@@ -855,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_trigger_event_skips_quoted_identifiers() {
+    fn test_parse_trigger_event_quoted_identifiers() {
         // a trigger named "delete" firing on INSERT
         assert_eq!(
             parse_trigger_event(

@@ -77,6 +77,9 @@ pub enum DocsError {
     FileWrite(String),
     /// Undocumented functions found.
     UndocumentedFunctions(Vec<String>),
+    /// Error already reported to stderr (e.g. a codespan report); the
+    /// caller should not print it again.
+    AlreadyReported,
 }
 
 impl std::fmt::Display for DocsError {
@@ -91,6 +94,7 @@ impl std::fmt::Display for DocsError {
             DocsError::UndocumentedFunctions(funcs) => {
                 write!(f, "Undocumented functions: {}", funcs.join(", "))
             }
+            DocsError::AlreadyReported => write!(f, "SQL error in code block"),
         }
     }
 }
@@ -106,7 +110,7 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
         .connection
         .execute("ATTACH DATABASE ':memory:' AS solite_docs")
     {
-        return Err(DocsError::DatabaseAttach(format!("{:?}", e)));
+        return Err(DocsError::DatabaseAttach(e.message));
     }
 
     // Load extension if provided
@@ -179,33 +183,33 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
 fn setup_extension_tracking(rt: &Runtime, ext: &str) -> Result<(), DocsError> {
     if let Err(e) = rt.connection.execute(BASE_FUNCTIONS_CREATE) {
         return Err(DocsError::SqlError(format!(
-            "Failed to create base functions table: {:?}",
-            e
+            "Failed to create base functions table: {}",
+            e.message
         )));
     }
 
     if let Err(e) = rt.connection.execute(BASE_MODULES_CREATE) {
         return Err(DocsError::SqlError(format!(
-            "Failed to create base modules table: {:?}",
-            e
+            "Failed to create base modules table: {}",
+            e.message
         )));
     }
 
     if let Err(e) = rt.connection.load_extension(ext, &None) {
-        return Err(DocsError::ExtensionLoad(format!("{}: {:?}", ext, e)));
+        return Err(DocsError::ExtensionLoad(format!("{}: {}", ext, e)));
     }
 
     if let Err(e) = rt.connection.execute(LOADED_FUNCTIONS_CREATE) {
         return Err(DocsError::SqlError(format!(
-            "Failed to create loaded functions table: {:?}",
-            e
+            "Failed to create loaded functions table: {}",
+            e.message
         )));
     }
 
     if let Err(e) = rt.connection.execute(LOADED_MODULES_CREATE) {
         return Err(DocsError::SqlError(format!(
-            "Failed to create loaded modules table: {:?}",
-            e
+            "Failed to create loaded modules table: {}",
+            e.message
         )));
     }
 
@@ -251,7 +255,10 @@ fn process_code_block(
                 if columns.is_empty() {
                     // No columns - just execute
                     if let Err(e) = stmt.execute() {
-                        return Err(DocsError::SqlError(format!("Execute failed: {:?}", e)));
+                        return Err(DocsError::SqlError(format!(
+                            "Execute failed: {}",
+                            e.message
+                        )));
                     }
                     last_result = None;
                 } else {
@@ -271,7 +278,7 @@ fn process_code_block(
                                     &error,
                                     None,
                                 );
-                                return Err(DocsError::SqlError(error.message));
+                                return Err(DocsError::AlreadyReported);
                             }
                         }
                     }
@@ -335,9 +342,14 @@ fn process_code_block(
             }
             Ok((_, None)) => break,
             Err(error) => {
-                let error_msg = report_error_string("TODO", &sql, &error, None);
+                let error_msg = report_error_string(
+                    args.input.to_string_lossy().as_ref(),
+                    &sql,
+                    &error,
+                    None,
+                );
                 eprintln!("{}", error_msg);
-                return Err(DocsError::SqlError(format!("Prepare failed: {:?}", error)));
+                return Err(DocsError::AlreadyReported);
             }
         }
     }
@@ -459,6 +471,8 @@ pub(crate) fn docs(cmd: DocsNamespace) -> Result<(), ()> {
     match cmd.command {
         DocsCommand::Inline(args) => match inline(args) {
             Ok(()) => Ok(()),
+            // Already printed (codespan report on stderr) — don't repeat it
+            Err(DocsError::AlreadyReported) => Err(()),
             Err(e) => {
                 eprintln!("Error: {}", e);
                 Err(())

@@ -127,3 +127,17 @@ def test_docs_inline_multiline_value_stays_commented(solite_cli, tmp_path):
     )
     assert result.success, result.stderr
     assert (tmp_path / "out2.md").read_text() == out1
+
+
+def test_docs_inline_error_report(solite_cli, tmp_path):
+    """A failing statement cites the markdown file (not the literal `TODO`)
+    and the error message appears exactly once, with no Debug dump."""
+    doc = tmp_path / "err.md"
+    doc.write_text("# Demo\n\n```sql\nSELECT * FROM no_such_table;\n```\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert not result.success
+    assert "TODO" not in result.stderr
+    assert str(doc) in result.stderr
+    assert result.stderr.count("no such table: no_such_table") == 1
+    assert "SQLiteError {" not in result.stderr

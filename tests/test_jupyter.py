@@ -388,6 +388,17 @@ def test_bench_dot_command(solite_kernel):
     assert reply["content"]["status"] == "ok"
 
 
+def test_bench_dot_command_failure_shows_underlying_error(solite_kernel):
+    # prepares fine but fails at execution time: the BenchmarkError must
+    # carry the underlying SQLite error, not a bare "Benchmark failed"
+    reply, msgs = solite_kernel.execute(".bench\nselect json_extract('{', '$.a');")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in msgs if m["msg_type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["content"]["ename"] == "BenchmarkError"
+    assert "malformed JSON" in errors[0]["content"]["evalue"]
+
+
 def test_procedures(solite_kernel):
     k = solite_kernel
 

@@ -389,8 +389,10 @@ async fn handle_dot_command_inner(
                     sender.send_clear(false, parent).await?;
                     sender.send_plain(result.report(), parent).await?;
                 }
-                Err(_) => {
-                    sender.send_error("BenchmarkError", "Benchmark failed").await?;
+                Err(e) => {
+                    sender
+                        .send_error("BenchmarkError", &format!("Benchmark failed: {e}"))
+                        .await?;
                 }
             }
         }

@@ -1,6 +1,7 @@
 # adapted from https://github.com/jupyter/jupyter_kernel_test/blob/main/jupyter_kernel_test/__init__.py
 
 
+import json
 import pytest
 from jupyter_client.blocking.client import BlockingKernelClient
 from jupyter_client.manager import KernelManager, start_new_kernel
@@ -60,7 +61,30 @@ class Kernel:
 
 
 @pytest.fixture
-def solite_kernel():
+def solite_kernel(tmp_path, monkeypatch):
+    # Register a kernelspec pointing at *this* checkout's freshly built
+    # binary. A globally installed `solite` kernelspec may point at another
+    # checkout's binary, which would silently test the wrong build.
+    kernel_dir = tmp_path / "jupyter" / "kernels" / "solite"
+    kernel_dir.mkdir(parents=True)
+    (kernel_dir / "kernel.json").write_text(
+        json.dumps(
+            {
+                "argv": [
+                    str(CLI_PATH),
+                    "jupyter",
+                    "up",
+                    "--connection",
+                    "{connection_file}",
+                ],
+                "display_name": "Solite",
+                "language": "sql",
+                "interrupt_mode": "signal",
+            }
+        )
+    )
+    # JUPYTER_PATH entries take precedence over the user-level kernelspecs
+    monkeypatch.setenv("JUPYTER_PATH", str(tmp_path / "jupyter"))
     km, kc = start_new_kernel(kernel_name="solite")
     yield Kernel(km, kc)
     kc.stop_channels()

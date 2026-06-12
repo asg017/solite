@@ -69,8 +69,11 @@ pub enum DocsError {
     MarkdownParse(String),
     /// Failed to write output file.
     FileWrite(String),
-    /// Undocumented functions found.
-    UndocumentedFunctions(Vec<String>),
+    /// Undocumented functions and/or virtual-table modules found.
+    Undocumented {
+        functions: Vec<String>,
+        modules: Vec<String>,
+    },
     /// Error already reported to stderr (e.g. a codespan report); the
     /// caller should not print it again.
     AlreadyReported,
@@ -85,10 +88,20 @@ impl std::fmt::Display for DocsError {
             DocsError::FileRead(msg) => write!(f, "Failed to read file: {}", msg),
             DocsError::MarkdownParse(msg) => write!(f, "Failed to parse markdown: {}", msg),
             DocsError::FileWrite(msg) => write!(f, "Failed to write file: {}", msg),
-            DocsError::UndocumentedFunctions(funcs) => {
-                write!(f, "The following functions are not documented:")?;
-                for func in funcs {
-                    write!(f, "\n  - {}", func)?;
+            DocsError::Undocumented { functions, modules } => {
+                let mut first = true;
+                for (label, names) in [("functions", functions), ("modules", modules)] {
+                    if names.is_empty() {
+                        continue;
+                    }
+                    if !first {
+                        writeln!(f)?;
+                    }
+                    write!(f, "The following {} are not documented:", label)?;
+                    for name in names {
+                        write!(f, "\n  - {}", name)?;
+                    }
+                    first = false;
                 }
                 Ok(())
             }
@@ -143,18 +156,33 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
         false,
     )?;
 
-    // Get loaded functions from extension; the tracking tables only exist
-    // when an extension was loaded
-    let loaded_funcs = if args.extension.is_some() {
-        get_loaded_functions(&rt)?
+    // Get loaded functions/modules from extension; the tracking tables
+    // only exist when an extension was loaded
+    let (loaded_funcs, loaded_modules) = if args.extension.is_some() {
+        (
+            query_names(
+                &rt,
+                "SELECT name FROM solite_docs.solite_docs_loaded_functions",
+            )?,
+            query_names(
+                &rt,
+                "SELECT name FROM solite_docs.solite_docs_loaded_modules",
+            )?,
+        )
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
 
-    // Find undocumented functions
+    // Find undocumented functions and modules; module headings use the
+    // same inline-code convention (### `vtab_foo`) as function headings
     let mut undocumented_funcs: Vec<String> = loaded_funcs
         .iter()
         .filter(|f| !documented_funcs.contains(f))
+        .cloned()
+        .collect();
+    let mut undocumented_modules: Vec<String> = loaded_modules
+        .iter()
+        .filter(|m| !documented_funcs.contains(m))
         .cloned()
         .collect();
 
@@ -167,11 +195,15 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     // Write output
     write_output(&args, &out_md)?;
 
-    // Report undocumented functions; printing is left to the Display impl
-    // so the list shows up exactly once
-    if !undocumented_funcs.is_empty() {
+    // Report undocumented functions/modules; printing is left to the
+    // Display impl so the list shows up exactly once
+    if !undocumented_funcs.is_empty() || !undocumented_modules.is_empty() {
         undocumented_funcs.sort();
-        return Err(DocsError::UndocumentedFunctions(undocumented_funcs));
+        undocumented_modules.sort();
+        return Err(DocsError::Undocumented {
+            functions: undocumented_funcs,
+            modules: undocumented_modules,
+        });
     }
 
     Ok(())
@@ -513,41 +545,39 @@ fn strip_trailing_anchors(heading_src: &str) -> &str {
     }
 }
 
-/// Get list of loaded functions from extension.
-fn get_loaded_functions(rt: &Runtime) -> Result<Vec<String>, DocsError> {
-    let mut stmt = match rt
-        .connection
-        .prepare("SELECT name FROM solite_docs.solite_docs_loaded_functions")
-    {
+/// Collect the first column of every row of a query as strings. Serves
+/// both the loaded-functions and loaded-modules tracking tables.
+fn query_names(rt: &Runtime, sql: &str) -> Result<Vec<String>, DocsError> {
+    let mut stmt = match rt.connection.prepare(sql) {
         Ok((_, Some(stmt))) => stmt,
         Ok((_, None)) => return Ok(vec![]),
         Err(e) => {
             return Err(DocsError::SqlError(format!(
-                "Failed to query loaded functions: {:?}",
-                e
+                "Failed to query names ({}): {}",
+                sql, e.message
             )))
         }
     };
 
-    let mut funcs = vec![];
+    let mut names = vec![];
     loop {
         match stmt.next() {
             Ok(Some(row)) => {
                 if let Some(val) = row.first() {
-                    funcs.push(val.as_str().to_owned());
+                    names.push(val.as_str().to_owned());
                 }
             }
             Ok(None) => break,
             Err(e) => {
                 return Err(DocsError::SqlError(format!(
-                    "Failed to read loaded functions: {:?}",
-                    e
+                    "Failed to read names ({}): {}",
+                    sql, e.message
                 )))
             }
         }
     }
 
-    Ok(funcs)
+    Ok(names)
 }
 
 /// Write output to file or stdout.
@@ -595,12 +625,40 @@ mod tests {
 
     #[test]
     fn test_undocumented_functions_display_lists_each_once() {
-        let err = DocsError::UndocumentedFunctions(vec!["a".into(), "b".into()]);
+        let err = DocsError::Undocumented {
+            functions: vec!["a".into(), "b".into()],
+            modules: vec![],
+        };
         let s = err.to_string();
         assert_eq!(
             s,
             "The following functions are not documented:\n  - a\n  - b"
         );
         assert_eq!(s.matches("- a").count(), 1);
+    }
+
+    #[test]
+    fn test_undocumented_display_labels_functions_and_modules() {
+        let err = DocsError::Undocumented {
+            functions: vec!["my_func".into()],
+            modules: vec!["vtab_foo".into()],
+        };
+        assert_eq!(
+            err.to_string(),
+            "The following functions are not documented:\n  - my_func\n\
+             The following modules are not documented:\n  - vtab_foo"
+        );
+    }
+
+    #[test]
+    fn test_undocumented_display_modules_only() {
+        let err = DocsError::Undocumented {
+            functions: vec![],
+            modules: vec!["vtab_foo".into()],
+        };
+        assert_eq!(
+            err.to_string(),
+            "The following modules are not documented:\n  - vtab_foo"
+        );
     }
 }

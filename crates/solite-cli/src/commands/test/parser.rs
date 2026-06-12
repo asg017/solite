@@ -25,32 +25,22 @@ pub fn parse_epilogue_comment(ep: &str) -> String {
     s.to_string()
 }
 
-/// Parse line and column from a reference display string.
+/// Convert a 1-based line/column position to a byte offset in `content`.
 ///
-/// Reference format: "file:line:column"
-/// Returns (line, column) tuple.
-pub fn parse_line_col_from_ref(ref_display: &str) -> Option<(usize, usize)> {
-    let parts: Vec<&str> = ref_display.rsplitn(3, ':').collect();
-    if parts.len() < 2 {
+/// Returns `None` when the line is 0 or past the end of the content.
+/// Walks lines inclusive of their terminators, so CRLF files stay
+/// byte-accurate.
+pub fn line_col_to_offset(content: &str, line: usize, col: usize) -> Option<usize> {
+    if line == 0 {
         return None;
     }
-    let col = parts[0].parse::<usize>().ok()?;
-    let line = parts[1].parse::<usize>().ok()?;
-    Some((line, col))
-}
-
-/// Parse file, line, and column from a reference display string.
-///
-/// Reference format: "file:line:column"
-pub fn parse_ref_file_line_col(ref_display: &str) -> Option<(String, usize, usize)> {
-    let parts: Vec<&str> = ref_display.splitn(3, ':').collect();
-    if parts.len() < 3 {
-        return None;
+    let mut offset = 0usize;
+    let mut lines = content.split_inclusive('\n');
+    for _ in 1..line {
+        offset += lines.next()?.len();
     }
-    let file = parts[0].to_string();
-    let line = parts[1].parse::<usize>().ok()?;
-    let col = parts[2].parse::<usize>().ok()?;
-    Some((file, line, col))
+    lines.next()?; // the target line must exist
+    Some(offset + col.saturating_sub(1))
 }
 
 /// Check whether a stripped epilogue is a TODO annotation.
@@ -132,28 +122,6 @@ pub fn parse_snap_directive(epilogue: &str) -> Result<Option<SnapDirective>, Str
     }))
 }
 
-/// Compute byte offset from a reference string.
-///
-/// Converts line:column to a byte offset in the source content.
-pub fn compute_offset_from_reference(content: &str, ref_display: &str) -> Option<usize> {
-    let (line, col) = parse_line_col_from_ref(ref_display)?;
-    let lines: Vec<&str> = content.lines().collect();
-
-    if line == 0 || line > lines.len() {
-        return None;
-    }
-
-    let mut offset = 0usize;
-    for l in &lines[..line - 1] {
-        offset += l.len();
-        offset += 1; // newline
-    }
-
-    let col0 = if col == 0 { 0 } else { col - 1 };
-    offset += col0;
-    Some(offset)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,46 +150,30 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_line_col_valid() {
-        assert_eq!(parse_line_col_from_ref("file.sql:10:5"), Some((10, 5)));
-        assert_eq!(parse_line_col_from_ref("path/to/file.sql:1:1"), Some((1, 1)));
-    }
-
-    #[test]
-    fn test_parse_line_col_invalid() {
-        assert_eq!(parse_line_col_from_ref("no_colons"), None);
-        assert_eq!(parse_line_col_from_ref("one:colon"), None);
-        assert_eq!(parse_line_col_from_ref("file:notnum:5"), None);
-    }
-
-    #[test]
-    fn test_parse_ref_file_line_col_valid() {
-        let result = parse_ref_file_line_col("test.sql:10:5");
-        assert_eq!(result, Some(("test.sql".to_string(), 10, 5)));
-    }
-
-    #[test]
-    fn test_parse_ref_file_line_col_invalid() {
-        assert_eq!(parse_ref_file_line_col("no_colons"), None);
-        assert_eq!(parse_ref_file_line_col("one:two"), None);
-    }
-
-    #[test]
-    fn test_compute_offset() {
+    fn test_line_col_to_offset() {
         let content = "line1\nline2\nline3";
         // line 1, col 1 = offset 0
-        assert_eq!(compute_offset_from_reference(content, "f:1:1"), Some(0));
+        assert_eq!(line_col_to_offset(content, 1, 1), Some(0));
         // line 2, col 1 = offset 6 (after "line1\n")
-        assert_eq!(compute_offset_from_reference(content, "f:2:1"), Some(6));
+        assert_eq!(line_col_to_offset(content, 2, 1), Some(6));
         // line 2, col 3 = offset 8
-        assert_eq!(compute_offset_from_reference(content, "f:2:3"), Some(8));
+        assert_eq!(line_col_to_offset(content, 2, 3), Some(8));
     }
 
     #[test]
-    fn test_compute_offset_invalid_line() {
+    fn test_line_col_to_offset_invalid_line() {
         let content = "line1\nline2";
-        assert_eq!(compute_offset_from_reference(content, "f:0:1"), None);
-        assert_eq!(compute_offset_from_reference(content, "f:10:1"), None);
+        assert_eq!(line_col_to_offset(content, 0, 1), None);
+        assert_eq!(line_col_to_offset(content, 10, 1), None);
+        assert_eq!(line_col_to_offset("", 1, 1), None);
+    }
+
+    #[test]
+    fn test_line_col_to_offset_crlf() {
+        // CRLF terminators count toward byte offsets
+        let content = "line1\r\nline2\r\nline3";
+        assert_eq!(line_col_to_offset(content, 2, 1), Some(7));
+        assert_eq!(line_col_to_offset(content, 3, 2), Some(15));
     }
 
     // --- is_todo_epilogue tests ---

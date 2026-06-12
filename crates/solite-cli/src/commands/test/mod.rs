@@ -50,8 +50,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::TestArgs;
 
 use parser::{
-    compute_offset_from_reference, parse_epilogue_comment, parse_ref_file_line_col,
-    parse_snap_directive, prepare_error_epilogue,
+    line_col_to_offset, parse_epilogue_comment, parse_snap_directive, prepare_error_epilogue,
 };
 use report::{report_mismatch, TestStats};
 use snap::{handle_orphans, handle_snap_assertion, SnapMode, SnapState};
@@ -311,9 +310,11 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
                             if let Err(err) = stmt.execute() {
                                 stats.record_failure();
                                 print!("{}", Style::new().red().apply_to("x"));
-                                let ref_display = format!("{}", step.reference);
-                                let maybe_offset =
-                                    compute_offset_from_reference(&content, &ref_display);
+                                let maybe_offset = line_col_to_offset(
+                                    &content,
+                                    step.reference.line_number(),
+                                    step.reference.column_number(),
+                                );
                                 crate::errors::report_error(
                                     &source_path.to_string_lossy(),
                                     &content,
@@ -330,17 +331,12 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
 
                     // Handle TODO annotations
                     if parser::is_todo_epilogue(&epilogue) {
-                        let ref_display = format!("{}", step.reference);
-                        if let Some((file, line, col)) = parse_ref_file_line_col(&ref_display) {
-                            stats.record_todo(file, line, col, epilogue.clone());
-                        } else {
-                            stats.record_todo(
-                                source_path.to_string_lossy().to_string(),
-                                0,
-                                0,
-                                epilogue.clone(),
-                            );
-                        }
+                        stats.record_todo(
+                            step.reference.block_name().to_string(),
+                            step.reference.line_number(),
+                            step.reference.column_number(),
+                            epilogue.clone(),
+                        );
                         print!("{}", Style::new().yellow().apply_to("-"));
                         continue;
                     }
@@ -373,9 +369,11 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
                     // Inline assertion: execute and compare
                     match stmt.next() {
                         Err(err) => {
-                            let ref_display = format!("{}", step.reference);
-                            let maybe_offset =
-                                compute_offset_from_reference(&content, &ref_display);
+                            let maybe_offset = line_col_to_offset(
+                                &content,
+                                step.reference.line_number(),
+                                step.reference.column_number(),
+                            );
 
                             if let Some(expected) = epilogue.strip_prefix("error:").map(str::trim) {
                                 if expected == err.message {
@@ -418,25 +416,14 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
                             } else {
                                 stats.record_failure();
                                 print!("{}", Style::new().red().apply_to("x"));
-
-                                let ref_display = format!("{}", step.reference);
-                                if let Some((_, line, col)) =
-                                    parse_ref_file_line_col(&ref_display)
-                                {
-                                    report_mismatch(
-                                        &source_path.to_string_lossy(),
-                                        &content,
-                                        line,
-                                        col,
-                                        &epilogue,
-                                        "[no results]",
-                                    );
-                                } else if args.verbose {
-                                    eprintln!(
-                                        "\nExpected: '{}' Got: '[no results]'",
-                                        epilogue
-                                    );
-                                }
+                                report_mismatch(
+                                    &source_path.to_string_lossy(),
+                                    &content,
+                                    step.reference.line_number(),
+                                    step.reference.column_number(),
+                                    &epilogue,
+                                    "[no results]",
+                                );
                             }
                         }
                         Ok(Some(row)) => {
@@ -453,25 +440,14 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
                                 None => {
                                     stats.record_failure();
                                     print!("{}", Style::new().red().apply_to("x"));
-
-                                    let ref_display = format!("{}", step.reference);
-                                    if let Some((_, line, col)) =
-                                        parse_ref_file_line_col(&ref_display)
-                                    {
-                                        report_mismatch(
-                                            &source_path.to_string_lossy(),
-                                            &content,
-                                            line,
-                                            col,
-                                            &epilogue,
-                                            "<zero-column row>",
-                                        );
-                                    } else if args.verbose {
-                                        eprintln!(
-                                            "\nExpected: '{}' Got: '<zero-column row>'",
-                                            epilogue
-                                        );
-                                    }
+                                    report_mismatch(
+                                        &source_path.to_string_lossy(),
+                                        &content,
+                                        step.reference.line_number(),
+                                        step.reference.column_number(),
+                                        &epilogue,
+                                        "<zero-column row>",
+                                    );
                                     continue;
                                 }
                             };
@@ -489,22 +465,14 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
                             } else {
                                 stats.record_failure();
                                 print!("{}", Style::new().red().apply_to("x"));
-
-                                let ref_display = format!("{}", step.reference);
-                                if let Some((_, line, col)) =
-                                    parse_ref_file_line_col(&ref_display)
-                                {
-                                    report_mismatch(
-                                        &source_path.to_string_lossy(),
-                                        &content,
-                                        line,
-                                        col,
-                                        &epilogue,
-                                        &actual,
-                                    );
-                                } else if args.verbose {
-                                    eprintln!("\nExpected: '{}' Got: '{}'", epilogue, actual);
-                                }
+                                report_mismatch(
+                                    &source_path.to_string_lossy(),
+                                    &content,
+                                    step.reference.line_number(),
+                                    step.reference.column_number(),
+                                    &epilogue,
+                                    &actual,
+                                );
                             }
 
                             // Inline assertions only ever compare the first

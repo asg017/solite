@@ -22,8 +22,7 @@ pub fn report_mismatch(
     let mut files = SimpleFiles::new();
     let id = files.add(file_name.to_string(), content.to_string());
 
-    let lines: Vec<&str> = content.lines().collect();
-    let (start, end) = compute_line_span(&lines, line);
+    let (start, end) = compute_line_span(content, line);
 
     let diagnostic = Diagnostic::error()
         .with_message("Test assertion failed: expected vs actual mismatch")
@@ -35,22 +34,22 @@ pub fn report_mismatch(
     let _ = term::emit(&mut writer.lock(), &config, &files, &diagnostic);
 }
 
-/// Compute the byte span for a given line number.
+/// Compute the byte span for a given 1-based line number.
 ///
-/// Returns (start_offset, end_offset) for the line.
-fn compute_line_span(lines: &[&str], line: usize) -> (usize, usize) {
-    if line == 0 || line > lines.len() {
-        return (0, 1);
+/// Returns (start_offset, end_offset) for the line, excluding its
+/// terminator. Delegates the line walk to the shared
+/// [`super::parser::line_col_to_offset`] helper.
+fn compute_line_span(content: &str, line: usize) -> (usize, usize) {
+    match super::parser::line_col_to_offset(content, line, 1) {
+        Some(start) => {
+            let len = content[start..]
+                .split_inclusive('\n')
+                .next()
+                .map_or(0, |l| l.trim_end_matches(['\n', '\r']).len());
+            (start, start + len)
+        }
+        None => (0, 1),
     }
-
-    let mut start = 0usize;
-    for l in &lines[..line - 1] {
-        start += l.len();
-        start += 1; // newline
-    }
-
-    let end = start + lines[line - 1].len();
-    (start, end)
 }
 
 /// Test result statistics.
@@ -111,29 +110,39 @@ mod tests {
 
     #[test]
     fn test_compute_line_span() {
-        let lines = vec!["line1", "line2", "line3"];
+        let content = "line1\nline2\nline3";
 
         // Line 1
-        let (start, end) = compute_line_span(&lines, 1);
+        let (start, end) = compute_line_span(content, 1);
         assert_eq!(start, 0);
         assert_eq!(end, 5);
 
         // Line 2 (after "line1\n")
-        let (start, end) = compute_line_span(&lines, 2);
+        let (start, end) = compute_line_span(content, 2);
         assert_eq!(start, 6);
         assert_eq!(end, 11);
     }
 
     #[test]
+    fn test_compute_line_span_crlf() {
+        let content = "line1\r\nline2\r\n";
+
+        // The CRLF terminator counts toward offsets but not the span
+        let (start, end) = compute_line_span(content, 2);
+        assert_eq!(start, 7);
+        assert_eq!(end, 12);
+    }
+
+    #[test]
     fn test_compute_line_span_invalid() {
-        let lines = vec!["line1"];
+        let content = "line1";
 
         // Line 0 (invalid)
-        let (start, end) = compute_line_span(&lines, 0);
+        let (start, end) = compute_line_span(content, 0);
         assert_eq!((start, end), (0, 1));
 
         // Line 10 (out of bounds)
-        let (start, end) = compute_line_span(&lines, 10);
+        let (start, end) = compute_line_span(content, 10);
         assert_eq!((start, end), (0, 1));
     }
 

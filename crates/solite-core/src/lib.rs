@@ -114,6 +114,23 @@ pub struct StepReference {
     pub region: Vec<String>,
 }
 
+impl StepReference {
+    /// Name of the block this step came from (file path, "[stdin]", ...).
+    pub fn block_name(&self) -> &str {
+        &self.block_name
+    }
+
+    /// 1-based line number of the step within its block.
+    pub fn line_number(&self) -> usize {
+        self.line_number
+    }
+
+    /// 1-based column number of the step within its block.
+    pub fn column_number(&self) -> usize {
+        self.column_number
+    }
+}
+
 impl fmt::Display for StepReference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

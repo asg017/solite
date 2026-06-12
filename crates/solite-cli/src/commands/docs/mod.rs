@@ -221,11 +221,29 @@ fn process_code_block(
     let sql = code.value.clone();
     let mut new_value = String::new();
     let mut curr = sql.as_str();
+    // Result text generated for the previous statement. When regenerating a
+    // previously inlined document, the prior run's result comments show up
+    // as leading trivia of the *next* statement — strip them (they are
+    // byte-identical for deterministic queries) so reruns are stable.
+    let mut last_result: Option<String> = None;
 
     loop {
         match rt.prepare_with_parameters(curr) {
             Ok((rest, Some(mut stmt))) => {
-                new_value.push_str(&stmt.sql());
+                let stmt_sql = stmt.sql();
+                let mut text = stmt_sql.trim_start();
+                if let Some(prev) = &last_result {
+                    let prev = prev.trim_end();
+                    while let Some(stripped) = text.strip_prefix(prev) {
+                        // Only strip on a line boundary, never mid-line
+                        if stripped.is_empty() || stripped.starts_with(['\n', '\r']) {
+                            text = stripped.trim_start();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                new_value.push_str(text);
                 new_value.push('\n');
 
                 let columns = stmt.column_names().unwrap_or_default();
@@ -235,6 +253,7 @@ fn process_code_block(
                     if let Err(e) = stmt.execute() {
                         return Err(DocsError::SqlError(format!("Execute failed: {:?}", e)));
                     }
+                    last_result = None;
                 } else {
                     // Has columns - collect results
                     let mut results: Vec<Vec<crate::commands::test::snap::ValueCopy>> = vec![];
@@ -257,21 +276,49 @@ fn process_code_block(
                         }
                     }
 
-                    // Format results
+                    // Format results; every branch ends with exactly one
+                    // newline so a following statement starts on its own
+                    // line instead of being swallowed into the comment
+                    let mut result_text = String::new();
                     match results.len() {
-                        0 => new_value.push_str("No results\n"),
+                        0 => result_text.push_str("-- No results\n"),
                         1 => {
-                            new_value.push_str(&format!(
-                                "-- {}",
-                                snapshot_value(&results[0][0])
-                            ));
+                            let value = snapshot_value(&results[0][0]);
+                            if value.contains('\n') {
+                                // A value containing a newline would break
+                                // out of the `-- ` comment, leaving raw SQL
+                                // fragments on unprefixed lines; prefix
+                                // every line to keep the block valid SQL
+                                for line in value.lines() {
+                                    result_text.push_str("-- ");
+                                    result_text.push_str(line);
+                                    result_text.push('\n');
+                                }
+                            } else {
+                                result_text.push_str(&format!("-- {}\n", value));
+                            }
                         }
                         _ => {
-                            new_value.push_str("/*\n");
-                            new_value.push_str(&render_table(&columns, &results));
-                            new_value.push_str("*/");
+                            let table = render_table(&columns, &results);
+                            if table.contains("*/") {
+                                // A cell containing `*/` would terminate the
+                                // block comment early; fall back to
+                                // line-comment prefixes to keep the block
+                                // valid SQL
+                                for line in table.lines() {
+                                    result_text.push_str("-- ");
+                                    result_text.push_str(line);
+                                    result_text.push('\n');
+                                }
+                            } else {
+                                result_text.push_str("/*\n");
+                                result_text.push_str(&table);
+                                result_text.push_str("*/\n");
+                            }
                         }
                     }
+                    new_value.push_str(&result_text);
+                    last_result = Some(result_text);
                 }
 
                 // Move to rest of SQL
@@ -295,7 +342,9 @@ fn process_code_block(
         }
     }
 
-    code.value = new_value;
+    // Drop the trailing newline so the closing fence sits directly under
+    // the last line instead of after a blank line
+    code.value = new_value.trim_end().to_string();
     Ok(())
 }
 

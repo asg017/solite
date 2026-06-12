@@ -8,9 +8,17 @@ use crate::colors;
 
 /// Handle a dot command during script execution.
 ///
+/// `is_trace` is threaded into nested SQL execution (`.run`) so statements
+/// inside child files are recorded when `--trace` is on.
+///
 /// Returns `false` when the command failed (the error is reported here);
 /// unsupported-command warnings still count as success.
-pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &mut bool) -> bool {
+pub fn handle_dot_command(
+    runtime: &mut Runtime,
+    cmd: &mut DotCommand,
+    timer: &mut bool,
+    is_trace: bool,
+) -> bool {
     match cmd {
         DotCommand::Ask(_) => {
             eprintln!("Warning: .ask command not supported in run mode");
@@ -240,7 +248,7 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                 };
                 let success = match runtime.prepare_with_parameters(&proc.sql) {
                     Ok((_, Some(mut stmt))) => {
-                        super::sql::handle_sql(runtime, &mut stmt, &run_cmd.file, false, *timer)
+                        super::sql::handle_sql(runtime, &mut stmt, &run_cmd.file, is_trace, *timer)
                     }
                     Ok((_, None)) => {
                         eprintln!("Procedure '{}' prepared to empty statement", proc_name);
@@ -264,7 +272,7 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                         return false;
                     }
                 };
-                let failures = super::execute_steps(runtime, false, timer);
+                let failures = super::execute_steps(runtime, is_trace, timer);
                 runtime.run_file_end(saved);
                 failures == 0
             }

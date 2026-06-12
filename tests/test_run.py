@@ -1,4 +1,11 @@
 import json
+import sqlite3
+
+
+def trace_statements(trace_path):
+    """All recorded sql texts from a --trace database."""
+    with sqlite3.connect(trace_path) as db:
+        return [row[0] for row in db.execute("select sql from statements")]
 
 
 def make_notebook(cells, nbformat_minor=5):
@@ -171,6 +178,30 @@ def test_run_exit_codes(solite_cli, tmp_path):
     result = solite_cli(["run", "dot.sql"], cwd=tmp_path)
     assert not result.success
     assert "Error loading extension" in result.stderr
+
+
+def test_run_trace_procedure(solite_cli, tmp_path):
+    (tmp_path / "procs.sql").write_text(
+        "-- name: getOne :value\nselect 1 + 1;\n", newline="\n"
+    )
+    result = solite_cli(
+        ["run", "procs.sql", "getOne", "--trace", "t.db"], cwd=tmp_path
+    )
+    assert result.success
+    statements = trace_statements(tmp_path / "t.db")
+    assert any("1 + 1" in sql for sql in statements)
+
+
+def test_run_trace_nested_dot_run(solite_cli, tmp_path):
+    (tmp_path / "child.sql").write_text("select 'from child';\n", newline="\n")
+    (tmp_path / "main.sql").write_text(
+        ".timer off\nselect 'from parent';\n.run child.sql\n", newline="\n"
+    )
+    result = solite_cli(["run", "main.sql", "--trace", "t.db"], cwd=tmp_path)
+    assert result.success
+    statements = trace_statements(tmp_path / "t.db")
+    assert any("from parent" in sql for sql in statements)
+    assert any("from child" in sql for sql in statements)
 
 
 def test_run_ipynb_cell_order(solite_cli, snapshot, tmp_path):

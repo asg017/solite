@@ -233,9 +233,19 @@ fn run_impl(flags: RunArgs) -> Result<()> {
 
             match rt.prepare_with_parameters(&proc.sql) {
                 Ok((_, Some(mut stmt))) => {
-                    let config = solite_table::TableConfig::terminal();
-                    solite_table::print_statement(&mut stmt, &config)
-                        .map_err(|e| anyhow::anyhow!("Error executing procedure: {e}"))?;
+                    // Route through handle_sql so --trace records the
+                    // procedure's statement (and we get progress/timer
+                    // handling), then write the trace like the other modes.
+                    let reference = format!("{script_str}:{proc_name}");
+                    let ok = handle_sql(&mut rt, &mut stmt, &reference, flags.trace.is_some(), true);
+
+                    if let Some(ref trace_path) = flags.trace {
+                        write_trace_output(&rt, trace_path)?;
+                    }
+
+                    if !ok {
+                        bail!("procedure '{proc_name}' failed");
+                    }
                 }
                 Ok((_, None)) => bail!("Procedure '{proc_name}' prepared to empty statement"),
                 Err(e) => bail!("Error preparing procedure '{proc_name}': {e:?}"),
@@ -399,7 +409,7 @@ fn execute_steps(rt: &mut Runtime, is_trace: bool, timer: &mut bool) -> usize {
                     }
                 }
                 StepResult::DotCommand(ref mut cmd) => {
-                    if !handle_dot_command(rt, cmd, timer) {
+                    if !handle_dot_command(rt, cmd, timer, is_trace) {
                         failures += 1;
                     }
                 }

@@ -55,11 +55,22 @@ pub fn report_from_file(
 /// Create a connection based on the database type.
 fn create_connection(base_db_type: &BaseDatabaseType) -> Result<Connection> {
     match base_db_type {
-        BaseDatabaseType::None => Connection::open_in_memory()
-            .map_err(|e| anyhow!("Failed to open database: {:?}", e)),
+        BaseDatabaseType::None => open_validation_db(),
         BaseDatabaseType::Database(path) => copy_schema_from_database(path),
         BaseDatabaseType::SqlFile(path) => setup_from_sql_file(path),
     }
+}
+
+/// Open the in-memory validation database with the solite stdlib initialized,
+/// mirroring `Runtime::new_with_options` so annotated queries can use stdlib
+/// functions (e.g. `ulid()`) and virtual tables (e.g. `vec0`).
+fn open_validation_db() -> Result<Connection> {
+    let db =
+        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
+    unsafe {
+        solite_stdlib::solite_stdlib_init(db.db(), std::ptr::null_mut(), std::ptr::null_mut());
+    }
+    Ok(db)
 }
 
 /// Copy schema from an existing database.
@@ -71,8 +82,7 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
     let base_db =
         Connection::open(path_str).map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
 
-    let db =
-        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
+    let db = open_validation_db()?;
 
     // Query for all tables and views
     let mut stmt = match base_db.prepare(
@@ -93,21 +103,49 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
         Err(e) => return Err(anyhow!("SQL error: {:?}", e)),
     };
 
+    // Virtual tables must be replayed before everything else: their shadow
+    // tables can show up as plain tables in `pragma_table_list`, and creating
+    // a shadow table first makes the later CREATE VIRTUAL TABLE fail.
+    let mut virtual_tables: Vec<String> = vec![];
+    let mut others: Vec<String> = vec![];
     loop {
         match stmt.nextx() {
             Ok(None) => break,
             Ok(Some(row)) => {
                 let sql = row.value_at(1);
                 let sql_str = sql.as_str();
-                if !sql_str.is_empty() {
-                    if let Err(e) = db.execute(sql_str) {
-                        return Err(anyhow!("Failed to copy schema: {:?}", e));
-                    }
+                if sql_str.is_empty() {
+                    continue;
+                }
+                let is_virtual = sql_str
+                    .trim_start()
+                    .get(..20)
+                    .is_some_and(|p| p.eq_ignore_ascii_case("create virtual table"));
+                if is_virtual {
+                    virtual_tables.push(sql_str.to_string());
+                } else {
+                    others.push(sql_str.to_string());
                 }
             }
             Err(e) => {
                 return Err(anyhow!("Failed to read schema: {:?}", e));
             }
+        }
+    }
+
+    for sql in &virtual_tables {
+        if let Err(e) = db.execute(sql) {
+            return Err(anyhow!("Failed to copy schema: {:?}", e));
+        }
+    }
+    for sql in &others {
+        if let Err(e) = db.execute(sql) {
+            // Shadow tables of a just-created virtual table already exist in
+            // the new database; skip their replayed CREATE statements.
+            if e.message.contains("already exists") {
+                continue;
+            }
+            return Err(anyhow!("Failed to copy schema: {:?}", e));
         }
     }
 
@@ -119,8 +157,7 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
 /// The schema is only used for query validation; it is not part of the
 /// report's `setup`, which holds non-annotated statements from the input file.
 fn setup_from_sql_file(path: &PathBuf) -> Result<Connection> {
-    let db =
-        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
+    let db = open_validation_db()?;
 
     let sql = std::fs::read_to_string(path)
         .map_err(|e| anyhow!("Failed to read file {}: {}", path.display(), e))?;

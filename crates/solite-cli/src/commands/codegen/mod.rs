@@ -278,6 +278,66 @@ mod tests {
     }
 
     #[test]
+    fn test_stdlib_function_in_export() {
+        // The validation connection must have the solite stdlib initialized,
+        // just like every other solite context (run, repl, query, test).
+        let r = report("-- name: makeId :value\nselect ulid();");
+        assert_eq!(r.exports.len(), 1);
+        assert_eq!(r.exports[0].name, "makeId");
+        assert!(r.setup.is_empty());
+    }
+
+    #[test]
+    fn test_schema_db_with_stdlib_virtual_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("schema.db");
+        {
+            // Runtime initializes the stdlib, so vec0 is available to build
+            // the schema database fixture.
+            let rt = solite_core::Runtime::new(Some(
+                db_path.to_string_lossy().to_string(),
+            ))
+            .unwrap();
+            rt.connection
+                .execute_script(
+                    "create virtual table vec_items using vec0(embedding float[4]);
+                     create table t(a int);",
+                )
+                .unwrap();
+        }
+
+        let r = report_from_file(
+            "-- name: getA :value\nselect a from t;",
+            &PathBuf::from("[test]"),
+            BaseDatabaseType::Database(db_path),
+        )
+        .expect("report should succeed");
+        assert_eq!(r.exports.len(), 1);
+        assert!(r.setup.is_empty());
+    }
+
+    #[test]
+    fn test_schema_sql_with_stdlib_virtual_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema_path = dir.path().join("schema.sql");
+        std::fs::write(
+            &schema_path,
+            "create virtual table vec_items using vec0(embedding float[4]);
+             create table t(a int);",
+        )
+        .unwrap();
+
+        let r = report_from_file(
+            "-- name: getA :value\nselect a from t;",
+            &PathBuf::from("[test]"),
+            BaseDatabaseType::SqlFile(schema_path),
+        )
+        .expect("report should succeed");
+        assert_eq!(r.exports.len(), 1);
+        assert!(r.setup.is_empty());
+    }
+
+    #[test]
     fn test_parameter_types() {
         let r = report(
             r#"

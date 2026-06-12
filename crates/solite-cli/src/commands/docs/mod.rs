@@ -124,11 +124,14 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     let mut ast = markdown::to_mdast(&docs_in, &options)
         .map_err(|e| DocsError::MarkdownParse(e.to_string()))?;
 
-    // Process code blocks
+    // Process code blocks; only ```sql blocks are executed — other
+    // languages (and untagged blocks) are left untouched
     if let Some(children) = ast.children_mut() {
         for node in children.iter_mut() {
             if let Node::Code(code) = node {
-                process_code_block(&rt, code, &args)?;
+                if matches!(code.lang.as_deref(), Some("sql") | Some("sqlite")) {
+                    process_code_block(&rt, code, &args)?;
+                }
             }
         }
     }

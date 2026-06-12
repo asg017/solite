@@ -1,6 +1,103 @@
 """Integration tests for `solite bench` (and the `.bench` dot command)."""
 
 
+def test_bench_simple_statement(solite_cli):
+    """Happy path: timing summary, range, and bytecode steps all print."""
+    result = solite_cli(["bench", "select 1"])
+    assert result.success, result.stderr
+    assert "select 1" in result.stdout
+    assert "Time" in result.stdout
+    assert "(10 iterations)" in result.stdout
+    assert "Range" in result.stdout
+    assert "QUERY PLAN" in result.stdout
+
+
+def test_bench_two_statements_print_in_order(solite_cli):
+    result = solite_cli(["bench", "SELECT 1;", "SELECT 1 + 1;"])
+    assert result.success, result.stderr
+    first = result.stdout.index("SELECT 1;")
+    second = result.stdout.index("SELECT 1 + 1;")
+    assert first < second
+    assert result.stdout.count("QUERY PLAN") == 2
+
+
+def test_bench_sql_file(solite_cli, tmp_path):
+    sql_file = tmp_path / "query.sql"
+    sql_file.write_text("SELECT 1 + 1;\n")
+    result = solite_cli(["bench", str(sql_file)])
+    assert result.success, result.stderr
+    assert "SELECT 1 + 1;" in result.stdout
+    assert "Time" in result.stdout
+
+
+def test_bench_positional_database_pairing(solite_cli, tmp_path):
+    db = tmp_path / "app.db"
+    setup = tmp_path / "setup.sql"
+    setup.write_text("CREATE TABLE users(id integer); INSERT INTO users VALUES (1);")
+    assert solite_cli(["run", str(setup), str(db)]).success
+
+    result = solite_cli(
+        ["bench", "--database", str(db), "SELECT count(*) FROM users;"]
+    )
+    assert result.success, result.stderr
+    assert "SELECT count(*) FROM users;" in result.stdout
+    assert "Time" in result.stdout
+
+
+def test_bench_invalid_sql_errors(solite_cli):
+    """Guards the Result<(), ()>/eprintln path: nonzero exit and a
+    diagnostic on stderr."""
+    result = solite_cli(["bench", "selec 1"])
+    assert not result.success
+    assert result.stderr.strip() != ""
+    assert "syntax error" in result.stderr.lower()
+
+
+def test_bench_nonexistent_extension_errors(solite_cli):
+    result = solite_cli(
+        ["bench", "--load-extension", "/nonexistent-ext", "SELECT 1;"]
+    )
+    assert not result.success
+    assert "extension" in result.stderr.lower()
+
+
+def test_dot_bench_in_run_mode_executes_and_consumes_sql(solite_cli, tmp_path):
+    """.bench in a script executes (no warning) and consumes its SQL: the
+    statement after the benched one still runs exactly once."""
+    script = tmp_path / "main.sql"
+    script.write_text(
+        ".timer off\n"
+        ".bench\n"
+        "select 1;\n"
+        "select 'after-bench-marker' as m;\n"
+    )
+    result = solite_cli(["run", str(script)])
+    assert result.success, result.stderr
+    combined = result.stdout + result.stderr
+    assert "not supported" not in combined
+    assert "Benchmark" in result.stdout
+    assert "(10 iterations)" in result.stdout
+    assert "QUERY PLAN" in result.stdout
+    # the trailing statement ran once — not zero times, not twice
+    assert result.stdout.count("after-bench-marker") == 1
+
+
+def test_dot_bench_in_run_mode(solite_cli, tmp_path):
+    """`.bench` benches the statement on the following line and leaves later
+    statements to run normally (exactly once)."""
+    script = tmp_path / "main.sql"
+    script.write_text(
+        ".timer off\n"
+        ".bench --name my-bench\n"
+        "select 1;\n"
+        "select 'after-bench-marker' as m;\n"
+    )
+    result = solite_cli(["run", str(script)])
+    assert result.success, result.stderr
+    assert "Benchmark: my-bench" in result.stdout
+    assert result.stdout.count("after-bench-marker") == 1
+
+
 def test_bench_missing_sql_file_errors(solite_cli, tmp_path):
     """A .sql argument that doesn't exist is a file error naming the path,
     not benched as literal SQL."""

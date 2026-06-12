@@ -184,9 +184,17 @@ impl From<&crate::introspect::IntrospectedSchema> for crate::json::JsonSchema {
             .map(|table| JsonTable {
                 name: table.name.clone(),
                 columns: table
-                    .original_columns
+                    .column_details
                     .iter()
-                    .map(JsonColumn::new)
+                    .map(|column| JsonColumn {
+                        name: column.name.clone(),
+                        r#type: column.type_name.clone(),
+                        primary_key: column.primary_key,
+                        not_null: column.not_null,
+                        description: None,
+                        example: None,
+                        tags: None,
+                    })
                     .collect(),
                 without_rowid: table.without_rowid,
                 description: None,
@@ -856,7 +864,16 @@ mod tests {
             assert!(alpha.without_rowid);
             assert_eq!(alpha.columns.len(), 2);
             assert_eq!(alpha.columns[0].name, "key");
+            // column metadata comes from PRAGMA table_info, not defaults
+            assert_eq!(alpha.columns[0].r#type.as_deref(), Some("TEXT"));
+            assert!(alpha.columns[0].primary_key);
+            assert!(!alpha.columns[1].primary_key);
             assert!(alpha.sql.as_ref().unwrap().contains("CREATE TABLE alpha"));
+
+            let zebra = &json.tables[1];
+            assert_eq!(zebra.columns[0].name, "id");
+            assert_eq!(zebra.columns[0].r#type.as_deref(), Some("INTEGER"));
+            assert!(zebra.columns[0].primary_key);
 
             assert_eq!(json.indexes.len(), 1);
             assert_eq!(json.indexes[0].name, "idx_zebra");

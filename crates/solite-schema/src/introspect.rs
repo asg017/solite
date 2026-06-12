@@ -41,6 +41,19 @@ fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
+/// Per-column metadata extracted from `PRAGMA table_info`.
+#[derive(Debug, Clone, Default)]
+pub struct ColumnInfo {
+    /// Original column name (preserves case).
+    pub name: String,
+    /// Declared type, e.g. `INTEGER` (None when the declaration omits it).
+    pub type_name: Option<String>,
+    /// Whether the column has a NOT NULL constraint.
+    pub not_null: bool,
+    /// Whether the column is part of the primary key.
+    pub primary_key: bool,
+}
+
 /// Table information extracted from introspection.
 #[derive(Debug, Clone, Default)]
 pub struct TableInfo {
@@ -50,6 +63,9 @@ pub struct TableInfo {
     pub columns: HashSet<String>,
     /// Original column names (preserves case for display).
     pub original_columns: Vec<String>,
+    /// Per-column metadata, in declaration order (parallel to
+    /// `original_columns`).
+    pub column_details: Vec<ColumnInfo>,
     /// Whether this table was created with WITHOUT ROWID option.
     pub without_rowid: bool,
     /// The original CREATE TABLE SQL statement.
@@ -339,19 +355,36 @@ fn introspect_table(
 ) -> Result<TableInfo, IntrospectError> {
     let mut columns = HashSet::new();
     let mut original_columns = Vec::new();
+    let mut column_details = Vec::new();
 
-    // Use PRAGMA table_info to get column details
+    // Use PRAGMA table_info to get column details:
+    // (cid, name, type, notnull, dflt_value, pk)
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", quote_ident(table_name)))?;
     let rows = stmt.query_map([], |row| {
-        row.get::<_, String>(1) // column name is at index 1
+        Ok((
+            row.get::<_, String>(1)?,  // name
+            row.get::<_, String>(2)?,  // declared type ("" when omitted)
+            row.get::<_, bool>(3)?,    // notnull
+            row.get::<_, i64>(5)?,     // pk (1-based position in PK, 0 = not part)
+        ))
     })?;
 
     for col_result in rows {
-        let col_name = col_result?;
+        let (col_name, col_type, not_null, pk) = col_result?;
         let col_lower = col_name.to_lowercase();
         if !columns.contains(&col_lower) {
             columns.insert(col_lower);
-            original_columns.push(col_name);
+            original_columns.push(col_name.clone());
+            column_details.push(ColumnInfo {
+                name: col_name,
+                type_name: if col_type.is_empty() {
+                    None
+                } else {
+                    Some(col_type)
+                },
+                not_null,
+                primary_key: pk > 0,
+            });
         }
     }
 
@@ -370,6 +403,7 @@ fn introspect_table(
         name: table_name.to_string(),
         columns,
         original_columns,
+        column_details,
         without_rowid,
         sql: sql.map(String::from),
     })
@@ -529,6 +563,19 @@ mod tests {
         assert!(table.columns.contains("email"));
         assert_eq!(table.original_columns.len(), 3);
         assert!(!table.without_rowid);
+
+        // per-column metadata from PRAGMA table_info
+        assert_eq!(table.column_details.len(), 3);
+        let id = &table.column_details[0];
+        assert_eq!(id.name, "id");
+        assert_eq!(id.type_name.as_deref(), Some("INTEGER"));
+        assert!(id.primary_key);
+        let name = &table.column_details[1];
+        assert_eq!(name.type_name.as_deref(), Some("TEXT"));
+        assert!(name.not_null);
+        assert!(!name.primary_key);
+        let email = &table.column_details[2];
+        assert!(!email.not_null);
     }
 
     #[test]

@@ -117,6 +117,11 @@ def test_schema_format_json(solite_cli, tmp_path, schema_db):
 
     assert [t["name"] for t in parsed["tables"]] == ["users"]
     assert [c["name"] for c in parsed["tables"][0]["columns"]] == ["id", "name"]
+    id_col, name_col = parsed["tables"][0]["columns"]
+    assert id_col["type"] == "INTEGER"
+    assert id_col["primary_key"] is True
+    assert name_col["type"] == "TEXT"
+    assert name_col["primary_key"] is False
     assert "CREATE TABLE users" in parsed["tables"][0]["sql"]
     assert [v["name"] for v in parsed["views"]] == ["v_users"]
     assert [i["name"] for i in parsed["indexes"]] == ["idx_users_name"]

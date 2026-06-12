@@ -13,7 +13,7 @@ use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
 use ratatui::widgets::{Cell, Row, Table, TableState};
-use solite_core::sqlite::OwnedValue;
+use solite_core::sqlite::{escape_string, quote_identifier, OwnedValue};
 use solite_core::Runtime;
 
 #[derive(Debug)]
@@ -183,8 +183,8 @@ impl RowCount {
         }
 
         let sql = format!(
-            "SELECT 1 FROM \"{}\" LIMIT {} OFFSET {}",
-            table.replace('"', "\"\""),
+            "SELECT 1 FROM {} LIMIT {} OFFSET {}",
+            quote_identifier(table),
             COUNT_BATCH_SIZE,
             self.probe_offset
         );
@@ -248,7 +248,7 @@ fn background_countable_path(runtime: &Runtime) -> Option<String> {
 fn count_rows(path: &str, table: &str) -> Result<usize, String> {
     let connection = solite_core::sqlite::Connection::open_readonly(path)
         .map_err(|e| format!("Failed to open database for counting: {}", e))?;
-    let sql = format!("SELECT COUNT(*) FROM \"{}\"", table.replace('"', "\"\""));
+    let sql = format!("SELECT COUNT(*) FROM {}", quote_identifier(table));
     let (_, stmt) = connection
         .prepare(&sql)
         .map_err(|e| format!("Count query error: {}", e))?;
@@ -285,9 +285,9 @@ fn load_table_data_with_select(
     // Use quoted identifier to handle special table names
     let _ = writeln!(
         &mut sql,
-        "SELECT {} FROM \"{}\"",
+        "SELECT {} FROM {}",
         select_list,
-        table.replace('"', "\"\"")
+        quote_identifier(table)
     );
     if let Some(order) = order {
         let _ = writeln!(
@@ -351,7 +351,7 @@ fn load_table_data_with_select(
 /// displayed columns, and the on-demand `SELECT *` full-row fetch must all
 /// agree on the same column set. Empty on failure.
 fn table_column_names(runtime: &Runtime, table: &str) -> Vec<String> {
-    let sql = format!("SELECT * FROM \"{}\" LIMIT 0", table.replace('"', "\"\""));
+    let sql = format!("SELECT * FROM {} LIMIT 0", quote_identifier(table));
     match runtime.connection.prepare(&sql) {
         Ok((_, Some(stmt))) => stmt.column_names().unwrap_or_default(),
         _ => vec![],
@@ -361,7 +361,7 @@ fn table_column_names(runtime: &Runtime, table: &str) -> Vec<String> {
 /// Per-column SELECT expression that truncates oversized text/blob values
 /// at the SQL layer, so the window never materializes a huge cell.
 fn truncating_select_expr(column: &str) -> String {
-    let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+    let quoted = quote_identifier(column);
     format!(
         "CASE WHEN typeof({q}) IN ('text','blob') AND length({q}) > {n} \
          THEN substr({q}, 1, {n}) ELSE {q} END AS {q}",
@@ -445,9 +445,9 @@ fn load_rowid_window(
     reverse: bool,
 ) -> Result<(Vec<String>, Vec<Vec<OwnedValue>>, Vec<i64>), String> {
     let sql = format!(
-        "SELECT rowid, {} FROM \"{}\" {}",
+        "SELECT rowid, {} FROM {} {}",
         select_list,
-        table.replace('"', "\"\""),
+        quote_identifier(table),
         suffix
     );
     let mut stmt = match runtime.connection.prepare(&sql) {
@@ -541,13 +541,12 @@ pub fn data_to_inserts(table_name: &str, data: &Data) -> String {
         return format!("-- No data in table \"{}\"", table_name);
     }
 
-    // Double-quote escaping for identifiers, same idiom as the table name.
     let cols = data
         .columns
         .iter()
-        .map(|c| c.replace('"', "\"\""))
+        .map(|c| quote_identifier(c))
         .collect::<Vec<_>>()
-        .join("\", \"");
+        .join(", ");
     data.rows
         .iter()
         .map(|row| {
@@ -558,18 +557,17 @@ pub fn data_to_inserts(table_name: &str, data: &Data) -> String {
                     OwnedValue::Integer(i) => i.to_string(),
                     OwnedValue::Double(f) => f.to_string(),
                     OwnedValue::Text(s) => {
-                        // Single-quote doubling is the correct SQL escaping.
                         // Invalid UTF-8 in TEXT values is silently replaced by
                         // from_utf8_lossy; BLOBs round-trip exactly via hex.
-                        let text = String::from_utf8_lossy(s);
-                        format!("'{}'", text.replace('\'', "''"))
+                        // escape_string (%Q) does the single-quote escaping.
+                        escape_string(&String::from_utf8_lossy(s))
                     }
                     OwnedValue::Blob(b) => format!("X'{}'", hex::encode(b)),
                 })
                 .collect();
             format!(
-                "INSERT INTO \"{}\" (\"{}\") VALUES ({});",
-                table_name.replace('"', "\"\""),
+                "INSERT INTO {} ({}) VALUES ({});",
+                quote_identifier(table_name),
                 cols,
                 values.join(", ")
             )
@@ -945,8 +943,8 @@ impl<'a> TablePage<'a> {
             {
                 if let Some(rowid) = rowids.get(window_idx) {
                     let sql = format!(
-                        "SELECT * FROM \"{}\" WHERE rowid = {}",
-                        self.table_name.replace('"', "\"\""),
+                        "SELECT * FROM {} WHERE rowid = {}",
+                        quote_identifier(&self.table_name),
                         rowid
                     );
                     let mut stmt = match self.runtime.connection.prepare(&sql) {
@@ -1008,7 +1006,7 @@ impl<'a> TablePage<'a> {
 
     /// Generate a SELECT statement for this table
     fn generate_select(&self) -> String {
-        format!("SELECT * FROM \"{}\";", self.table_name.replace('"', "\"\""))
+        format!("SELECT * FROM {};", quote_identifier(&self.table_name))
     }
 
     /// Load the full table (up to COPY_ROW_LIMIT rows, respecting the active
@@ -1571,6 +1569,33 @@ mod tests {
         let (data, truncated) = load_table_for_copy(&runtime, "nums", None, 30).unwrap();
         assert!(truncated);
         assert_eq!(data.rows.len(), 30);
+    }
+
+    #[test]
+    fn test_load_table_with_embedded_quote_name() {
+        // A table (and column) whose name contains a double quote must load
+        // through the count/window/full-row paths, all of which interpolate
+        // the identifier. Without escaping the generated SQL is malformed.
+        let runtime = Runtime::new(None).unwrap();
+        runtime
+            .connection
+            .execute_script(
+                "CREATE TABLE \"we\"\"ird\" (\"c\"\"ol\" INTEGER); \
+                 INSERT INTO \"we\"\"ird\" VALUES (1), (2), (3);",
+            )
+            .unwrap();
+
+        let result = load_table_data(&runtime, "we\"ird", None, 0, 10);
+        assert!(result.error.is_none(), "load error: {:?}", result.error);
+        assert_eq!(result.data.rows.len(), 3);
+        assert_eq!(result.data.columns, vec!["c\"ol".to_string()]);
+
+        // Generated INSERTs round-trip the escaped identifiers.
+        let inserts = data_to_inserts("we\"ird", &result.data);
+        assert!(
+            inserts.starts_with("INSERT INTO \"we\"\"ird\" (\"c\"\"ol\") VALUES (1);"),
+            "got: {inserts}"
+        );
     }
 
     #[test]

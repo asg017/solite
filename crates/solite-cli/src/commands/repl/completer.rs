@@ -4,6 +4,7 @@ use rustyline::Result;
 use solite_completion::{
     detect_context, get_completions, CompletionItem, CompletionKind, SchemaSource,
 };
+use solite_core::sqlite::quote_identifier;
 use solite_core::Runtime;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -40,7 +41,7 @@ impl SchemaSource for LiveSchemaSource<'_> {
 
     fn columns_for_table(&self, table: &str) -> Option<Vec<String>> {
         // Use PRAGMA table_info to get column names
-        let sql = format!("PRAGMA table_info(\"{}\")", table.replace("\"", "\"\""));
+        let sql = format!("PRAGMA table_info({})", quote_identifier(table));
         let mut stmt = match self.runtime.connection.prepare(&sql) {
             Ok((_, Some(stmt))) => stmt,
             _ => return None,
@@ -66,8 +67,8 @@ impl SchemaSource for LiveSchemaSource<'_> {
 
         // Check if the table is WITHOUT ROWID
         let sql = format!(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name = \"{}\"",
-            table.replace("\"", "\"\"")
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name = {}",
+            quote_identifier(table)
         );
         let mut stmt = match self.runtime.connection.prepare(&sql) {
             Ok((_, Some(stmt))) => stmt,

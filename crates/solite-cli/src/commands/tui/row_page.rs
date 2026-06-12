@@ -23,12 +23,9 @@ pub struct PrimaryKeyInfo {
 
 /// Get primary key columns for a table
 pub fn get_primary_keys(runtime: &Runtime, table_name: &str) -> Vec<PrimaryKeyInfo> {
-    use solite_core::sqlite::ValueRefXValue;
+    use solite_core::sqlite::{quote_identifier, ValueRefXValue};
 
-    let sql = format!(
-        "PRAGMA table_info(\"{}\")",
-        table_name.replace('"', "\"\"")
-    );
+    let sql = format!("PRAGMA table_info({})", quote_identifier(table_name));
 
     let mut pks = Vec::new();
 

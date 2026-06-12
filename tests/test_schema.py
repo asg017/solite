@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -107,6 +108,33 @@ def test_schema_pattern_filtering(solite_cli, tmp_path, schema_db):
     nothing = solite_cli(["schema", str(schema_db), "zzz"], cwd=tmp_path)
     assert nothing.success
     assert nothing.stdout.strip() == ""
+
+
+def test_schema_format_json(solite_cli, tmp_path, schema_db):
+    result = solite_cli(["schema", str(schema_db), "--format", "json"], cwd=tmp_path)
+    assert result.success
+    parsed = json.loads(result.stdout)
+
+    assert [t["name"] for t in parsed["tables"]] == ["users"]
+    assert [c["name"] for c in parsed["tables"][0]["columns"]] == ["id", "name"]
+    assert "CREATE TABLE users" in parsed["tables"][0]["sql"]
+    assert [v["name"] for v in parsed["views"]] == ["v_users"]
+    assert [i["name"] for i in parsed["indexes"]] == ["idx_users_name"]
+    assert [t["name"] for t in parsed["triggers"]] == ["trg"]
+    assert parsed["triggers"][0]["event"] == "INSERT"
+
+    # output is deterministic across runs
+    again = solite_cli(["schema", str(schema_db), "--format", "json"], cwd=tmp_path)
+    assert again.success
+    assert again.stdout == result.stdout
+
+
+def test_schema_format_json_rejects_pattern(solite_cli, tmp_path, schema_db):
+    result = solite_cli(
+        ["schema", str(schema_db), "users", "--format", "json"], cwd=tmp_path
+    )
+    assert not result.success
+    assert "pattern" in result.stderr
 
 
 def test_dot_schema_in_run_mode_terminates_statements(solite_cli, tmp_path, schema_db):

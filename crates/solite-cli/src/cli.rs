@@ -545,6 +545,15 @@ pub struct RsyncArgs {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SchemaFormat {
+    /// Raw CREATE statements, one per object, replayable into a new database
+    #[default]
+    Sql,
+    /// Machine-readable JSON with tables/columns/views/indexes/triggers
+    Json,
+}
+
 #[derive(Args, Debug)]
 pub struct SchemaArgs {
     /// Database file to print CREATE statements for
@@ -552,6 +561,10 @@ pub struct SchemaArgs {
 
     /// Only show objects whose name (or owning table) matches this LIKE pattern, e.g. 'users' or 'idx_%'
     pub pattern: Option<String>,
+
+    /// Output format
+    #[arg(long, short = 'f', value_enum, default_value = "sql")]
+    pub format: SchemaFormat,
 }
 
 #[derive(Args, Debug)]

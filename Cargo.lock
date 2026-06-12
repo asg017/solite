@@ -4573,6 +4573,7 @@ dependencies = [
  "solite-lexer",
  "solite-lsp",
  "solite-parser",
+ "solite-schema",
  "solite-stdlib",
  "solite-table",
  "statistical",

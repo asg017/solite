@@ -75,7 +75,7 @@ pub fn run_main() {
         cli::Commands::Diff(args) => commands::diff::diff(args.args),
         cli::Commands::Rsync(args) => commands::rsync::rsync(args.args),
         cli::Commands::Schema(args) => {
-            commands::schema::schema(args.database, args.pattern, allow_ssh)
+            commands::schema::schema(args.database, args.pattern, args.format, allow_ssh)
         }
         cli::Commands::Backup(args) => commands::backup::backup(args),
         cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),

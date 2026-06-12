@@ -43,6 +43,9 @@ pub struct JsonTable {
     /// Additional tags from sqlite-docs (e.g., @details, @source)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<std::collections::HashMap<String, Vec<String>>>,
+    /// The original CREATE TABLE SQL statement, when known
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,6 +72,9 @@ pub struct JsonColumn {
 pub struct JsonView {
     pub name: String,
     pub columns: Vec<String>,
+    /// The original CREATE VIEW SQL statement, when known
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -78,6 +84,9 @@ pub struct JsonIndex {
     pub columns: Vec<String>,
     #[serde(default)]
     pub unique: bool,
+    /// The original CREATE INDEX SQL statement, when known
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,6 +94,9 @@ pub struct JsonTrigger {
     pub name: String,
     pub table_name: String,
     pub event: String, // "INSERT", "UPDATE", "DELETE"
+    /// The original CREATE TRIGGER SQL statement, when known
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<String>,
 }
 
 impl JsonSchema {
@@ -213,6 +225,7 @@ impl JsonTable {
             without_rowid: false,
             description: None,
             tags: None,
+            sql: None,
         }
     }
 
@@ -287,6 +300,7 @@ impl JsonView {
         Self {
             name: name.into(),
             columns,
+            sql: None,
         }
     }
 }
@@ -303,6 +317,7 @@ impl JsonIndex {
             table_name: table_name.into(),
             columns,
             unique: false,
+            sql: None,
         }
     }
 
@@ -324,6 +339,7 @@ impl JsonTrigger {
             name: name.into(),
             table_name: table_name.into(),
             event: event.into(),
+            sql: None,
         }
     }
 }
@@ -577,21 +593,25 @@ mod tests {
                 without_rowid: false,
                 description: None,
                 tags: None,
+                sql: None,
             }],
             views: vec![JsonView {
                 name: "v_users".to_string(),
                 columns: vec!["id".to_string(), "email".to_string()],
+                sql: None,
             }],
             indexes: vec![JsonIndex {
                 name: "idx_email".to_string(),
                 table_name: "users".to_string(),
                 columns: vec!["email".to_string()],
                 unique: true,
+                sql: None,
             }],
             triggers: vec![JsonTrigger {
                 name: "trg_log".to_string(),
                 table_name: "users".to_string(),
                 event: "INSERT".to_string(),
+                sql: None,
             }],
         };
 
@@ -1161,6 +1181,7 @@ mod tests {
                 without_rowid: false,
                 description: Some("Table description".to_string()),
                 tags: Some([("details".to_string(), vec!["http://example.com".to_string()])].into()),
+                sql: None,
             }],
             ..Default::default()
         };

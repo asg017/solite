@@ -18,6 +18,7 @@ solite-fmt = {path="../solite-fmt"}
 solite-analyzer = {path="../solite-analyzer"}
 solite-parser = {path="../solite-parser"}
 solite-lsp = {path="../solite-lsp"}
+solite-schema = {path="../solite-schema"}
 solite-completion = {path="../solite-completion"}
 solite-table = {path="../solite-table"}
 rustyline = {version="12.0.0", features = ["derive"]}

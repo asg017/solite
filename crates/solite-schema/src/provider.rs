@@ -166,6 +166,86 @@ fn introspected_to_analyzer_schema(
     schema
 }
 
+/// Convert an introspected schema into the serializable JSON schema model.
+///
+/// Used by `solite schema --format json` to emit a machine-readable schema.
+/// Output is deterministic: tables, views, indexes, and triggers are sorted
+/// by name (the introspected registries are HashMaps). The original CREATE
+/// SQL is carried through on each object when available.
+#[cfg(not(target_arch = "wasm32"))]
+impl From<&crate::introspect::IntrospectedSchema> for crate::json::JsonSchema {
+    fn from(introspected: &crate::introspect::IntrospectedSchema) -> Self {
+        use crate::introspect::TriggerEvent;
+        use crate::json::{JsonColumn, JsonIndex, JsonSchema, JsonTable, JsonTrigger, JsonView};
+
+        let mut tables: Vec<JsonTable> = introspected
+            .tables
+            .values()
+            .map(|table| JsonTable {
+                name: table.name.clone(),
+                columns: table
+                    .original_columns
+                    .iter()
+                    .map(JsonColumn::new)
+                    .collect(),
+                without_rowid: table.without_rowid,
+                description: None,
+                tags: None,
+                sql: table.sql.clone(),
+            })
+            .collect();
+        tables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut views: Vec<JsonView> = introspected
+            .views
+            .values()
+            .map(|view| JsonView {
+                name: view.name.clone(),
+                columns: view.columns.clone(),
+                sql: view.sql.clone(),
+            })
+            .collect();
+        views.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut indexes: Vec<JsonIndex> = introspected
+            .indexes
+            .values()
+            .map(|index| JsonIndex {
+                name: index.name.clone(),
+                table_name: index.table_name.clone(),
+                columns: index.columns.clone(),
+                unique: index.is_unique,
+                sql: index.sql.clone(),
+            })
+            .collect();
+        indexes.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut triggers: Vec<JsonTrigger> = introspected
+            .triggers
+            .values()
+            .map(|trigger| JsonTrigger {
+                name: trigger.name.clone(),
+                table_name: trigger.table_name.clone(),
+                event: match trigger.event {
+                    Some(TriggerEvent::Update) => "UPDATE",
+                    Some(TriggerEvent::Delete) => "DELETE",
+                    Some(TriggerEvent::Insert) | None => "INSERT",
+                }
+                .to_string(),
+                sql: trigger.sql.clone(),
+            })
+            .collect();
+        triggers.sort_by(|a, b| a.name.cmp(&b.name));
+
+        JsonSchema {
+            tables,
+            views,
+            indexes,
+            triggers,
+        }
+    }
+}
+
 // ============================================================================
 // JsonSchemaProvider - JSON-based schema loading
 // ============================================================================
@@ -746,6 +826,59 @@ mod tests {
             assert!(schema.get_table("settings").unwrap().without_rowid);
 
             let _ = fs::remove_file(&path);
+        }
+
+        #[test]
+        fn test_introspected_to_json_schema_conversion() {
+            use crate::introspect::introspect_connection;
+            use crate::json::JsonSchema;
+
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE zebra (id INTEGER PRIMARY KEY);
+                CREATE TABLE alpha (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
+                CREATE UNIQUE INDEX idx_zebra ON zebra(id);
+                CREATE VIEW v_zebra AS SELECT id FROM zebra;
+                CREATE TRIGGER trg_zebra AFTER UPDATE ON zebra BEGIN SELECT 1; END;
+            "#,
+            )
+            .unwrap();
+
+            let introspected = introspect_connection(&conn).unwrap();
+            let json = JsonSchema::from(&introspected);
+
+            // deterministic: sorted by name despite HashMap storage
+            let table_names: Vec<_> = json.tables.iter().map(|t| t.name.as_str()).collect();
+            assert_eq!(table_names, vec!["alpha", "zebra"]);
+
+            let alpha = &json.tables[0];
+            assert!(alpha.without_rowid);
+            assert_eq!(alpha.columns.len(), 2);
+            assert_eq!(alpha.columns[0].name, "key");
+            assert!(alpha.sql.as_ref().unwrap().contains("CREATE TABLE alpha"));
+
+            assert_eq!(json.indexes.len(), 1);
+            assert_eq!(json.indexes[0].name, "idx_zebra");
+            assert!(json.indexes[0].unique);
+            assert_eq!(json.indexes[0].table_name, "zebra");
+
+            assert_eq!(json.views.len(), 1);
+            assert_eq!(json.views[0].name, "v_zebra");
+            assert_eq!(json.views[0].columns, vec!["id"]);
+
+            assert_eq!(json.triggers.len(), 1);
+            assert_eq!(json.triggers[0].event, "UPDATE");
+            assert!(json.triggers[0]
+                .sql
+                .as_ref()
+                .unwrap()
+                .contains("CREATE TRIGGER trg_zebra"));
+
+            // round-trips through serde
+            let serialized = json.to_json().unwrap();
+            let parsed = JsonSchema::from_json(&serialized).unwrap();
+            assert_eq!(json, parsed);
         }
 
         #[test]

@@ -318,8 +318,9 @@ pub struct TestArgs {
     #[arg(required = true, num_args = 1..)]
     pub files: Vec<PathBuf>,
 
-    /// Reserved; currently ignored (tests always run in-memory)
-    #[arg(long, hide = true)]
+    /// Seed each test file's in-memory database from this SQLite file
+    /// (the file itself is never modified)
+    #[arg(long, value_name = "PATH")]
     pub database: Option<PathBuf>,
 
     /// Also print expected/actual detail for failing assertions

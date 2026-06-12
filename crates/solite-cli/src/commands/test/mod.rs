@@ -178,6 +178,13 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
 
     let mut rt = Runtime::new(None)
         .map_err(|e| TestError::FileRead(format!("Failed to initialize runtime: {}", e)))?;
+
+    // Seed the in-memory database from a fixture file; copy-on-open
+    // semantics mean tests can never mutate the fixture.
+    if let Some(ref fixture) = args.database {
+        seed_database(&rt.connection, fixture).map_err(TestError::Database)?;
+    }
+
     rt.enqueue(
         &source_path.to_string_lossy(),
         &content,
@@ -513,6 +520,57 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
     Ok((stats, snap_state))
 }
 
+/// Copy the contents of a fixture SQLite database into `dest` (the test's
+/// in-memory connection) via the backup API. The fixture is opened
+/// read-only and is never modified.
+fn seed_database(
+    dest: &solite_core::sqlite::Connection,
+    fixture: &Path,
+) -> Result<(), String> {
+    use libsqlite3_sys::{
+        sqlite3_backup_finish, sqlite3_backup_init, sqlite3_backup_step, sqlite3_errstr,
+        SQLITE_DONE, SQLITE_OK,
+    };
+
+    let source = solite_core::sqlite::Connection::open_readonly(&fixture.to_string_lossy())
+        .map_err(|e| {
+            format!(
+                "Failed to open database '{}': {}",
+                fixture.display(),
+                e.message
+            )
+        })?;
+
+    let main = std::ffi::CString::new("main").expect("static str has no NUL");
+    let backup =
+        unsafe { sqlite3_backup_init(dest.db(), main.as_ptr(), source.db(), main.as_ptr()) };
+    if backup.is_null() {
+        return Err(format!(
+            "Failed to seed from '{}': could not initialize copy",
+            fixture.display()
+        ));
+    }
+    let step_rc = unsafe { sqlite3_backup_step(backup, -1) };
+    let finish_rc = unsafe { sqlite3_backup_finish(backup) };
+    if step_rc != SQLITE_DONE || finish_rc != SQLITE_OK {
+        let code = if step_rc != SQLITE_DONE { step_rc } else { finish_rc };
+        let msg = unsafe {
+            let p = sqlite3_errstr(code);
+            if p.is_null() {
+                "unknown error".to_string()
+            } else {
+                std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+            }
+        };
+        return Err(format!(
+            "Failed to seed from '{}': {}",
+            fixture.display(),
+            msg
+        ));
+    }
+    Ok(())
+}
+
 /// Handle a dot command during test execution. Execution errors of SQL
 /// statements inside a whole-file `.run` are recorded as test failures.
 ///
@@ -648,6 +706,8 @@ fn handle_dot_command(
 pub enum TestError {
     /// Failed to read the test file.
     FileRead(String),
+    /// Failed to seed from the `--database` fixture.
+    Database(String),
     /// Tests failed.
     TestsFailed { failures: usize, todos: usize },
 }
@@ -656,6 +716,7 @@ impl std::fmt::Display for TestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TestError::FileRead(msg) => write!(f, "Failed to read file: {}", msg),
+            TestError::Database(msg) => write!(f, "{}", msg),
             TestError::TestsFailed { failures, todos } => {
                 write!(f, "{} failures; {} todos", failures, todos)
             }
@@ -725,6 +786,26 @@ mod tests {
 
     fn default_args(file: PathBuf) -> TestArgs {
         make_args(file, false, false)
+    }
+
+    fn db_args(file: PathBuf, database: PathBuf) -> TestArgs {
+        TestArgs {
+            files: vec![file],
+            database: Some(database),
+            verbose: false,
+            update: false,
+            review: false,
+        }
+    }
+
+    /// Create a SQLite database file with the given setup statements.
+    fn create_fixture_db(path: &Path, statements: &[&str]) {
+        let conn =
+            solite_core::sqlite::Connection::open(&path.to_string_lossy()).unwrap();
+        for sql in statements {
+            let (_, stmt) = conn.prepare(sql).unwrap();
+            stmt.unwrap().execute().unwrap();
+        }
     }
 
     fn update_args(file: PathBuf) -> TestArgs {
@@ -1754,6 +1835,72 @@ SELECT 1; -- @snap keep
         assert!(tmp.join("__snapshots__").join("a-one.snap").exists());
         assert!(sub.join("__snapshots__").join("b-two.snap").exists());
 
+        cleanup(&tmp);
+    }
+
+    // ===== --database fixture seeding =====
+
+    #[test]
+    fn test_database_flag_seeds_fixture() {
+        let tmp = temp_dir();
+        let fixture = tmp.join("fixture.db");
+        create_fixture_db(&fixture, &[
+            "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)",
+            "INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')",
+        ]);
+
+        let file = write_sql(&tmp, "seeded.sql", "\
+SELECT COUNT(*) FROM users; -- 2
+SELECT name FROM users WHERE id = 1; -- 'Alice'
+");
+        let result = test_impl(db_args(file, fixture));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_database_flag_never_modifies_fixture() {
+        let tmp = temp_dir();
+        let fixture = tmp.join("fixture.db");
+        create_fixture_db(&fixture, &[
+            "CREATE TABLE users(id INTEGER PRIMARY KEY)",
+            "INSERT INTO users VALUES (1)",
+        ]);
+        let before = fs::read(&fixture).unwrap();
+
+        // The test INSERTs and sees its own write in the in-memory copy
+        let file = write_sql(&tmp, "mutating.sql", "\
+INSERT INTO users VALUES (2);
+SELECT COUNT(*) FROM users; -- 2
+");
+        let result = test_impl(db_args(file, fixture.clone()));
+        assert!(result.is_ok());
+
+        let after = fs::read(&fixture).unwrap();
+        assert_eq!(before, after, "fixture file bytes changed");
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_database_flag_missing_file_errors() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "t.sql", "SELECT 1; -- 1\n");
+        let result = test_impl(db_args(file, tmp.join("nope.db")));
+        match result {
+            Err(TestError::Database(msg)) => assert!(msg.contains("nope.db")),
+            other => panic!("Expected Database error, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_database_flag_non_database_file_errors() {
+        let tmp = temp_dir();
+        let not_db = tmp.join("not-a-db.txt");
+        fs::write(&not_db, "definitely not a sqlite file").unwrap();
+        let file = write_sql(&tmp, "t.sql", "SELECT 1; -- 1\n");
+        let result = test_impl(db_args(file, not_db));
+        assert!(matches!(result, Err(TestError::Database(_))));
         cleanup(&tmp);
     }
 

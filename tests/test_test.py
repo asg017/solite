@@ -49,3 +49,37 @@ def test_no_files_is_a_usage_error(solite_cli):
     result = solite_cli(["test"])
     assert not result.success
     assert result.stderr.strip() != ""
+
+
+def test_database_flag_seeds_fixture(solite_cli, tmp_path):
+    import sqlite3
+
+    fixture = tmp_path / "fixture.db"
+    conn = sqlite3.connect(fixture)
+    conn.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')")
+    conn.commit()
+    conn.close()
+    before = fixture.read_bytes()
+
+    test_file = write(
+        tmp_path / "seeded.sql",
+        "INSERT INTO users VALUES (3, 'Carol');\n"
+        "SELECT COUNT(*) FROM users; -- 3\n",
+    )
+    result = solite_cli(
+        ["test", "--database", str(fixture), str(test_file)], cwd=tmp_path
+    )
+    assert result.success
+    # copy-on-open: the fixture itself is never modified
+    assert fixture.read_bytes() == before
+
+
+def test_database_flag_missing_file_errors(solite_cli, tmp_path):
+    test_file = write(tmp_path / "t.sql", "SELECT 1; -- 1\n")
+    result = solite_cli(
+        ["test", "--database", str(tmp_path / "nope.db"), str(test_file)],
+        cwd=tmp_path,
+    )
+    assert not result.success
+    assert "nope.db" in result.stderr

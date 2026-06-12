@@ -17,10 +17,14 @@ test-pytest:
 	cargo build
 	uv run --project tests pytest -vv
 
+# Default mode so snapshot drift fails CI; snapshots are pinned to the
+# vendored SQLite, so they're stable per checkout. Use test-snap-update to
+# intentionally re-record (e.g. in the bump-sqlite flow).
 test-snap:
-	cargo run --bin solite -- test --update tests/snaps/snap1.sql
-	cargo run --bin solite -- test --update tests/snaps/snap2.sql
-	cargo run --bin solite -- test --update tests/snaps/compile_options.sql
+	cargo run --bin solite -- test tests/snaps/
+
+test-snap-update:
+	cargo run --bin solite -- test --update tests/snaps/
 
 # Bump the vendored SQLite submodule to a release tag, regenerate the
 # amalgamation and version-bearing snapshots, and verify with the full suite.
@@ -35,6 +39,7 @@ endif
 	cargo build
 	cargo insta test --accept
 	uv run --project tests pytest --snapshot-update
+	$(MAKE) test-snap-update
 	make test
 	@echo "SQLite bumped to $(VERSION). Review 'git diff' and 'git -C vendor/sqlite log -1', then commit."
 
@@ -43,7 +48,7 @@ endif
 bench:
 	cargo bench -p solite-core -p solite-cli
 
-.PHONY: test test-cargo test-pytest test-snap bump-sqlite bench
+.PHONY: test test-cargo test-pytest test-snap test-snap-update bump-sqlite bench
 
 docs-dev:
 	npm -C site run dev

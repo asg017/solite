@@ -1,0 +1,5 @@
+Source: ../snap2.sql
+INSERT INTO t VALUES (-1);
+---
+ERROR[19] constraint failed
+CHECK constraint failed: x > 0

@@ -1,4 +1,0 @@
-Source: ../snaps/snap2.sql
-select 'in snap2.sql' as snap2;
----
-'in snap2.sql'

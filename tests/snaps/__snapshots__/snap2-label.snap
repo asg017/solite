@@ -1,0 +1,4 @@
+Source: ../snap2.sql
+SELECT 'in snap2.sql' AS snap2;
+---
+'in snap2.sql'

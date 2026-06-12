@@ -1,0 +1,4 @@
+Source: ../snap2.sql
+SELECT * FROM t;
+---
+[no results]

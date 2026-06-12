@@ -231,6 +231,19 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                         ));
                     }
 
+                    // Bare `?` parameters have no name (`sqlite3_bind_parameter_name`
+                    // returns NULL), so downstream generators cannot construct an
+                    // argument or bind key for them. A `?N` numbering gap leaves the
+                    // skipped index equally anonymous. Positional order is invisible
+                    // in the IR, so error instead of guessing.
+                    if proc.parameters.iter().any(|p| p.full_name.is_empty()) {
+                        return Err(anyhow!(
+                            "Query `{}` at {} uses an anonymous positional parameter (a bare `?`, or a `?N` numbering gap); use named ($x, :x) or contiguous numbered (?1, ?2, ...) parameters in annotated queries",
+                            proc.name,
+                            step.reference
+                        ));
+                    }
+
                     if let Some(class_name) = &proc.result_class {
                         match declared_classes.get(class_name) {
                             None => {

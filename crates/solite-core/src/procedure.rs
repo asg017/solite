@@ -107,13 +107,14 @@ pub fn parse_name_line(line: &str) -> Option<(String, Vec<String>, Option<String
 /// - `$name::type`    → typed, required
 /// - `$name::type::`  → typed, nullable
 ///
-/// Works for both `$` and `:` prefixes. The full input is preserved as
-/// `full_name` so generators can bind using the exact SQLite bind key.
+/// Works for `$`, `:`, and `?` prefixes (`?N` numbered parameters yield
+/// `name` = `N`). The full input is preserved as `full_name` so generators
+/// can bind using the exact SQLite bind key (or index, for `?N`).
 pub fn parse_parameter(param: &str) -> ProcedureParam {
     let full_name = param.to_string();
 
     let rest = match param.as_bytes().first() {
-        Some(b'$') | Some(b':') => &param[1..],
+        Some(b'$') | Some(b':') | Some(b'?') => &param[1..],
         _ => param,
     };
 
@@ -292,6 +293,15 @@ mod tests {
         assert_eq!(param.name, "id");
         assert!(param.annotated_type.is_none());
         assert!(param.nullable);
+    }
+
+    #[test]
+    fn test_parse_parameter_numbered() {
+        let param = parse_parameter("?2");
+        assert_eq!(param.full_name, "?2");
+        assert_eq!(param.name, "2");
+        assert!(param.annotated_type.is_none());
+        assert!(!param.nullable);
     }
 
     #[test]

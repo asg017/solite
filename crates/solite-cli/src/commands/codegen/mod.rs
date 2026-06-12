@@ -63,6 +63,13 @@
 //! that construct parameter dicts for sqlite3 should use the IR's `full_name`
 //! (minus the leading `$`/`:`) as the key.
 //!
+//! Numbered parameters (`?2`) are positional, not named: their `name` is the
+//! number (`"2"`) and generators bind them by index N rather than by key.
+//! Bare `?` parameters are rejected in annotated queries since the IR cannot
+//! convey their position; the same applies to `?N` numbering gaps (e.g. `?2`
+//! without a `?1`), which leave the skipped index anonymous. Use named
+//! parameters or contiguous numbering starting at `?1`.
+//!
 //! # Schema Support
 //!
 //! The codegen command supports loading a schema from:
@@ -318,6 +325,39 @@ mod tests {
             "create table users(id int, name text);\n\n-- name: trailing :rows -> Workbook :extra\nselect id, name from users;",
         );
         assert!(err.contains(":extra"), "error cites the line: {err}");
+    }
+
+    #[test]
+    fn test_bare_positional_parameter_errors() {
+        let err = report_err(
+            "create table t(a int, b text);\n\n-- name: positional :row\nselect * from t where a = ?;",
+        );
+        assert!(err.contains("positional"), "error names the query: {err}");
+        assert!(err.contains("bare `?`"), "error explains the problem: {err}");
+        assert!(err.contains("$x"), "error suggests alternatives: {err}");
+    }
+
+    #[test]
+    fn test_numbered_parameter_gap_errors() {
+        // `?2` without a `?1` leaves index 1 anonymous — indistinguishable
+        // from a bare `?` in the bind metadata, so it is rejected too.
+        let err = report_err(
+            "create table t(a int, b text);\n\n-- name: gap :row\nselect * from t where b = ?2;",
+        );
+        assert!(err.contains("numbering gap"), "error explains the gap: {err}");
+    }
+
+    #[test]
+    fn test_numbered_positional_parameter_names() {
+        let r = report(
+            "create table t(a int, b text);\n\n-- name: numbered :row\nselect * from t where a = ?1 and b = ?2;",
+        );
+        let params = &r.exports[0].parameters;
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].full_name, "?1");
+        assert_eq!(params[0].name, "1");
+        assert_eq!(params[1].full_name, "?2");
+        assert_eq!(params[1].name, "2");
     }
 
     #[test]

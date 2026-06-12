@@ -306,7 +306,8 @@ Statements without an assertion comment are setup and run silently, against
 an in-memory database. `error:` matches the error message exactly.
 Snapshots (`@snap <name>`) are stored in __snapshots__/ next to the test
 file; use --update to accept changes, --review to accept interactively.
-Dot commands available in tests: .load, .param, .call, .run";
+Dot commands available in tests: .load, .param, .print, .call, .run;
+any other dot command (or a failing one) aborts the test file.";
 
 #[derive(Args, Debug)]
 pub struct TestArgs {

@@ -156,7 +156,17 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
             }
             Some(Ok(step)) => match step.result {
                 StepResult::DotCommand(cmd) => {
-                    handle_dot_command(&cmd, &mut rt, &mut stats);
+                    // Dot commands are setup; a failure invalidates every
+                    // assertion after it, so abort like a failed setup
+                    // statement.
+                    if let Err(msg) = handle_dot_command(&cmd, &mut rt, &mut stats) {
+                        stats.record_failure();
+                        print!("{}", Style::new().red().apply_to("x"));
+                        eprintln!("{}", msg);
+                        eprintln!("Dot command failed; aborting test file.");
+                        aborted = true;
+                        break;
+                    }
                 }
                 StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
                 StepResult::SqlStatement { mut stmt, .. } => {
@@ -360,39 +370,45 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
 
 /// Handle a dot command during test execution. Execution errors in `.run`
 /// SQL are recorded as test failures.
-fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime, stats: &mut TestStats) {
+///
+/// Dot commands only appear in test files as setup, so any failure
+/// (missing `.run` file, unknown procedure, `.load` error, unsupported
+/// command) is returned as `Err` and aborts the file, mirroring the
+/// setup-statement policy in `test_impl`.
+fn handle_dot_command(
+    cmd: &DotCommand,
+    rt: &mut Runtime,
+    stats: &mut TestStats,
+) -> Result<(), String> {
     match cmd {
-        DotCommand::Load(load_cmd) => {
-            if let Err(e) = load_cmd.execute(&mut rt.connection) {
-                eprintln!("Warning: Failed to load extension: {:?}", e);
-            }
+        DotCommand::Print(print_cmd) => {
+            print_cmd.execute();
+            Ok(())
         }
+        DotCommand::Load(load_cmd) => load_cmd
+            .execute(&mut rt.connection)
+            .map(|_| ())
+            .map_err(|e| format!("Failed to load extension: {:?}", e)),
         DotCommand::Parameter(param_cmd) => {
             if let solite_core::dot::ParameterCommand::Set { key, value } = param_cmd {
-                if let Err(e) = rt.define_parameter(key.clone(), value.to_owned()) {
-                    eprintln!("Warning: Failed to set parameter {}: {}", key, e);
-                }
+                rt.define_parameter(key.clone(), value.to_owned())
+                    .map_err(|e| format!("Failed to set parameter {}: {}", key, e))?;
             }
+            Ok(())
         }
-        DotCommand::Call(_) => { /* resolved to SqlStatement in next_stepx() */ }
+        DotCommand::Call(_) => Ok(()), /* resolved to SqlStatement in next_stepx() */
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {
                 for (key, value) in &run_cmd.parameters {
-                    if let Err(e) = rt.define_parameter(key.clone(), value.clone()) {
-                        eprintln!("Warning: Failed to set parameter {}: {}", key, e);
-                    }
+                    rt.define_parameter(key.clone(), value.clone())
+                        .map_err(|e| format!("Failed to set parameter {}: {}", key, e))?;
                 }
-                if let Err(e) = rt.load_file(&run_cmd.file) {
-                    eprintln!("Warning: Failed to load file '{}': {}", run_cmd.file, e);
-                    return;
-                }
-                let proc = match rt.get_procedure(proc_name) {
-                    Some(p) => p.clone(),
-                    None => {
-                        eprintln!("Warning: Unknown procedure: '{}'", proc_name);
-                        return;
-                    }
-                };
+                rt.load_file(&run_cmd.file)
+                    .map_err(|e| format!("Failed to load file '{}': {}", run_cmd.file, e))?;
+                let proc = rt
+                    .get_procedure(proc_name)
+                    .cloned()
+                    .ok_or_else(|| format!("Unknown procedure: '{}'", proc_name))?;
                 match rt.prepare_with_parameters(&proc.sql) {
                     Ok((_, Some(stmt))) => {
                         if let Err(e) = stmt.execute() {
@@ -402,22 +418,22 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime, stats: &mut TestStats)
                                 proc_name, e.message
                             );
                         }
+                        Ok(())
                     }
-                    Ok((_, None)) => {
-                        eprintln!("Warning: Procedure '{}' prepared to empty statement", proc_name);
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Failed to prepare procedure '{}': {:?}", proc_name, e);
-                    }
+                    Ok((_, None)) => Err(format!(
+                        "Procedure '{}' prepared to empty statement",
+                        proc_name
+                    )),
+                    Err(e) => Err(format!(
+                        "Failed to prepare procedure '{}': {:?}",
+                        proc_name, e
+                    )),
                 }
             } else {
-                let saved = match rt.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("Warning: {}", e);
-                        return;
-                    }
-                };
+                let saved = rt
+                    .run_file_begin(&run_cmd.file, &run_cmd.parameters)
+                    .map_err(|e| e.to_string())?;
+                let mut result = Ok(());
                 loop {
                     match rt.next_stepx() {
                         None => break,
@@ -432,26 +448,26 @@ fn handle_dot_command(cmd: &DotCommand, rt: &mut Runtime, stats: &mut TestStats)
                                 }
                             }
                             solite_core::StepResult::DotCommand(ref cmd) => {
-                                handle_dot_command(cmd, rt, stats);
+                                if let Err(e) = handle_dot_command(cmd, rt, stats) {
+                                    result = Err(e);
+                                    break;
+                                }
                             }
                             solite_core::StepResult::ProcedureDefinition(_) => {}
                         },
                         Some(Err(e)) => {
-                            eprintln!("Warning: Error in .run file: {}", e);
+                            result = Err(format!("Error in .run file '{}': {}", run_cmd.file, e));
                             break;
                         }
                     }
                 }
                 rt.run_file_end(saved);
+                result
             }
         }
         #[cfg(feature = "ritestream")]
-        DotCommand::Stream(_) => {
-            eprintln!("Warning: .stream command not supported in test mode");
-        }
-        other => {
-            eprintln!("Warning: Unhandled dot command in test: {:?}", other);
-        }
+        DotCommand::Stream(_) => Err(".stream command not supported in test mode".to_string()),
+        other => Err(format!("Unhandled dot command in test: {:?}", other)),
     }
 }
 
@@ -834,6 +850,79 @@ SELECT 1; -- todo fix this later
 ");
         let result = test_impl(default_args(file));
         assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    // ===== Dot command failures =====
+
+    #[test]
+    fn test_run_missing_file_fails_and_aborts() {
+        let tmp = temp_dir();
+        // The later (passing) assertion must not run: exactly one failure
+        let file = write_sql(&tmp, "dot_run_missing.sql", "\
+.run does-not-exist.sql
+SELECT 1; -- 1
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_run_unknown_procedure_fails() {
+        let tmp = temp_dir();
+        write_sql(&tmp, "procs.sql", "\
+-- name: realProc :value
+SELECT 1;
+");
+        let file = write_sql(&tmp, "dot_run_unknown.sql", "\
+.run procs.sql missingProc
+SELECT 1; -- 1
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_unhandled_dot_command_fails() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "dot_unhandled.sql", "\
+.open foo.db
+SELECT 1; -- 1
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_print_dot_command_supported() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "dot_print.sql", "\
+.print hello from a test
+SELECT 1; -- 1
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_run_valid_file_still_works() {
+        let tmp = temp_dir();
+        write_sql(&tmp, "fixture.sql", "\
+CREATE TABLE t(x);
+INSERT INTO t VALUES (1), (2);
+");
+        let file = write_sql(&tmp, "dot_run_ok.sql", "\
+.run fixture.sql
+SELECT COUNT(*) FROM t; -- 2
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
         cleanup(&tmp);
     }
 

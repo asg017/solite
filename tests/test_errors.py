@@ -66,3 +66,14 @@ def test_prepare_error_assertion_passes(solite_cli, tmp_path):
     result = solite_cli(["test", str(test_file)], cwd=tmp_path)
     assert result.success
     assert "2 successes" in result.stdout
+
+
+def test_dot_run_missing_file_fails_test_run(solite_cli, tmp_path):
+    """A `.run` pointing at a missing file is broken setup: the run must
+    exit nonzero and name the file, not warn and pass."""
+    test_file = tmp_path / "t.sql"
+    test_file.write_text(".run does-not-exist.sql\nSELECT 1; -- 1\n")
+    result = solite_cli(["test", str(test_file)], cwd=tmp_path)
+    assert not result.success
+    assert "does-not-exist.sql" in result.stderr
+    assert "aborting test file" in result.stderr

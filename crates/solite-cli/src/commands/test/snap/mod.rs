@@ -301,7 +301,13 @@ fn handle_new_snapshot(state: &mut SnapState, snapshot_path: &Path, contents: &s
 }
 
 /// Check for orphaned snapshot files and handle based on mode.
-pub fn handle_orphans(state: &mut SnapState, filestem: &str) {
+///
+/// Filestems may contain `-`, so the `{filestem}-{name}.snap` naming is
+/// ambiguous: `foo.sql`'s prefix `foo-` also matches every snapshot of
+/// `foo-bar.sql`. Ownership is therefore confirmed against the `Source:`
+/// header each snapshot embeds; snapshots whose header is missing or points
+/// at a different test file are never treated as orphans.
+pub fn handle_orphans(state: &mut SnapState, filestem: &str, source_path: &Path) {
     if !state.snapshots_dir.exists() {
         return;
     }
@@ -310,6 +316,12 @@ pub fn handle_orphans(state: &mut SnapState, filestem: &str) {
         Ok(e) => e,
         Err(_) => return,
     };
+
+    // The same relative source string the writer embeds (see
+    // handle_snap_assertion).
+    let expected_source = pathdiff::diff_paths(source_path, &state.snapshots_dir)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|| source_path.to_string_lossy().to_string());
 
     let prefix = format!("{}-", filestem);
     let mut orphans: Vec<String> = Vec::new();
@@ -320,7 +332,19 @@ pub fn handle_orphans(state: &mut SnapState, filestem: &str) {
                 && name.ends_with(".snap")
                 && !state.generated_snapshots.contains(name)
             {
-                orphans.push(name.to_string());
+                let path = state.snapshots_dir.join(name);
+                match snapshot_source_header(&path) {
+                    Some(source) if source == expected_source => {
+                        orphans.push(name.to_string());
+                    }
+                    Some(_) => { /* owned by another test file: leave alone */ }
+                    None => {
+                        eprintln!(
+                            "Warning: snapshot {} has no readable 'Source:' header; leaving it in place",
+                            path.display()
+                        );
+                    }
+                }
             }
         }
     }
@@ -371,6 +395,18 @@ pub fn handle_orphans(state: &mut SnapState, filestem: &str) {
             }
         }
     }
+}
+
+/// Read the `Source: <path>` header from a snapshot file's first line.
+///
+/// Returns `None` if the file can't be read or the first line isn't a
+/// `Source:` header.
+fn snapshot_source_header(path: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let first_line = contents.lines().next()?;
+    first_line
+        .strip_prefix("Source: ")
+        .map(|s| s.trim().to_string())
 }
 
 /// Write snapshot contents to a file (create or overwrite).
@@ -645,12 +681,23 @@ mod tests {
 
     // --- handle_orphans tests ---
 
+    /// Write a snapshot file with the `Source:` header `handle_orphans`
+    /// uses to confirm ownership (the writer embeds the test file path
+    /// relative to the snapshots dir, i.e. `../<file>`).
+    fn write_owned_snap(snap_dir: &Path, name: &str, source_file: &str) {
+        fs::write(
+            snap_dir.join(name),
+            format!("Source: ../{}\nSELECT 1;\n---\n1\n", source_file),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn handle_orphans_no_dir_does_nothing() {
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Default);
         state.snapshots_dir = PathBuf::from("/nonexistent/path/__snapshots__");
         // Should not panic
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", Path::new("test.sql"));
         assert_eq!(state.removed, 0);
     }
 
@@ -661,13 +708,13 @@ mod tests {
         fs::create_dir_all(&snap_dir).unwrap();
 
         // Create a snapshot that IS tracked
-        fs::write(snap_dir.join("test-my-snap.snap"), "content").unwrap();
+        write_owned_snap(&snap_dir, "test-my-snap.snap", "test.sql");
 
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir;
         state.generated_snapshots.insert("test-my-snap.snap".to_string());
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
         assert_eq!(state.removed, 0);
 
         cleanup(&tmp);
@@ -680,13 +727,13 @@ mod tests {
         fs::create_dir_all(&snap_dir).unwrap();
 
         let orphan_path = snap_dir.join("test-old-snap.snap");
-        fs::write(&orphan_path, "orphan content").unwrap();
+        write_owned_snap(&snap_dir, "test-old-snap.snap", "test.sql");
 
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Default);
         state.snapshots_dir = snap_dir;
         // No generated snapshots → orphan_path is orphaned
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
 
         // Should still exist (default mode only warns)
         assert!(orphan_path.exists());
@@ -702,12 +749,12 @@ mod tests {
         fs::create_dir_all(&snap_dir).unwrap();
 
         let orphan_path = snap_dir.join("test-old-snap.snap");
-        fs::write(&orphan_path, "orphan content").unwrap();
+        write_owned_snap(&snap_dir, "test-old-snap.snap", "test.sql");
 
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir;
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
 
         assert!(!orphan_path.exists());
         assert_eq!(state.removed, 1);
@@ -721,14 +768,14 @@ mod tests {
         let snap_dir = tmp.join("__snapshots__");
         fs::create_dir_all(&snap_dir).unwrap();
 
-        fs::write(snap_dir.join("test-a.snap"), "a").unwrap();
-        fs::write(snap_dir.join("test-b.snap"), "b").unwrap();
-        fs::write(snap_dir.join("test-c.snap"), "c").unwrap();
+        write_owned_snap(&snap_dir, "test-a.snap", "test.sql");
+        write_owned_snap(&snap_dir, "test-b.snap", "test.sql");
+        write_owned_snap(&snap_dir, "test-c.snap", "test.sql");
 
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir;
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
         assert_eq!(state.removed, 3);
 
         cleanup(&tmp);
@@ -742,12 +789,12 @@ mod tests {
 
         // This file has a different prefix
         let other_file = snap_dir.join("other-snap.snap");
-        fs::write(&other_file, "content").unwrap();
+        write_owned_snap(&snap_dir, "other-snap.snap", "other.sql");
 
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir;
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
 
         // Should NOT be deleted — different prefix
         assert!(other_file.exists());
@@ -768,7 +815,7 @@ mod tests {
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir;
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
         assert_eq!(state.removed, 0);
 
         cleanup(&tmp);
@@ -780,14 +827,14 @@ mod tests {
         let snap_dir = tmp.join("__snapshots__");
         fs::create_dir_all(&snap_dir).unwrap();
 
-        fs::write(snap_dir.join("test-keep.snap"), "keep").unwrap();
-        fs::write(snap_dir.join("test-delete.snap"), "delete").unwrap();
+        write_owned_snap(&snap_dir, "test-keep.snap", "test.sql");
+        write_owned_snap(&snap_dir, "test-delete.snap", "test.sql");
 
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir.clone();
         state.generated_snapshots.insert("test-keep.snap".to_string());
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
 
         assert!(snap_dir.join("test-keep.snap").exists());
         assert!(!snap_dir.join("test-delete.snap").exists());
@@ -805,9 +852,78 @@ mod tests {
         let mut state = SnapState::new(Path::new("test.sql"), SnapMode::Update);
         state.snapshots_dir = snap_dir;
 
-        handle_orphans(&mut state, "test");
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
         assert_eq!(state.removed, 0);
 
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn handle_orphans_prefix_collision_leaves_other_files_snapshots() {
+        // `foo.sql`'s prefix `foo-` also matches `foo-bar.sql`'s snapshots;
+        // the Source header must prevent cross-file deletion.
+        let tmp = temp_dir();
+        let snap_dir = tmp.join("__snapshots__");
+        fs::create_dir_all(&snap_dir).unwrap();
+
+        write_owned_snap(&snap_dir, "foo-bar-other.snap", "foo-bar.sql");
+        write_owned_snap(&snap_dir, "foo-stale.snap", "foo.sql");
+
+        let mut state = SnapState::new(&tmp.join("foo.sql"), SnapMode::Update);
+        state.snapshots_dir = snap_dir.clone();
+
+        handle_orphans(&mut state, "foo", &tmp.join("foo.sql"));
+
+        // foo-bar.sql's snapshot survives; foo.sql's own stale snap is removed
+        assert!(snap_dir.join("foo-bar-other.snap").exists());
+        assert!(!snap_dir.join("foo-stale.snap").exists());
+        assert_eq!(state.removed, 1);
+
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn handle_orphans_no_source_header_never_deleted() {
+        let tmp = temp_dir();
+        let snap_dir = tmp.join("__snapshots__");
+        fs::create_dir_all(&snap_dir).unwrap();
+
+        let legacy = snap_dir.join("test-legacy.snap");
+        fs::write(&legacy, "hand-edited content with no header\n").unwrap();
+
+        let mut state = SnapState::new(&tmp.join("test.sql"), SnapMode::Update);
+        state.snapshots_dir = snap_dir;
+
+        handle_orphans(&mut state, "test", &tmp.join("test.sql"));
+
+        assert!(legacy.exists());
+        assert_eq!(state.removed, 0);
+
+        cleanup(&tmp);
+    }
+
+    // --- snapshot_source_header tests ---
+
+    #[test]
+    fn snapshot_source_header_parses() {
+        let tmp = temp_dir();
+        let path = tmp.join("a.snap");
+        fs::write(&path, "Source: ../foo.sql\nSELECT 1;\n---\n1\n").unwrap();
+        assert_eq!(
+            snapshot_source_header(&path),
+            Some("../foo.sql".to_string())
+        );
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn snapshot_source_header_missing() {
+        let tmp = temp_dir();
+        let path = tmp.join("b.snap");
+        fs::write(&path, "no header here\n").unwrap();
+        assert_eq!(snapshot_source_header(&path), None);
+        // unreadable file
+        assert_eq!(snapshot_source_header(Path::new("/nonexistent.snap")), None);
         cleanup(&tmp);
     }
 }

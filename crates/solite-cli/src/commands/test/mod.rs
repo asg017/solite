@@ -278,7 +278,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     // Handle orphaned snapshots — skipped on abort, where unreached @snap
     // directives would be misreported (and in update mode deleted) as orphans
     if !aborted {
-        handle_orphans(&mut snap_state, &filestem);
+        handle_orphans(&mut snap_state, &filestem, &source_path);
     }
 
     // Print results
@@ -1059,6 +1059,29 @@ SELECT 1; -- @snap keep
         // Orphan should still exist in default mode
         let snap_dir = tmp.join("__snapshots__");
         assert!(snap_dir.join("orphan_def-to-orphan.snap").exists());
+
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_orphan_prefix_collision_keeps_other_files_snapshots() {
+        let tmp = temp_dir();
+
+        // foo.sql and foo-bar.sql share the filestem prefix "foo-"
+        let foo = write_sql(&tmp, "foo.sql", "SELECT 1; -- @snap base\n");
+        let foo_bar = write_sql(&tmp, "foo-bar.sql", "SELECT 2; -- @snap other\n");
+        test_impl(update_args(foo.clone())).unwrap();
+        test_impl(update_args(foo_bar)).unwrap();
+
+        let snap_dir = tmp.join("__snapshots__");
+        assert!(snap_dir.join("foo-base.snap").exists());
+        assert!(snap_dir.join("foo-bar-other.snap").exists());
+
+        // Re-running foo.sql with --update must not delete foo-bar.sql's
+        // snapshot even though it matches foo.sql's orphan prefix
+        test_impl(update_args(foo)).unwrap();
+        assert!(snap_dir.join("foo-base.snap").exists());
+        assert!(snap_dir.join("foo-bar-other.snap").exists());
 
         cleanup(&tmp);
     }

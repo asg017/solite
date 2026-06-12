@@ -45,6 +45,7 @@ use solite_core::dot::DotCommand;
 use solite_core::{BlockSource, Runtime, StepResult};
 use std::fs::read_to_string;
 use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 use crate::cli::TestArgs;
 
@@ -56,10 +57,123 @@ use report::{report_mismatch, TestStats};
 use snap::{handle_orphans, handle_snap_assertion, SnapMode, SnapState};
 use value::value_to_string;
 
-/// Run SQL tests from a file.
+/// Run SQL tests from every given file/directory and aggregate the results.
 fn test_impl(args: TestArgs) -> Result<(), TestError> {
-    let source_path = args.file;
-    let content = read_to_string(&source_path)
+    let files = expand_test_paths(&args.files)?;
+
+    if files.len() == 1 {
+        let (stats, snap_state) = run_file(&files[0], &args)?;
+        return summarize(&stats, &snap_state);
+    }
+
+    let mut total = TestStats::new();
+    // Counter-only aggregate; its path is never used for printing.
+    let mut snap_total = SnapState::new(Path::new(""), snap_mode(&args));
+
+    for file in &files {
+        print!("{}: ", file.display());
+        let _ = std::io::stdout().flush();
+        match run_file(file, &args) {
+            Ok((stats, snap_state)) => {
+                let mut line =
+                    format!(" {} passed, {} failed", stats.successes, stats.failures);
+                if !stats.todos.is_empty() {
+                    line.push_str(&format!(", {} todo(s)", stats.todos.len()));
+                }
+                if snap_state.rejected > 0 {
+                    line.push_str(&format!(
+                        ", {} snapshot(s) rejected",
+                        snap_state.rejected
+                    ));
+                }
+                println!("{}", line);
+                total.successes += stats.successes;
+                total.failures += stats.failures;
+                total.todos.extend(stats.todos);
+                snap_total.matches += snap_state.matches;
+                snap_total.new += snap_state.new;
+                snap_total.updated += snap_state.updated;
+                snap_total.rejected += snap_state.rejected;
+                snap_total.removed += snap_state.removed;
+            }
+            Err(e) => {
+                println!();
+                eprintln!("Error: {}", e);
+                total.failures += 1;
+            }
+        }
+    }
+
+    summarize(&total, &snap_total)
+}
+
+/// Expand the CLI path arguments: directories become their `*.sql` files
+/// (non-recursive, sorted), plain files are used as-is.
+fn expand_test_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, TestError> {
+    let mut files = Vec::new();
+    for path in paths {
+        if path.is_dir() {
+            let entries = std::fs::read_dir(path)
+                .map_err(|e| TestError::FileRead(format!("{}: {}", path.display(), e)))?;
+            let mut sql_files: Vec<PathBuf> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|ext| ext == "sql") && p.is_file())
+                .collect();
+            if sql_files.is_empty() {
+                return Err(TestError::FileRead(format!(
+                    "{}: no .sql files found in directory",
+                    path.display()
+                )));
+            }
+            sql_files.sort();
+            files.append(&mut sql_files);
+        } else {
+            files.push(path.clone());
+        }
+    }
+    Ok(files)
+}
+
+/// The snapshot mode selected by the CLI flags.
+fn snap_mode(args: &TestArgs) -> SnapMode {
+    if args.update {
+        SnapMode::Update
+    } else if args.review {
+        SnapMode::Review
+    } else {
+        SnapMode::Default
+    }
+}
+
+/// Print the (possibly aggregated) summary and convert it to an exit result.
+fn summarize(stats: &TestStats, snap_state: &SnapState) -> Result<(), TestError> {
+    stats.print_summary();
+    snap_state.print_summary();
+
+    let has_failures = stats.has_failures() || snap_state.has_failures();
+
+    if has_failures {
+        if !stats.todos.is_empty() {
+            eprintln!(
+                "\nThere are {} TODO(s). Treating as failure per policy.",
+                stats.todos.len()
+            );
+        }
+        Err(TestError::TestsFailed {
+            failures: stats.failures + snap_state.rejected,
+            todos: stats.todos.len(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Run a single SQL test file with its own fresh in-memory runtime and
+/// snapshot state. Returns the file's stats; printing dots and diagnostics
+/// happens inline.
+fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState), TestError> {
+    let content = read_to_string(source_path)
         .map_err(|e| TestError::FileRead(format!("{}: {}", source_path.display(), e)))?;
 
     let mut rt = Runtime::new(None)
@@ -67,19 +181,11 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     rt.enqueue(
         &source_path.to_string_lossy(),
         &content,
-        BlockSource::File(source_path.clone()),
+        BlockSource::File(source_path.to_path_buf()),
     );
 
     let mut stats = TestStats::new();
-
-    let snap_mode = if args.update {
-        SnapMode::Update
-    } else if args.review {
-        SnapMode::Review
-    } else {
-        SnapMode::Default
-    };
-    let mut snap_state = SnapState::new(&source_path, snap_mode);
+    let mut snap_state = SnapState::new(source_path, snap_mode(args));
 
     let filestem = source_path
         .file_stem()
@@ -120,7 +226,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                         rt.enqueue(
                             &file_name,
                             &remainder,
-                            BlockSource::File(source_path.clone()),
+                            BlockSource::File(source_path.to_path_buf()),
                         );
                     }
                     _ => {
@@ -401,30 +507,10 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     // Handle orphaned snapshots — skipped on abort, where unreached @snap
     // directives would be misreported (and in update mode deleted) as orphans
     if !aborted {
-        handle_orphans(&mut snap_state, &filestem, &source_path);
+        handle_orphans(&mut snap_state, &filestem, source_path);
     }
 
-    // Print results
-    stats.print_summary();
-    snap_state.print_summary();
-
-    let has_failures =
-        stats.has_failures() || snap_state.has_failures();
-
-    if has_failures {
-        if !stats.todos.is_empty() {
-            eprintln!(
-                "\nThere are {} TODO(s). Treating as failure per policy.",
-                stats.todos.len()
-            );
-        }
-        Err(TestError::TestsFailed {
-            failures: stats.failures + snap_state.rejected,
-            todos: stats.todos.len(),
-        })
-    } else {
-        Ok(())
-    }
+    Ok((stats, snap_state))
 }
 
 /// Handle a dot command during test execution. Execution errors of SQL
@@ -624,8 +710,12 @@ mod tests {
     }
 
     fn make_args(file: PathBuf, update: bool, review: bool) -> TestArgs {
+        multi_args(vec![file], update, review)
+    }
+
+    fn multi_args(files: Vec<PathBuf>, update: bool, review: bool) -> TestArgs {
         TestArgs {
-            file,
+            files,
             database: None,
             verbose: false,
             update,
@@ -1563,6 +1653,106 @@ SELECT 1; -- @snap keep
         test_impl(update_args(foo)).unwrap();
         assert!(snap_dir.join("foo-base.snap").exists());
         assert!(snap_dir.join("foo-bar-other.snap").exists());
+
+        cleanup(&tmp);
+    }
+
+    // ===== Multi-file and directory arguments =====
+
+    #[test]
+    fn test_multi_file_all_passing() {
+        let tmp = temp_dir();
+        let a = write_sql(&tmp, "a.sql", "SELECT 1; -- 1\n");
+        let b = write_sql(&tmp, "b.sql", "SELECT 2; -- 2\n");
+        let result = test_impl(multi_args(vec![a, b], false, false));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_multi_file_one_failing() {
+        let tmp = temp_dir();
+        let a = write_sql(&tmp, "a.sql", "SELECT 1; -- 1\n");
+        let b = write_sql(&tmp, "b.sql", "SELECT 2; -- 999\n");
+        match test_impl(multi_args(vec![a, b], false, false)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_multi_file_fresh_runtime_per_file() {
+        let tmp = temp_dir();
+        // b.sql must not see a.sql's table: each file gets its own database
+        let a = write_sql(&tmp, "a.sql", "CREATE TABLE t(x);\nINSERT INTO t VALUES (1);\n");
+        let b = write_sql(
+            &tmp,
+            "b.sql",
+            "SELECT * FROM t; -- error: no such table: t\n",
+        );
+        let result = test_impl(multi_args(vec![a, b], false, false));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_multi_file_missing_file_counts_as_failure() {
+        let tmp = temp_dir();
+        let a = write_sql(&tmp, "a.sql", "SELECT 1; -- 1\n");
+        let missing = tmp.join("missing.sql");
+        match test_impl(multi_args(vec![a, missing], false, false)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_directory_argument_runs_all_sql_files() {
+        let tmp = temp_dir();
+        write_sql(&tmp, "a.sql", "SELECT 1; -- 1\n");
+        write_sql(&tmp, "b.sql", "SELECT 2; -- 999\n");
+        fs::write(tmp.join("notes.txt"), "not sql").unwrap();
+        match test_impl(multi_args(vec![tmp.clone()], false, false)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_directory_argument_all_passing() {
+        let tmp = temp_dir();
+        write_sql(&tmp, "a.sql", "SELECT 1; -- 1\n");
+        write_sql(&tmp, "b.sql", "SELECT 2; -- 2\n");
+        let result = test_impl(multi_args(vec![tmp.clone()], false, false));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_directory_without_sql_files_errors() {
+        let tmp = temp_dir();
+        fs::write(tmp.join("notes.txt"), "not sql").unwrap();
+        match test_impl(multi_args(vec![tmp.clone()], false, false)) {
+            Err(TestError::FileRead(msg)) => assert!(msg.contains("no .sql files")),
+            other => panic!("Expected FileRead, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_multi_file_snapshots_resolve_per_file() {
+        let tmp = temp_dir();
+        let sub = tmp.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let a = write_sql(&tmp, "a.sql", "SELECT 1; -- @snap one\n");
+        let b = write_sql(&sub, "b.sql", "SELECT 2; -- @snap two\n");
+        test_impl(multi_args(vec![a, b], true, false)).unwrap();
+
+        assert!(tmp.join("__snapshots__").join("a-one.snap").exists());
+        assert!(sub.join("__snapshots__").join("b-two.snap").exists());
 
         cleanup(&tmp);
     }

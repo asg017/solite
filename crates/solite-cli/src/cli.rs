@@ -306,13 +306,17 @@ Statements without an assertion comment are setup and run silently, against
 an in-memory database. `error:` matches the error message exactly.
 Snapshots (`@snap <name>`) are stored in __snapshots__/ next to the test
 file; use --update to accept changes, --review to accept interactively.
+Multiple files and directories may be given; each file runs against its
+own fresh in-memory database and the summary is aggregated.
 Dot commands available in tests: .load, .param, .print, .call, .run;
 any other dot command (or a failing one) aborts the test file.";
 
 #[derive(Args, Debug)]
 pub struct TestArgs {
-    /// SQL test file with inline `-- expected` assertions
-    pub file: PathBuf,
+    /// SQL test files with inline `-- expected` assertions; a directory
+    /// expands to the *.sql files directly inside it (non-recursive)
+    #[arg(required = true, num_args = 1..)]
+    pub files: Vec<PathBuf>,
 
     /// Reserved; currently ignored (tests always run in-memory)
     #[arg(long, hide = true)]

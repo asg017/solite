@@ -238,6 +238,10 @@ Examples:
   solite bench \"SELECT 1\" \"SELECT 1 + 1\"        # compare two statements
   solite bench --database a.db --database b.db query.sql query.sql
 
+Give --database once to run every SQL argument against that database
+(one shared connection), or once per SQL argument to pair them by
+position. Any other count is an error.
+
 Also available inside scripts and the REPL as the multi-line `.bench`
 dot command.";
 
@@ -247,7 +251,8 @@ pub struct BenchArgs {
     #[arg(required = true)]
     pub sql: Vec<String>,
 
-    /// Database for each SQL argument, paired by position
+    /// Database(s) to bench against: give once to share across all SQL
+    /// arguments, or once per SQL argument to pair by position
     /// (default: in-memory)
     #[arg(long)]
     pub database: Option<Vec<PathBuf>>,

@@ -12,6 +12,50 @@ def test_bench_missing_sql_file_errors(solite_cli, tmp_path):
     assert "Time" not in result.stdout
 
 
+def test_bench_single_database_broadcasts_to_all_queries(solite_cli, tmp_path):
+    """One --database with several queries benches all of them against it."""
+    db = tmp_path / "app.db"
+    setup = tmp_path / "setup.sql"
+    setup.write_text("CREATE TABLE t(a integer); INSERT INTO t VALUES (1);")
+    assert solite_cli(["run", str(setup), str(db)]).success
+
+    result = solite_cli(
+        [
+            "bench",
+            "--database",
+            str(db),
+            "SELECT count(*) FROM t;",
+            "SELECT max(a) FROM t;",
+        ]
+    )
+    assert result.success, result.stderr
+    assert "SELECT count(*) FROM t;" in result.stdout
+    assert "SELECT max(a) FROM t;" in result.stdout
+
+
+def test_bench_database_arity_mismatch_fails_before_benchmarking(
+    solite_cli, tmp_path
+):
+    """2 databases for 3 queries errors up front: no benchmark output."""
+    db_a = tmp_path / "a.db"
+    db_b = tmp_path / "b.db"
+    result = solite_cli(
+        [
+            "bench",
+            "--database",
+            str(db_a),
+            "--database",
+            str(db_b),
+            "SELECT 1;",
+            "SELECT 2;",
+            "SELECT 3;",
+        ]
+    )
+    assert not result.success
+    assert "got 2 databases for 3 queries" in result.stderr
+    assert "Time" not in result.stdout
+
+
 def test_bench_multi_statement_file_runs_setup_and_benches_last(
     solite_cli, tmp_path
 ):

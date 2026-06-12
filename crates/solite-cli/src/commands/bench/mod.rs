@@ -163,34 +163,65 @@ pub fn bench(args: BenchArgs) -> Result<(), ()> {
     bench_impl(args).map_err(|e| eprintln!("Error: {e:?}"))
 }
 
+/// Open a database connection and load any requested extensions into it.
+fn open_database(
+    db_path: &std::path::Path,
+    extensions: &Option<Vec<std::path::PathBuf>>,
+) -> anyhow::Result<Connection> {
+    let path_str = db_path
+        .as_os_str()
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid database path: {}", db_path.display()))?;
+    let conn = Connection::open(path_str)?;
+    if let Some(extensions) = extensions {
+        load_extensions(&conn, extensions)?;
+    }
+    Ok(conn)
+}
+
 fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
+    // Validate --database pairing up front, before any iterations run:
+    // a single --database broadcasts to every SQL argument, otherwise the
+    // counts must match exactly.
+    if let Some(databases) = &args.database {
+        if databases.len() != 1 && databases.len() != args.sql.len() {
+            anyhow::bail!(
+                "--database must be given once or once per SQL argument \
+                 (got {} databases for {} queries)",
+                databases.len(),
+                args.sql.len()
+            );
+        }
+    }
+
     let mut runtime = Runtime::new(None)?;
 
-    // Load extensions for the runtime connection
-    if let Some(ref extensions) = args.load_extension {
-        load_extensions(&runtime.connection, extensions)?;
+    match &args.database {
+        // Broadcast: open the single database once and reuse the (warm)
+        // connection across all SQL arguments.
+        Some(databases) if databases.len() == 1 => {
+            runtime.connection = open_database(&databases[0], &args.load_extension)?;
+        }
+        // Positional pairing: per-query connections are opened in the loop.
+        Some(_) => {}
+        // In-memory default: extensions load into the runtime connection.
+        None => {
+            if let Some(ref extensions) = args.load_extension {
+                load_extensions(&runtime.connection, extensions)?;
+            }
+        }
     }
 
     let pb = create_progress_bar();
 
     for (idx, sql_arg) in args.sql.iter().enumerate() {
         // Set up connection for this query
-        if let Some(databases) = &args.database {
-            let db_path = databases.get(idx)
-                .ok_or_else(|| anyhow::anyhow!("No database specified for SQL argument {}", idx))?;
-
-            let path_str = db_path.as_os_str().to_str()
-                .ok_or_else(|| anyhow::anyhow!("Invalid database path: {}", db_path.display()))?;
-
-            let conn = Connection::open(path_str)?;
-
-            if let Some(ref extensions) = args.load_extension {
-                load_extensions(&conn, extensions)?;
+        match &args.database {
+            Some(databases) if databases.len() > 1 => {
+                runtime.connection = open_database(&databases[idx], &args.load_extension)?;
             }
-
-            runtime.connection = conn;
-        } else {
-            pb.set_message("Using in-memory database");
+            Some(_) => {}
+            None => pb.set_message("Using in-memory database"),
         }
 
         // Resolve SQL (from file or direct)

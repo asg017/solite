@@ -17,7 +17,7 @@
 //!
 //! - `-- [no results]`: Expect no rows returned
 //! - `-- error: <message>`: Expect a specific error message
-//! - `-- TODO ...`: Skip this test (marked as pending)
+//! - `-- TODO ...`: Record as a TODO (listed in the summary and fails the run until resolved)
 //! - `-- @snap <name>`: Snapshot assertion (captures full output to a .snap file)
 //!
 //! # Example Test File
@@ -91,6 +91,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
 
     let mut aborted = false;
     let mut warned_multi_column = false;
+    let mut warned_multi_row = false;
 
     loop {
         match rt.next_stepx() {
@@ -197,7 +198,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                     };
 
                     // Handle TODO annotations
-                    if epilogue.to_uppercase().starts_with("TODO") {
+                    if parser::is_todo_epilogue(&epilogue) {
                         let ref_display = format!("{}", step.reference);
                         if let Some((file, line, col)) = parse_ref_file_line_col(&ref_display) {
                             stats.record_todo(file, line, col, epilogue.clone());
@@ -345,6 +346,7 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                             };
 
                             let actual = value_to_string(v);
+                            drop(row);
                             if actual == epilogue {
                                 stats.record_success();
                                 print!("{}", Style::new().green().apply_to("."));
@@ -366,6 +368,20 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                                     );
                                 } else if args.verbose {
                                     eprintln!("\nExpected: '{}' Got: '{}'", epilogue, actual);
+                                }
+                            }
+
+                            // Inline assertions only ever compare the first
+                            // row; warn once if the query has more. Probing
+                            // only read-only statements avoids driving
+                            // side-effecting DML/RETURNING further.
+                            if !warned_multi_row && stmt.readonly() {
+                                if let Ok(Some(_)) = stmt.next() {
+                                    warned_multi_row = true;
+                                    eprintln!(
+                                        "note: {} returns more than one row; inline assertions compare only the first (further notes suppressed)",
+                                        step.reference
+                                    );
                                 }
                             }
                         }
@@ -1078,6 +1094,70 @@ SELECT :x; -- '1'
 ");
         let result = test_impl(default_args(file));
         assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_todo_prefix_word_is_not_todo() {
+        let tmp = temp_dir();
+        // "TODOLIST ..." is an ordinary (failing) value assertion, not a TODO
+        let file = write_sql(&tmp, "todolist.sql", "\
+SELECT 1; -- TODOLIST is a value
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, todos }) => {
+                assert_eq!(failures, 1);
+                assert_eq!(todos, 0);
+            }
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_todo_with_punctuation_boundary() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "todo_punct.sql", "\
+SELECT 1; -- TODO: handle later
+SELECT 2; -- todo(alex) revisit
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, todos }) => {
+                assert_eq!(failures, 0);
+                assert_eq!(todos, 2);
+            }
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    // ===== Multi-row note =====
+
+    #[test]
+    fn test_multi_row_result_still_passes_on_first_row() {
+        let tmp = temp_dir();
+        // The one-time multi-row note must not change pass/fail
+        let file = write_sql(&tmp, "multirow.sql", "\
+CREATE TABLE t(x);
+INSERT INTO t VALUES (1),(2),(3);
+SELECT x FROM t ORDER BY x; -- 1
+SELECT x FROM t ORDER BY x DESC; -- 3
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_multi_row_mismatch_still_fails() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "multirow_fail.sql", "\
+CREATE TABLE t(x);
+INSERT INTO t VALUES (1),(2);
+SELECT x FROM t ORDER BY x; -- 2
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_err());
         cleanup(&tmp);
     }
 

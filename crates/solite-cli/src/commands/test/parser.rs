@@ -53,6 +53,24 @@ pub fn parse_ref_file_line_col(ref_display: &str) -> Option<(String, usize, usiz
     Some((file, line, col))
 }
 
+/// Check whether a stripped epilogue is a TODO annotation.
+///
+/// Requires a word boundary after `TODO` (end of string or a
+/// non-alphanumeric character) so ordinary expected values like
+/// `TODOLIST is a value` aren't hijacked — the same rule as the `@snap`
+/// boundary check in [`parse_snap_directive`]. Case-insensitive:
+/// `TODO`, `todo: later`, `TODO(alex)`, and `TODO fix` all match.
+pub fn is_todo_epilogue(epilogue: &str) -> bool {
+    let bytes = epilogue.as_bytes();
+    if bytes.len() < 4 || !bytes[..4].eq_ignore_ascii_case(b"TODO") {
+        return false;
+    }
+    match epilogue[4..].chars().next() {
+        None => true,
+        Some(c) => !c.is_alphanumeric(),
+    }
+}
+
 /// Recover an `error: <msg>` assertion for a statement that failed to
 /// *prepare* (and so never produced a `Step` with an epilogue).
 ///
@@ -206,6 +224,28 @@ mod tests {
         let content = "line1\nline2";
         assert_eq!(compute_offset_from_reference(content, "f:0:1"), None);
         assert_eq!(compute_offset_from_reference(content, "f:10:1"), None);
+    }
+
+    // --- is_todo_epilogue tests ---
+
+    #[test]
+    fn test_is_todo_epilogue_word_boundary() {
+        assert!(is_todo_epilogue("TODO"));
+        assert!(is_todo_epilogue("todo"));
+        assert!(is_todo_epilogue("TODO fix this later"));
+        assert!(is_todo_epilogue("todo: later"));
+        assert!(is_todo_epilogue("TODO(alex) revisit"));
+        assert!(is_todo_epilogue("ToDo soon"));
+    }
+
+    #[test]
+    fn test_is_todo_epilogue_rejects_prefix_words() {
+        assert!(!is_todo_epilogue("TODOLIST is a value"));
+        assert!(!is_todo_epilogue("TODOs"));
+        assert!(!is_todo_epilogue("todo2"));
+        assert!(!is_todo_epilogue("TOD"));
+        assert!(!is_todo_epilogue(""));
+        assert!(!is_todo_epilogue("42"));
     }
 
     // --- prepare_error_assertion tests ---

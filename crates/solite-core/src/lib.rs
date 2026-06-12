@@ -1059,6 +1059,39 @@ select not_exist();",
     }
 
     #[test]
+    fn test_replacement_scan_escapes_quoted_csv_path() {
+        // A CSV path containing a double quote (legal on disk) must be escaped
+        // when interpolated into the generated CREATE VIRTUAL TABLE; otherwise
+        // the DDL is malformed and the replacement scan panics. Drives the full
+        // next_stepx() retry path end to end.
+        let dir = tempfile::tempdir().unwrap();
+        let csv_path = dir.path().join("we\"ird.csv");
+        std::fs::write(&csv_path, "a,b\n1,2\n").unwrap();
+        let path_str = csv_path.to_str().unwrap();
+
+        let mut rt = Runtime::new(None).unwrap();
+        rt.enqueue(
+            "[input]",
+            &format!(
+                "SELECT a, b FROM {};",
+                crate::sqlite::quote_identifier(path_str)
+            ),
+            BlockSource::Repl,
+        );
+
+        let mut stmt = match rt.next_stepx() {
+            Some(Ok(step)) => match step.result {
+                StepResult::SqlStatement { stmt, .. } => stmt,
+                other => panic!("expected SqlStatement, got {other:?}"),
+            },
+            other => panic!("expected a step, got {other:?}"),
+        };
+        let row = stmt.next().unwrap().expect("expected one row from the csv");
+        assert_eq!(row[0].as_str(), "1");
+        assert_eq!(row[1].as_str(), "2");
+    }
+
+    #[test]
     fn test_extract_epilogue_line_comment_same_line() {
         let code = "select 1; -- epilogue\nselect 2;";
         let rest_index = "select 1;".len();

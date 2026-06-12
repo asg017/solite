@@ -20,7 +20,7 @@
 //! - Truncates columns for large tables (shows PKs/FKs + ellipsis)
 
 use crate::dot::DotError;
-use crate::sqlite::ValueRefXValue;
+use crate::sqlite::{escape_string, ValueRefXValue};
 use crate::Runtime;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -116,8 +116,8 @@ impl GraphvizCommand {
     /// Get column information for a specific table.
     fn get_table_columns(&self, runtime: &Runtime, table: &str) -> Result<Vec<Column>, DotError> {
         let query = format!(
-            "SELECT name, type, pk FROM pragma_table_info('{}')",
-            table.replace('\'', "''")
+            "SELECT name, type, pk FROM pragma_table_info({})",
+            escape_string(table)
         );
 
         let (_, stmt) = runtime.connection.prepare(&query)?;
@@ -154,8 +154,8 @@ impl GraphvizCommand {
         table: &str,
     ) -> Result<Vec<ForeignKey>, DotError> {
         let query = format!(
-            "SELECT \"from\", \"table\", \"to\" FROM pragma_foreign_key_list('{}')",
-            table.replace('\'', "''")
+            "SELECT \"from\", \"table\", \"to\" FROM pragma_foreign_key_list({})",
+            escape_string(table)
         );
 
         let (_, stmt) = runtime.connection.prepare(&query)?;
@@ -194,13 +194,13 @@ impl GraphvizCommand {
         let query = format!(
             r#"
             SELECT il.name
-            FROM pragma_index_list('{}') AS il
+            FROM pragma_index_list({}) AS il
             JOIN pragma_index_info(il.name) AS ii
             WHERE il."unique" = 1
-              AND ii.name = '{}'
+              AND ii.name = {}
             "#,
-            table.replace('\'', "''"),
-            column.replace('\'', "''")
+            escape_string(table),
+            escape_string(column)
         );
 
         runtime
@@ -417,5 +417,20 @@ mod tests {
         let result = cmd.generate_dot(&tables, &fks);
         assert!(result.contains("\"orders\" -> \"users\""));
         assert!(result.contains("arrowtail=crow"));
+    }
+
+    #[test]
+    fn test_get_table_columns_escapes_apostrophe_name() {
+        // The pragma queries pass the table name as a string literal; a name
+        // containing an apostrophe must be escaped or the query breaks.
+        let mut rt = Runtime::new(None).unwrap();
+        rt.connection
+            .execute_script("CREATE TABLE \"o'brien\" (id INTEGER PRIMARY KEY, name TEXT);")
+            .unwrap();
+
+        let cmd = GraphvizCommand {};
+        let cols = cmd.get_table_columns(&rt, "o'brien").unwrap();
+        let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["id", "name"]);
     }
 }

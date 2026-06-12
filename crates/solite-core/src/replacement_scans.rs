@@ -1,4 +1,4 @@
-use crate::sqlite::{Connection, SQLiteError, Statement};
+use crate::sqlite::{quote_identifier, Connection, SQLiteError, Statement};
 
 pub fn replacement_scan(
     error: &SQLiteError,
@@ -15,7 +15,7 @@ pub fn replacement_scan(
      */
     if table_name.to_lowercase().ends_with(".csv") {
         match connection
-            .prepare(format!("create virtual table temp.\"{}\" using csv ", table_name).as_str())
+            .prepare(format!("create virtual table temp.{} using csv ", quote_identifier(table_name)).as_str())
         {
             Ok((_, Some(stmt))) => return Some(Ok(stmt)),
             _ => {
@@ -25,7 +25,7 @@ pub fn replacement_scan(
     }
     if table_name.to_lowercase().ends_with(".tsv") {
         match connection
-            .prepare(format!("create virtual table temp.\"{}\" using tsv(flexible=true)", table_name).as_str())
+            .prepare(format!("create virtual table temp.{} using tsv(flexible=true)", quote_identifier(table_name)).as_str())
         {
             Ok((_, Some(stmt))) => return Some(Ok(stmt)),
             _ => {

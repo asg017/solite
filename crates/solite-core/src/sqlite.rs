@@ -157,6 +157,34 @@ pub fn escape_string(value: &str) -> String {
     }
 }
 
+/// Use the SQLite printf '%w' conversion to escape a string as a SQL
+/// identifier, surrounded by double quotes (e.g. `foo"bar` -> `"foo""bar"`).
+/// Use this whenever interpolating a table/column/index/view/module name into
+/// SQL text; bound parameters (`?`) cannot stand in for identifiers.
+///
+/// Note `%w` only *doubles* embedded `"` characters; unlike `%Q` it does not
+/// add the surrounding quotes, so they are supplied by the format string here.
+/// Lossy: interior NUL bytes are replaced with U+FFFD, since the value must
+/// cross a NUL-terminated FFI boundary.
+pub fn quote_identifier(name: &str) -> String {
+    let s = match CString::new(name) {
+        Ok(s) => s,
+        Err(_) => CString::new(name.replace('\0', "\u{FFFD}")).unwrap(),
+    };
+    unsafe {
+        let x = sqlite3_str_new(ptr::null_mut());
+        sqlite3_str_appendf(x, c"\"%w\"".as_ptr(), s.as_ptr());
+        let s = sqlite3_str_finish(x);
+        // NULL on out-of-memory
+        if s.is_null() {
+            return "\"\"".to_string();
+        }
+        let cpy = CStr::from_ptr(s).to_string_lossy().into_owned();
+        sqlite3_free(s.cast());
+        cpy
+    }
+}
+
 /// A borrowed reference to a single result value, valid only until the
 /// statement is stepped, reset, or dropped (the borrow on the stepping
 /// method enforces this). The `X` suffix is historical. For data that must
@@ -1723,6 +1751,44 @@ mod tests {
         assert_eq!(escape_string(""), "''");
         assert_eq!(escape_string("it's"), "'it''s'");
         assert_eq!(escape_string("a''b"), "'a''''b'");
+    }
+
+    #[test]
+    fn test_quote_identifier() {
+        assert_eq!(quote_identifier("users"), "\"users\"");
+        assert_eq!(quote_identifier(""), "\"\"");
+        // embedded double quotes are doubled
+        assert_eq!(quote_identifier("foo\"bar"), "\"foo\"\"bar\"");
+        assert_eq!(quote_identifier("a\"\"b"), "\"a\"\"\"\"b\"");
+        // single quotes are not special inside an identifier
+        assert_eq!(quote_identifier("it's"), "\"it's\"");
+        // lossy on NUL, mirroring escape_string
+        assert_eq!(quote_identifier("a\0b"), "\"a\u{FFFD}b\"");
+    }
+
+    #[test]
+    fn test_quote_identifier_round_trips_in_sql() {
+        // A hostile identifier containing a double quote must not break out of
+        // the quoted context: prepared against a real connection, it parses.
+        let conn = Connection::open_in_memory().unwrap();
+        let weird = "we\"ird";
+        let sql = format!(
+            "CREATE TABLE {} ({} INTEGER)",
+            quote_identifier(weird),
+            quote_identifier("col\"umn")
+        );
+        conn.execute(&sql).unwrap();
+        // table_info on the same quoted name finds the column back
+        let probe = format!("PRAGMA table_info({})", quote_identifier(weird));
+        let (_, stmt) = conn.prepare(&probe).unwrap();
+        let mut stmt = stmt.unwrap();
+        let mut names = Vec::new();
+        while let Some(row) = stmt.next().unwrap() {
+            if let ValueRefXValue::Text(bytes) = row[1].value {
+                names.push(String::from_utf8_lossy(bytes).into_owned());
+            }
+        }
+        assert_eq!(names, vec!["col\"umn".to_string()]);
     }
 
     #[test]

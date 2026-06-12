@@ -6,7 +6,7 @@ pub mod value;
 
 pub use diff::{print_decision, print_diff};
 pub use file::generate_snapshot_contents;
-pub use value::{copy, snapshot_value, ValueCopy, ValueCopyValue};
+pub use value::{copy, ValueCopy, ValueCopyValue};
 
 use console::{Key, Style, Term};
 use solite_core::sqlite::Statement;

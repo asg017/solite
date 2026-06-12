@@ -41,8 +41,7 @@ mod value;
 use std::fs::OpenOptions;
 use std::io::{stdout, Write};
 
-use markdown::mdast::{Node, Text};
-use mdast_util_to_markdown::to_markdown;
+use markdown::mdast::{Code, Heading, Node};
 use solite_core::Runtime;
 
 use crate::cli::{DocsCommand, DocsInlineArgs, DocsNamespace};
@@ -54,12 +53,6 @@ use sql::{
 };
 use table::render_table;
 use value::display_value;
-
-/// Stand-in for `_` in generated heading anchors. The markdown serializer
-/// escapes underscores in text nodes (`_` → `\_`), which would corrupt
-/// anchors like `{#my_function}`. Underscores are swapped to this
-/// private-use-area character before serialization and swapped back after.
-const ANCHOR_UNDERSCORE_SENTINEL: &str = "\u{E000}";
 
 /// Errors that can occur during documentation generation.
 #[derive(Debug)]
@@ -126,23 +119,25 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     let mut options = markdown::ParseOptions::gfm();
     options.constructs.frontmatter = true;
 
-    let mut ast = markdown::to_mdast(&docs_in, &options)
+    let ast = markdown::to_mdast(&docs_in, &options)
         .map_err(|e| DocsError::MarkdownParse(e.to_string()))?;
 
-    // Process code blocks; only ```sql blocks are executed — other
-    // languages (and untagged blocks) are left untouched
-    if let Some(children) = ast.children_mut() {
-        for node in children.iter_mut() {
-            if let Node::Code(code) = node {
-                if matches!(code.lang.as_deref(), Some("sql") | Some("sqlite")) {
-                    process_code_block(&rt, code, &args)?;
-                }
-            }
-        }
-    }
-
-    // Extract documented functions from headings
-    let documented_funcs = extract_documented_functions(&mut ast);
+    // Walk the AST collecting span edits (code block results, heading
+    // anchors) against the original source. Splicing by byte span instead
+    // of re-serializing the whole AST preserves every construct the
+    // serializer doesn't understand (GFM tables, strikethrough,
+    // frontmatter, footnotes) and avoids reformatting churn.
+    let mut edits: Vec<Edit> = Vec::new();
+    let mut documented_funcs: Vec<String> = Vec::new();
+    collect_edits(
+        &rt,
+        &ast,
+        &docs_in,
+        &args,
+        &mut edits,
+        &mut documented_funcs,
+        false,
+    )?;
 
     // Get loaded functions from extension; the tracking tables only exist
     // when an extension was loaded
@@ -159,10 +154,11 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
         .cloned()
         .collect();
 
-    // Convert AST back to markdown, restoring underscores in anchors
-    let out_md = to_markdown(&ast)
-        .map_err(|e| DocsError::MarkdownParse(format!("Failed to serialize: {}", e)))?
-        .replace(ANCHOR_UNDERSCORE_SENTINEL, "_");
+    // Apply edits back-to-front so earlier offsets stay valid
+    let mut out_md = docs_in;
+    for edit in edits.iter().rev() {
+        out_md.replace_range(edit.start..edit.end, &edit.replacement);
+    }
 
     // Write output
     write_output(&args, &out_md)?;
@@ -217,15 +213,144 @@ fn setup_extension_tracking(rt: &Runtime, ext: &str) -> Result<(), DocsError> {
     Ok(())
 }
 
-/// Process a SQL code block, executing queries and inlining results.
+/// A byte-span replacement against the original markdown source.
+struct Edit {
+    start: usize,
+    end: usize,
+    replacement: String,
+}
+
+/// Walk the AST in document order, executing ```sql code blocks and
+/// collecting span edits for their results and for heading anchors.
+/// Recurses into container nodes so nested code blocks (in lists, ...) are
+/// processed too. Code blocks inside blockquotes are passed through
+/// untouched: every line carries a `> ` prefix in the source, which breaks
+/// both closing-fence detection and the whitespace-only re-indentation,
+/// so editing them would corrupt the document.
+fn collect_edits(
+    rt: &Runtime,
+    node: &Node,
+    src: &str,
+    args: &DocsInlineArgs,
+    edits: &mut Vec<Edit>,
+    documented: &mut Vec<String>,
+    in_blockquote: bool,
+) -> Result<(), DocsError> {
+    match node {
+        // Only ```sql blocks are executed — other languages (and untagged
+        // blocks) are left untouched, as are blocks inside blockquotes
+        Node::Code(code)
+            if !in_blockquote
+                && matches!(code.lang.as_deref(), Some("sql") | Some("sqlite")) =>
+        {
+            let new_value = process_code_block(rt, &code.value, args)?;
+            if let Some(edit) = code_block_edit(code, src, &new_value) {
+                edits.push(edit);
+            }
+        }
+        Node::Heading(heading) if heading.depth == 3 || heading.depth == 4 => {
+            if let Some(function) = heading_function_name(heading) {
+                if let Some(edit) = heading_anchor_edit(heading, src, &function) {
+                    edits.push(edit);
+                }
+                documented.push(function);
+            }
+        }
+        _ => {
+            let in_blockquote = in_blockquote || matches!(node, Node::Blockquote(_));
+            if let Some(children) = node.children() {
+                for child in children {
+                    collect_edits(rt, child, src, args, edits, documented, in_blockquote)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Build the edit replacing a code block's contents (the bytes between the
+/// fence lines, which are preserved byte-for-byte) with the new SQL+results.
+fn code_block_edit(code: &Code, src: &str, new_value: &str) -> Option<Edit> {
+    let pos = code.position.as_ref()?;
+    let (start, end) = (pos.start.offset, pos.end.offset);
+    let block = src.get(start..end)?;
+
+    // Interior spans from just after the opening fence line to the start
+    // of the closing fence line (or to the end when the fence is unclosed)
+    let first_newline = block.find('\n')?;
+    let interior_start = first_newline + 1;
+    let interior_end = match block.rfind('\n') {
+        // `idx + 1 >= interior_start` (not `idx >= interior_start`): in an
+        // empty block the only newline is the opening fence's own, so the
+        // line after it is the closing fence and must still be recognized
+        // (otherwise the fence would be swallowed into the replacement)
+        Some(idx) if idx + 1 >= interior_start => {
+            let last_line = block[idx + 1..].trim_start();
+            if last_line.starts_with("```") || last_line.starts_with("~~~") {
+                // Clamp so an empty interior yields an empty span instead
+                // of one that ends before it starts
+                (idx + 1).max(interior_start)
+            } else {
+                block.len()
+            }
+        }
+        _ => block.len(),
+    };
+
+    // Re-indent content to the fence's column (e.g. blocks in list items)
+    let indent = " ".repeat(pos.start.column.saturating_sub(1));
+    let mut replacement = String::new();
+    for line in new_value.lines() {
+        if !line.is_empty() {
+            replacement.push_str(&indent);
+            replacement.push_str(line);
+        }
+        replacement.push('\n');
+    }
+
+    Some(Edit {
+        start: start + interior_start,
+        end: start + interior_end,
+        replacement,
+    })
+}
+
+/// Extract the documented function name from a heading whose first child is
+/// inline code, e.g. ``### `my_func(a, b)` `` → `my_func`.
+fn heading_function_name(heading: &Heading) -> Option<String> {
+    match heading.children.first()? {
+        Node::InlineCode(c) => match c.value.split_once('(') {
+            Some((f, _)) => Some(f.to_owned()),
+            None => Some(c.value.clone()),
+        },
+        _ => None,
+    }
+}
+
+/// Build the edit appending a fresh `{#name}` anchor to a heading,
+/// replacing any anchor a previous run left there so reruns are idempotent
+/// and stale anchors from renamed headings self-heal.
+fn heading_anchor_edit(heading: &Heading, src: &str, function: &str) -> Option<Edit> {
+    let pos = heading.position.as_ref()?;
+    let (start, end) = (pos.start.offset, pos.end.offset);
+    let heading_src = src.get(start..end)?;
+    let kept = strip_trailing_anchors(heading_src);
+    Some(Edit {
+        start: start + kept.len(),
+        end,
+        replacement: format!(" {{#{}}}", function),
+    })
+}
+
+/// Process a SQL code block, executing queries and returning the new block
+/// contents with results inlined.
 fn process_code_block(
     rt: &Runtime,
-    code: &mut markdown::mdast::Code,
+    sql: &str,
     args: &DocsInlineArgs,
-) -> Result<(), DocsError> {
-    let sql = code.value.clone();
+) -> Result<String, DocsError> {
     let mut new_value = String::new();
-    let mut curr = sql.as_str();
+    let mut curr = sql;
     // Result text generated for the previous statement. When regenerating a
     // previously inlined document, the prior run's result comments show up
     // as leading trivia of the *next* statement — strip them (they are
@@ -345,7 +470,7 @@ fn process_code_block(
             Err(error) => {
                 let error_msg = report_error_string(
                     args.input.to_string_lossy().as_ref(),
-                    &sql,
+                    sql,
                     &error,
                     None,
                 );
@@ -357,88 +482,32 @@ fn process_code_block(
 
     // Drop the trailing newline so the closing fence sits directly under
     // the last line instead of after a blank line
-    code.value = new_value.trim_end().to_string();
-    Ok(())
+    Ok(new_value.trim_end().to_string())
 }
 
-/// Extract function names from documentation headings.
-fn extract_documented_functions(ast: &mut Node) -> Vec<String> {
-    let children = match ast.children_mut() {
-        Some(c) => c,
-        None => return vec![],
-    };
-
-    children
-        .iter_mut()
-        .filter_map(|node| {
-            if let Node::Heading(heading) = node {
-                if heading.depth == 3 || heading.depth == 4 {
-                    let children = node.children()?;
-                    let first = children.first()?;
-
-                    let function = if let Node::InlineCode(c) = first {
-                        match c.value.split_once('(') {
-                            Some((f, _)) => Some(f.to_owned()),
-                            None => Some(c.value.clone()),
-                        }
-                    } else {
-                        None
-                    };
-
-                    // Add anchor link, replacing any anchor a previous run
-                    // already appended so reruns don't accumulate copies
-                    if let Some(ref f) = function {
-                        if let Some(children) = node.children_mut() {
-                            strip_trailing_anchors(children);
-                            children.push(Node::Text(Text {
-                                value: format!(
-                                    " {{#{}}}",
-                                    f.replace('_', ANCHOR_UNDERSCORE_SENTINEL)
-                                ),
-                                position: None,
-                            }));
-                        }
-                    }
-
-                    return function;
+/// Remove `{#anchor}` text (possibly several, possibly escaped as
+/// `{#my\_func}` by older serializer-based runs) trailing a heading's
+/// source text, so re-running `docs inline` on its own output replaces the
+/// anchor instead of appending another copy. Stripping (rather than
+/// skipping the push) also self-heals stale anchors when a heading's
+/// function name changed.
+fn strip_trailing_anchors(heading_src: &str) -> &str {
+    let mut text = heading_src.trim_end();
+    loop {
+        let stripped = match (text.rfind("{#"), text.ends_with('}')) {
+            (Some(idx), true) => {
+                let inner = &text[idx + 2..text.len() - 1];
+                if !inner.is_empty() && !inner.contains(['{', '}']) {
+                    Some(text[..idx].trim_end())
+                } else {
+                    None
                 }
             }
-            None
-        })
-        .collect()
-}
-
-/// Remove `{#anchor}` text trailing a heading's children, so re-running
-/// `docs inline` on its own output replaces the anchor instead of appending
-/// another copy. Stripping (rather than skipping the push) also self-heals
-/// stale anchors when a heading's function name changed.
-fn strip_trailing_anchors(children: &mut Vec<Node>) {
-    while let Some(Node::Text(last)) = children.last_mut() {
-        let before = last.value.clone();
-        loop {
-            let trimmed = last.value.trim_end();
-            let stripped = match (trimmed.rfind("{#"), trimmed.ends_with('}')) {
-                (Some(idx), true) => {
-                    let inner = &trimmed[idx + 2..trimmed.len() - 1];
-                    if !inner.is_empty() && !inner.contains(['{', '}']) {
-                        Some(trimmed[..idx].trim_end().to_string())
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-            match stripped {
-                Some(value) => last.value = value,
-                None => break,
-            }
-        }
-        if last.value.is_empty() {
-            children.pop();
-            continue;
-        }
-        if last.value == before {
-            break;
+            _ => None,
+        };
+        match stripped {
+            Some(value) => text = value,
+            None => return text,
         }
     }
 }

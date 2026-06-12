@@ -206,3 +206,141 @@ def test_docs_inline_no_json_prefix(solite_cli, tmp_path):
     assert result.success, result.stderr
     assert "(json)" not in result.stdout
     assert "-- '{\"a\":1}'" in result.stdout
+
+
+def test_docs_inline_gfm_table_and_strikethrough(solite_cli, tmp_path):
+    """GFM tables and strikethrough no longer crash serialization and are
+    preserved byte-for-byte (regression: the old AST re-serializer had no
+    GFM handlers and hard-failed)."""
+    doc = tmp_path / "doc.md"
+    table = "| col | desc |\n|-----|------|\n| a   | ~~old~~ new |\n"
+    doc.write_text("# Demo\n\n" + table + "\n```sql\nSELECT 1 + 1;\n```\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert table in result.stdout
+    assert "-- 2" in result.stdout
+
+
+def test_docs_inline_frontmatter(solite_cli, tmp_path):
+    """YAML frontmatter is preserved and does not crash serialization."""
+    doc = tmp_path / "doc.md"
+    fm = "---\ntitle: My Extension\n---\n"
+    doc.write_text(fm + "\n# Demo\n\n```sql\nSELECT 1 + 1;\n```\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert fm in result.stdout
+    assert "-- 2" in result.stdout
+
+
+def test_docs_inline_no_reformatting_churn(solite_cli, tmp_path):
+    """Content outside code blocks comes back byte-for-byte: no `-` → `*`
+    bullet rewrites and no `\\_` escaping of prose underscores."""
+    doc = tmp_path / "doc.md"
+    prose = (
+        "# Demo\n\n"
+        "- bullet one\n"
+        "- bullet two\n\n"
+        "prose with an_underscore and snake_case words\n\n"
+        "[^1]: a footnote\n\n"
+    )
+    doc.write_text(prose + "```sql\nSELECT 1 + 1;\n```\n")
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", "out.md"], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    out = (tmp_path / "out.md").read_text()
+    assert out.startswith(prose)
+    assert "\\_" not in out
+    assert "* bullet" not in out
+
+
+def test_docs_inline_nested_code_block(solite_cli, tmp_path):
+    """```sql blocks nested in containers (list items) are processed too,
+    preserving their indentation."""
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "# Demo\n\n- a list item\n\n  ```sql\n  SELECT 'in-list';\n  ```\n"
+    )
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert "  -- 'in-list'" in result.stdout
+
+
+def test_docs_inline_empty_sql_block(solite_cli, tmp_path):
+    """An empty ```sql block keeps its closing fence and the rest of the
+    document (regression: the fence was treated as the block's interior and
+    deleted, silently absorbing everything after it into an unclosed code
+    block)."""
+    doc = tmp_path / "doc.md"
+    src = "# Demo\n\n```sql\n```\n\nAfter the block.\n\n```sql\nSELECT 1;\n```\n"
+    doc.write_text(src)
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", "out1.md"], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    out1 = (tmp_path / "out1.md").read_text()
+    # The empty block and the document after it survive byte-for-byte
+    assert "```sql\n```\n\nAfter the block.\n" in out1
+    assert "SELECT 1;\n-- 1" in out1
+
+    # Second run is idempotent
+    result = solite_cli(
+        ["docs", "inline", str(tmp_path / "out1.md"), "--output", "out2.md"],
+        cwd=tmp_path,
+    )
+    assert result.success, result.stderr
+    assert (tmp_path / "out2.md").read_text() == out1
+
+
+def test_docs_inline_empty_sql_block_crlf(solite_cli, tmp_path):
+    """Same as above for a CRLF document: the closing fence's only
+    preceding newline is the opening fence's own."""
+    doc = tmp_path / "doc.md"
+    src = "# Demo\r\n\r\n```sql\r\n```\r\n\r\nAfter the block.\r\n"
+    doc.write_bytes(src.encode("utf8"))
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", "out1.md"], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    # Nothing to inline, so the whole document is unchanged byte-for-byte
+    assert (tmp_path / "out1.md").read_bytes() == src.encode("utf8")
+
+    result = solite_cli(
+        ["docs", "inline", str(tmp_path / "out1.md"), "--output", "out2.md"],
+        cwd=tmp_path,
+    )
+    assert result.success, result.stderr
+    assert (tmp_path / "out2.md").read_bytes() == src.encode("utf8")
+
+
+def test_docs_inline_blockquoted_sql_block_untouched(solite_cli, tmp_path):
+    """```sql blocks inside blockquotes are passed through byte-for-byte:
+    the `> ` line prefix breaks fence detection and re-indentation, so they
+    are not executed or edited (matching pre-splice behavior)."""
+    doc = tmp_path / "doc.md"
+    quoted = "> ```sql\n> SELECT 'quoted';\n> ```\n"
+    src = "# Demo\n\n" + quoted + "\nAfter the quote.\n\n```sql\nSELECT 2;\n```\n"
+    doc.write_text(src)
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", "out1.md"], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    out1 = (tmp_path / "out1.md").read_text()
+    assert quoted in out1
+    assert "'quoted'" not in out1.replace(quoted, "")  # not executed
+    assert "After the quote.\n" in out1
+    assert "SELECT 2;\n-- 2" in out1
+
+    result = solite_cli(
+        ["docs", "inline", str(tmp_path / "out1.md"), "--output", "out2.md"],
+        cwd=tmp_path,
+    )
+    assert result.success, result.stderr
+    assert (tmp_path / "out2.md").read_text() == out1

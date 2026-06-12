@@ -19,6 +19,8 @@ pub struct ValueCopy {
 }
 
 impl ValueCopy {
+    /// Construct a value directly (used by unit tests).
+    #[cfg(test)]
     pub fn new(value: ValueCopyValue, subtype: Option<u32>) -> Self {
         ValueCopy { subtype, value }
     }

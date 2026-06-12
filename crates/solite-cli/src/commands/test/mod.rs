@@ -51,7 +51,7 @@ use crate::cli::TestArgs;
 
 use parser::{
     compute_offset_from_reference, parse_epilogue_comment, parse_ref_file_line_col,
-    parse_snap_directive, prepare_error_assertion,
+    parse_snap_directive, prepare_error_epilogue,
 };
 use report::{report_mismatch, TestStats};
 use snap::{handle_orphans, handle_snap_assertion, SnapMode, SnapState};
@@ -217,23 +217,37 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
             })) => {
                 // Prepare-time errors (syntax errors, missing tables, ...)
                 // never produce a Step, so recover any trailing `-- error:`
-                // assertion on the failing statement ourselves.
-                let assertion = prepare_error_assertion(&src, offset);
-                match assertion {
-                    Some((ref expected, resume_offset)) if *expected == error.message => {
+                // or `-- TODO` epilogue on the failing statement ourselves.
+                let recovered = prepare_error_epilogue(&src, offset);
+                match recovered {
+                    Some((ref ep, resume_offset)) if parser::is_todo_epilogue(ep) => {
+                        // A TODO'd statement that can't even prepare is
+                        // still a TODO (e.g. `SELECT slow(); -- TODO ...`).
+                        let line = src[..offset].matches('\n').count() + 1;
+                        let col =
+                            offset - src[..offset].rfind('\n').map_or(0, |i| i + 1) + 1;
+                        stats.record_todo(file_name.clone(), line, col, ep.clone());
+                        print!("{}", Style::new().yellow().apply_to("-"));
+                        resume_after_prepare_error(
+                            &mut rt,
+                            &file_name,
+                            &src,
+                            resume_offset,
+                            &source_path,
+                        );
+                    }
+                    Some((ref ep, resume_offset))
+                        if ep.strip_prefix("error:").map(str::trim)
+                            == Some(error.message.as_str()) =>
+                    {
                         stats.record_success();
                         print!("{}", Style::new().green().apply_to("."));
-                        // The failing statement's block was consumed by the
-                        // error; re-enqueue the remainder so the rest of the
-                        // file still runs. Newline padding preserves line
-                        // numbers in later step references.
-                        let consumed_lines = src[..resume_offset].matches('\n').count();
-                        let remainder =
-                            format!("{}{}", "\n".repeat(consumed_lines), &src[resume_offset..]);
-                        rt.enqueue(
+                        resume_after_prepare_error(
+                            &mut rt,
                             &file_name,
-                            &remainder,
-                            BlockSource::File(source_path.to_path_buf()),
+                            &src,
+                            resume_offset,
+                            &source_path,
                         );
                     }
                     _ => {
@@ -250,7 +264,11 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
                             );
                         }
                         if args.verbose {
-                            if let Some((expected, _)) = assertion {
+                            if let Some(expected) = recovered
+                                .as_ref()
+                                .and_then(|(ep, _)| ep.strip_prefix("error:"))
+                                .map(str::trim)
+                            {
                                 eprintln!(
                                     "\nExpected error: '{}' got: '{}'",
                                     expected, error.message
@@ -518,6 +536,25 @@ fn run_file(source_path: &Path, args: &TestArgs) -> Result<(TestStats, SnapState
     }
 
     Ok((stats, snap_state))
+}
+
+/// Re-enqueue the remainder of a block after a recovered prepare error.
+/// The failing statement's block was consumed by the error; newline
+/// padding preserves line numbers in later step references.
+fn resume_after_prepare_error(
+    rt: &mut Runtime,
+    file_name: &str,
+    src: &str,
+    resume_offset: usize,
+    source_path: &Path,
+) {
+    let consumed_lines = src[..resume_offset].matches('\n').count();
+    let remainder = format!("{}{}", "\n".repeat(consumed_lines), &src[resume_offset..]);
+    rt.enqueue(
+        file_name,
+        &remainder,
+        BlockSource::File(source_path.to_path_buf()),
+    );
 }
 
 /// Copy the contents of a fixture SQLite database into `dest` (the test's
@@ -1136,6 +1173,25 @@ SELECT 1; -- 999
 ");
         match test_impl(default_args(file)) {
             Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_prepare_error_with_todo_records_todo_and_continues() {
+        let tmp = temp_dir();
+        // slow() doesn't exist, so the statement fails to *prepare*; the
+        // TODO must still be recorded and the rest of the file must run.
+        let file = write_sql(&tmp, "prep_todo.sql", "\
+SELECT slow(); -- TODO speed this up
+SELECT 1; -- 1
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, todos }) => {
+                assert_eq!(failures, 0);
+                assert_eq!(todos, 1);
+            }
             other => panic!("Expected TestsFailed, got {:?}", other),
         }
         cleanup(&tmp);

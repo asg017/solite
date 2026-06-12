@@ -71,23 +71,21 @@ pub fn is_todo_epilogue(epilogue: &str) -> bool {
     }
 }
 
-/// Recover an `error: <msg>` assertion for a statement that failed to
+/// Recover the stripped epilogue comment of a statement that failed to
 /// *prepare* (and so never produced a `Step` with an epilogue).
 ///
 /// Scans from `offset` (the start of the failing statement) to the first
 /// `;` and extracts the trailing same-line comment after it. Returns the
-/// expected error message and the byte offset just past the comment, where
-/// stepping can resume. The scan-to-`;` heuristic can be fooled by `;`
-/// inside string literals, but the statement already failed to prepare, so
-/// a missed assertion only means the file fails (as it would have anyway).
-pub fn prepare_error_assertion(src: &str, offset: usize) -> Option<(String, usize)> {
+/// stripped comment and the byte offset just past it, where stepping can
+/// resume. The scan-to-`;` heuristic can be fooled by `;` inside string
+/// literals, but the statement already failed to prepare, so a missed
+/// epilogue only means the file fails (as it would have anyway).
+pub fn prepare_error_epilogue(src: &str, offset: usize) -> Option<(String, usize)> {
     let semi = src.get(offset..)?.find(';')? + offset;
     let rest_index = semi + 1;
     let raw_epilogue = solite_core::extract_epilogue(src, rest_index)?;
     let resume = rest_index + raw_epilogue.len();
-    let cleaned = parse_epilogue_comment(&raw_epilogue);
-    let expected = cleaned.strip_prefix("error:")?.trim().to_string();
-    Some((expected, resume))
+    Some((parse_epilogue_comment(&raw_epilogue), resume))
 }
 
 /// A parsed `@snap` directive from an epilogue comment.
@@ -248,49 +246,48 @@ mod tests {
         assert!(!is_todo_epilogue("42"));
     }
 
-    // --- prepare_error_assertion tests ---
+    // --- prepare_error_epilogue tests ---
 
     #[test]
-    fn test_prepare_error_assertion_found() {
+    fn test_prepare_error_epilogue_found() {
         let src = "SELECT * FROM nope; -- error: no such table: nope\nSELECT 1;\n";
-        let (expected, resume) = prepare_error_assertion(src, 0).unwrap();
-        assert_eq!(expected, "no such table: nope");
+        let (epilogue, resume) = prepare_error_epilogue(src, 0).unwrap();
+        assert_eq!(epilogue, "error: no such table: nope");
         // resume points at the newline after the comment
         assert_eq!(&src[resume..], "\nSELECT 1;\n");
     }
 
     #[test]
-    fn test_prepare_error_assertion_with_offset() {
+    fn test_prepare_error_epilogue_with_offset() {
         let src = "SELECT 1;\nSELECT * FROM nope; -- error: no such table: nope\n";
-        let (expected, _) = prepare_error_assertion(src, 10).unwrap();
-        assert_eq!(expected, "no such table: nope");
+        let (epilogue, _) = prepare_error_epilogue(src, 10).unwrap();
+        assert_eq!(epilogue, "error: no such table: nope");
     }
 
     #[test]
-    fn test_prepare_error_assertion_no_comment() {
-        assert_eq!(prepare_error_assertion("SELECT * FROM nope;\n", 0), None);
+    fn test_prepare_error_epilogue_todo() {
+        let src = "SELECT slow(); -- TODO speed this up\n";
+        let (epilogue, _) = prepare_error_epilogue(src, 0).unwrap();
+        assert!(is_todo_epilogue(&epilogue));
     }
 
     #[test]
-    fn test_prepare_error_assertion_non_error_comment() {
+    fn test_prepare_error_epilogue_no_comment() {
+        assert_eq!(prepare_error_epilogue("SELECT * FROM nope;\n", 0), None);
+    }
+
+    #[test]
+    fn test_prepare_error_epilogue_comment_on_next_line() {
         assert_eq!(
-            prepare_error_assertion("SELECT * FROM nope; -- 42\n", 0),
+            prepare_error_epilogue("SELECT * FROM nope;\n-- error: nope\n", 0),
             None
         );
     }
 
     #[test]
-    fn test_prepare_error_assertion_comment_on_next_line() {
-        assert_eq!(
-            prepare_error_assertion("SELECT * FROM nope;\n-- error: nope\n", 0),
-            None
-        );
-    }
-
-    #[test]
-    fn test_prepare_error_assertion_no_semicolon() {
-        assert_eq!(prepare_error_assertion("SELECT * FROM nope", 0), None);
-        assert_eq!(prepare_error_assertion("", 5), None);
+    fn test_prepare_error_epilogue_no_semicolon() {
+        assert_eq!(prepare_error_epilogue("SELECT * FROM nope", 0), None);
+        assert_eq!(prepare_error_epilogue("", 5), None);
     }
 
     // --- @snap directive tests ---

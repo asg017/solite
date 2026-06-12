@@ -347,7 +347,12 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
 
                             let actual = value_to_string(v);
                             drop(row);
-                            if actual == epilogue {
+                            // Numeric fallback: `-- 1.0`, `-- 1`, and
+                            // `-- 1.0e+20` should match regardless of how
+                            // either side was formatted.
+                            if actual == epilogue
+                                || value::values_numerically_equal(&epilogue, &actual)
+                            {
                                 stats.record_success();
                                 print!("{}", Style::new().green().apply_to("."));
                             } else {
@@ -748,6 +753,32 @@ SELECT 1; -- 1
         let file = write_sql(&tmp, "float.sql", "SELECT 3.14; -- 3.14\n");
         let result = test_impl(default_args(file));
         assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_inline_assertion_float_formats() {
+        let tmp = temp_dir();
+        // doubles match however the user writes them: rendered form,
+        // integral shorthand, or exponent notation
+        let file = write_sql(&tmp, "float_fmt.sql", "\
+SELECT 1.0; -- 1.0
+SELECT 1.0; -- 1
+SELECT 1e20; -- 1.0e+20
+SELECT 1e20; -- 100000000000000000000
+SELECT 0.5; -- .5
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_inline_assertion_float_mismatch_still_fails() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "float_bad.sql", "SELECT 1.0; -- 1.1\n");
+        let result = test_impl(default_args(file));
+        assert!(result.is_err());
         cleanup(&tmp);
     }
 
@@ -1356,6 +1387,22 @@ SELECT * FROM t; -- @snap empty-table
         let result = test_impl(default_args(file));
         assert!(result.is_ok());
 
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_snap_double_rendered_like_sqlite() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "snap_dbl.sql", "SELECT 1.0; -- @snap dbl\n");
+        test_impl(update_args(file.clone())).unwrap();
+
+        let snap = fs::read_to_string(
+            tmp.join("__snapshots__").join("snap_dbl-dbl.snap")
+        ).unwrap();
+        // doubles keep their decimal point in snapshots, like sqlite3
+        assert!(snap.contains("1.0"), "snapshot was: {snap}");
+
+        assert!(test_impl(default_args(file)).is_ok());
         cleanup(&tmp);
     }
 

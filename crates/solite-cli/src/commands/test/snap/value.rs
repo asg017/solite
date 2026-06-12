@@ -23,7 +23,8 @@ pub fn snapshot_value(v: &ValueCopy) -> String {
     match &v.value {
         ValueCopyValue::Null => "NULL".to_string(),
         ValueCopyValue::Int(value) => value.to_string(),
-        ValueCopyValue::Double(value) => value.to_string(),
+        // shared with the inline-assertion renderer so the two can't drift
+        ValueCopyValue::Double(value) => super::super::value::format_double(*value),
         ValueCopyValue::Text(value) => {
             let text = String::from_utf8_lossy(value);
             let escaped = escape_string(&text);

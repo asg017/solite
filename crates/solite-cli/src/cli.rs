@@ -241,7 +241,10 @@ Examples:
 
 Give --database once to run every SQL argument against that database
 (one shared connection), or once per SQL argument to pair them by
-position. Any other count is an error.
+position. Any other count is an error. --attach PATH NAME attaches an
+extra database to every benchmark connection:
+
+  solite bench --attach other.db aux \"SELECT count(*) FROM aux.t\"
 
 Also available inside scripts and the REPL as the multi-line `.bench`
 dot command.";
@@ -258,8 +261,9 @@ pub struct BenchArgs {
     #[arg(long)]
     pub database: Option<Vec<PathBuf>>,
 
-    /// Reserved; currently ignored
-    #[arg(long, num_args = 2, value_names = ["PATH", "NAME"], hide = true)]
+    /// Attach an additional database to every benchmark connection;
+    /// queries can reference it as NAME.table. Repeatable
+    #[arg(long, num_args = 2, value_names = ["PATH", "NAME"])]
     pub attach: Option<Vec<PathBuf>>,
 
     /// Number of timed iterations per benchmark

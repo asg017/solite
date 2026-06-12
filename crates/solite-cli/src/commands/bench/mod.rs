@@ -162,10 +162,47 @@ pub fn bench(args: BenchArgs) -> Result<(), ()> {
     bench_impl(args).map_err(|e| eprintln!("Error: {e:#}"))
 }
 
-/// Open a database connection and load any requested extensions into it.
+/// Attach additional databases (flattened PATH/NAME pairs from `--attach`)
+/// to a connection.
+fn attach_databases(conn: &Connection, attach: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    // clap's `num_args = 2` flattens repeated `--attach PATH NAME` uses
+    // into one even-length Vec; chunk it back into pairs.
+    if attach.len() % 2 != 0 {
+        anyhow::bail!("--attach requires PATH NAME pairs");
+    }
+    for pair in attach.chunks(2) {
+        let path = pair[0]
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid attach path: {}", pair[0].display()))?;
+        let name = pair[1]
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid attach name: {}", pair[1].display()))?;
+        // ATTACH's filename is an expression, so bind the path as a parameter
+        // rather than interpolating it. The AS name is an identifier, which
+        // cannot be a bound parameter, so escape it with quote_identifier.
+        let sql = format!(
+            "ATTACH DATABASE ? AS {}",
+            solite_core::sqlite::quote_identifier(name)
+        );
+        let (_, stmt) = conn
+            .prepare(&sql)
+            .map_err(|e| anyhow::anyhow!("Failed to attach {path} as {name}: {e}"))?;
+        let stmt =
+            stmt.ok_or_else(|| anyhow::anyhow!("Failed to attach {path} as {name}: empty SQL"))?;
+        stmt.bind_text(1, path)
+            .map_err(|e| anyhow::anyhow!("Failed to attach {path} as {name}: {e}"))?;
+        stmt.execute()
+            .map_err(|e| anyhow::anyhow!("Failed to attach {path} as {name}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Open a database connection and load any requested extensions and
+/// attachments into it.
 fn open_database(
     db_path: &std::path::Path,
     extensions: &Option<Vec<std::path::PathBuf>>,
+    attach: &Option<Vec<std::path::PathBuf>>,
 ) -> anyhow::Result<Connection> {
     let path_str = db_path
         .as_os_str()
@@ -174,6 +211,9 @@ fn open_database(
     let conn = Connection::open(path_str)?;
     if let Some(extensions) = extensions {
         load_extensions(&conn, extensions)?;
+    }
+    if let Some(attach) = attach {
+        attach_databases(&conn, attach)?;
     }
     Ok(conn)
 }
@@ -199,14 +239,18 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
         // Broadcast: open the single database once and reuse the (warm)
         // connection across all SQL arguments.
         Some(databases) if databases.len() == 1 => {
-            runtime.connection = open_database(&databases[0], &args.load_extension)?;
+            runtime.connection = open_database(&databases[0], &args.load_extension, &args.attach)?;
         }
         // Positional pairing: per-query connections are opened in the loop.
         Some(_) => {}
-        // In-memory default: extensions load into the runtime connection.
+        // In-memory default: extensions and attachments apply to the
+        // runtime connection.
         None => {
             if let Some(ref extensions) = args.load_extension {
                 load_extensions(&runtime.connection, extensions)?;
+            }
+            if let Some(ref attach) = args.attach {
+                attach_databases(&runtime.connection, attach)?;
             }
         }
     }
@@ -217,7 +261,8 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
         // Set up connection for this query
         match &args.database {
             Some(databases) if databases.len() > 1 => {
-                runtime.connection = open_database(&databases[idx], &args.load_extension)?;
+                runtime.connection =
+                    open_database(&databases[idx], &args.load_extension, &args.attach)?;
             }
             Some(_) => {}
             None => pb.set_message("Using in-memory database"),

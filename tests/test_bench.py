@@ -38,6 +38,34 @@ def test_bench_warmup_flag(solite_cli):
     assert "(2 iterations)" in result.stdout
 
 
+def test_bench_attach_flag(solite_cli, tmp_path):
+    """--attach makes another database readable as NAME.table."""
+    db = tmp_path / "other.db"
+    setup = tmp_path / "setup.sql"
+    setup.write_text("CREATE TABLE t(a integer); INSERT INTO t VALUES (1), (2);")
+    assert solite_cli(["run", str(setup), str(db)]).success
+
+    result = solite_cli(
+        ["bench", "--attach", str(db), "aux1", "SELECT count(*) FROM aux1.t;"]
+    )
+    assert result.success, result.stderr
+    assert "SELECT count(*) FROM aux1.t;" in result.stdout
+
+
+def test_bench_attach_missing_database_errors(solite_cli, tmp_path):
+    result = solite_cli(
+        [
+            "bench",
+            "--attach",
+            str(tmp_path / "nope" / "missing.db"),
+            "aux1",
+            "SELECT 1;",
+        ]
+    )
+    assert not result.success
+    assert "attach" in result.stderr.lower()
+
+
 def test_bench_single_database_broadcasts_to_all_queries(solite_cli, tmp_path):
     """One --database with several queries benches all of them against it."""
     db = tmp_path / "app.db"

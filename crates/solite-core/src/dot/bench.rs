@@ -238,9 +238,11 @@ impl BenchCommand {
             self.statement
                 .execute()
                 .map_err(|e| anyhow::anyhow!("Query execution failed: {}", e))?;
-            self.statement.reset();
 
+            // Stop the clock before resetting, mirroring the CLI bench loop —
+            // reset overhead would otherwise inflate every sample.
             let elapsed = jiff::Timestamp::now() - start;
+            self.statement.reset();
             times.push(elapsed);
 
             if let Some(ref cb) = callback {

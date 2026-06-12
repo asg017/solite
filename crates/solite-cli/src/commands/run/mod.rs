@@ -392,7 +392,11 @@ fn setup_tracing(rt: &Runtime) -> Result<()> {
 
 /// Load and enqueue a script for execution.
 fn enqueue_script(rt: &mut Runtime, script: &std::path::Path) -> Result<()> {
-    match script.extension().and_then(OsStr::to_str) {
+    let extension = script
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(|e| e.to_ascii_lowercase());
+    match extension.as_deref() {
         Some("sql") => {
             let sql = read_to_string(script)
                 .with_context(|| format!("Failed to read {}", script.display()))?;

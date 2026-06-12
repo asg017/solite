@@ -363,6 +363,30 @@ def test_run_ipynb_invalid_json(solite_cli, tmp_path):
     assert "Failed to parse notebook" in result.stderr
 
 
+def test_run_uppercase_sql_extension(solite_cli, tmp_path):
+    # Extension matching is case-insensitive end-to-end, not just in
+    # classify_arg: the script must actually execute.
+    (tmp_path / "a.SQL").write_text(
+        ".timer off\nselect 'upper sql ran';\n", newline="\n"
+    )
+    result = solite_cli(["run", "a.SQL"], cwd=tmp_path)
+    assert result.success
+    assert "upper sql ran" in result.stdout
+
+
+def test_run_uppercase_ipynb_extension(solite_cli, tmp_path):
+    nb = make_notebook(
+        [
+            ("code", ".timer off"),
+            ("code", "select 'upper ipynb ran';"),
+        ]
+    )
+    (tmp_path / "a.IPYNB").write_text(json.dumps(nb), newline="\n")
+    result = solite_cli(["run", "a.IPYNB"], cwd=tmp_path)
+    assert result.success
+    assert "upper ipynb ran" in result.stdout
+
+
 def test_run_parameter_subcommands(solite_cli, snapshot, tmp_path):
     (tmp_path / "a.sql").write_text(
         """

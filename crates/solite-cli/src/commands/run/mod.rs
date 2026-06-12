@@ -27,6 +27,28 @@
 //! # Run a Jupyter notebook
 //! solite run notebook.ipynb
 //! ```
+//!
+//! # Trace output
+//!
+//! `--trace` records execution into an in-memory `solite_trace` schema
+//! (see [`setup_tracing`]) which is written to the given path at the end of
+//! the run via `VACUUM INTO` (replacing any existing file). The resulting
+//! SQLite database contains two tables:
+//!
+//! ```sql
+//! CREATE TABLE statements(id INTEGER PRIMARY KEY AUTOINCREMENT, sql TEXT);
+//! CREATE TABLE steps(
+//!     id INTEGER PRIMARY KEY AUTOINCREMENT,
+//!     statement_id INTEGER REFERENCES statements(id),
+//!     addr, opcode, p1, p2, p3, p4, p5, comment, subprog, nexec, ncycle
+//! );
+//! ```
+//!
+//! `statements` has one row per executed SQL statement; `steps` has that
+//! statement's per-opcode bytecode stats, sourced from SQLite's `bytecode()`
+//! virtual table after the statement finishes (see `sql::record_trace_steps`).
+//! Statements run by a procedure argument or inside `.run` files are
+//! recorded too; dot commands are not.
 
 mod dot;
 mod format;

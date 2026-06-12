@@ -68,10 +68,20 @@ Examples:
   cat script.sql | solite run app.db         # SQL from stdin
   solite run app.db -c \"SELECT count(*) FROM users\"
   solite run -c \"SELECT * FROM 'data.csv'\"   # query a CSV/TSV file directly
+  solite run --readonly app.db script.sql    # statements that write will fail
+  solite run script.sql --trace trace.db     # record an execution trace
+
+Trace output: --trace writes (replacing any existing file) a SQLite database
+with two tables: statements(id, sql) has one row per executed statement, and
+steps(id, statement_id, addr, opcode, p1, p2, p3, p4, p5, comment, subprog,
+nexec, ncycle) has that statement's per-opcode stats from SQLite's bytecode()
+virtual table. Explore it with, for example:
+  solite query \"SELECT opcode, sum(ncycle) FROM steps \\
+                GROUP BY 1 ORDER BY 2 DESC\" trace.db
 
 Scripts may contain dot commands (.export, .param set, .run, .load, ...;
 see `.help` in the REPL) and procedure definitions (`-- name: getUser :row`).
-Not available in run mode: .ask, .tui, .clear, .vegalite, .bench.";
+Not available in run mode: .ask, .tui, .clear.";
 
 #[derive(
     Debug,

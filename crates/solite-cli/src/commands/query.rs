@@ -3,7 +3,7 @@
 //! This module provides functionality to execute SQL queries and statements
 //! from the command line, with support for various output formats.
 
-use solite_core::{exporter::ExportFormat, replacement_scans::replacement_scan, Runtime};
+use solite_core::{exporter::ExportFormat, Runtime};
 use solite_table::TableConfig;
 use std::{
     fmt,
@@ -24,8 +24,6 @@ pub enum QueryError {
     ParameterSet(String),
     /// Statement preparation returned no statement.
     EmptyPrepare,
-    /// Replacement scan failed.
-    ReplacementScanFailed(String),
     /// Statement execution failed.
     ExecutionFailed(String),
     /// SQL syntax or preparation error (already reported).
@@ -49,7 +47,6 @@ impl fmt::Display for QueryError {
             }
             QueryError::ParameterSet(msg) => write!(f, "Failed to set parameter: {}", msg),
             QueryError::EmptyPrepare => write!(f, "Statement preparation returned no statement"),
-            QueryError::ReplacementScanFailed(msg) => write!(f, "Replacement scan failed: {}", msg),
             QueryError::ExecutionFailed(msg) => write!(f, "Execution failed: {}", msg),
             QueryError::SqlError => write!(f, "SQL error"),
             QueryError::TrailingSql => write!(
@@ -319,38 +316,24 @@ fn prepare_statement(
     runtime: &mut Runtime,
     sql: &str,
 ) -> Result<solite_core::sqlite::Statement, QueryError> {
-    loop {
-        match runtime.prepare_with_parameters(sql) {
-            Ok((rest, Some(stmt))) => {
-                // `query` can only print a single result set; reject input
-                // that contains a second statement instead of silently
-                // dropping it. Trailing comments/whitespace are fine: they
-                // re-prepare to `(_, None)`.
-                if let Some(offset) = rest {
-                    match runtime.prepare_with_parameters(&sql[offset..]) {
-                        Ok((_, None)) => {}
-                        _ => return Err(QueryError::TrailingSql),
-                    }
-                }
-                return Ok(stmt);
-            }
-            Ok((_, None)) => return Err(QueryError::EmptyPrepare),
-            Err(err) => {
-                // Try replacement scan
-                match replacement_scan(&err, &runtime.connection) {
-                    Some(Ok(stmt)) => {
-                        stmt.execute()
-                            .map_err(|e| QueryError::ExecutionFailed(format!("{:?}", e)))?;
-                        // Continue loop to re-prepare
-                        continue;
-                    }
-                    Some(Err(e)) => return Err(QueryError::ReplacementScanFailed(e.message)),
-                    None => {
-                        crate::errors::report_error("[input]", sql, &err, None);
-                        return Err(QueryError::SqlError);
-                    }
+    match runtime.prepare_with_replacement_scans(sql) {
+        Ok((rest, Some(stmt))) => {
+            // `query` can only print a single result set; reject input
+            // that contains a second statement instead of silently
+            // dropping it. Trailing comments/whitespace are fine: they
+            // re-prepare to `(_, None)`.
+            if let Some(offset) = rest {
+                match runtime.prepare_with_parameters(&sql[offset..]) {
+                    Ok((_, None)) => {}
+                    _ => return Err(QueryError::TrailingSql),
                 }
             }
+            Ok(stmt)
+        }
+        Ok((_, None)) => Err(QueryError::EmptyPrepare),
+        Err(err) => {
+            crate::errors::report_error("[input]", sql, &err, None);
+            Err(QueryError::SqlError)
         }
     }
 }

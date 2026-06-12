@@ -418,7 +418,7 @@ impl Runtime {
                         }
                     };
 
-                    match self.prepare_with_parameters(&proc.sql) {
+                    match self.prepare_with_replacement_scans(&proc.sql) {
                         Ok((_, Some(stmt))) => {
                             let raw_sql = stmt.sql();
                             return Some(Ok(Step {
@@ -482,7 +482,7 @@ impl Runtime {
                 }));
             }
 
-            match self.prepare_with_parameters(code) {
+            match self.prepare_with_replacement_scans(code) {
                 Ok((rest, Some(stmt))) => {
                     let stmt_offset_idx = block.offset; // + preamble.map_or(0, |p| p.len()) + 1;
                     let block_name = block.name.clone();
@@ -556,39 +556,17 @@ impl Runtime {
                     return None;
                 }
                 Err(error) => {
-                    match replacement_scans::replacement_scan(&error, &self.connection) {
-                        Some(Ok(stmt)) => {
-                            // The xsv vtab opens the file at execute time, so
-                            // this can still fail (e.g. file deleted after the
-                            // existence check, unreadable, malformed). Surface
-                            // the creation error instead of panicking.
-                            if let Err(scan_error) = stmt.execute() {
-                                return Some(Err(StepError::Prepare {
-                                    error: scan_error,
-                                    file_name: block.name,
-                                    src: block.contents,
-                                    offset: block.offset,
-                                }));
-                            }
-                            self.stack.push(block);
-                        }
-                        Some(Err(scan_error)) => {
-                            return Some(Err(StepError::Prepare {
-                                error: scan_error,
-                                file_name: block.name,
-                                src: block.contents,
-                                offset: block.offset,
-                            }));
-                        }
-                        None => {
-                            return Some(Err(StepError::Prepare {
-                                error,
-                                file_name: block.name,
-                                src: block.contents,
-                                offset: block.offset,
-                            }));
-                        }
-                    };
+                    // Replacement scans (and their failures — e.g. a file
+                    // deleted between the existence check and the vtab
+                    // create) are handled inside
+                    // prepare_with_replacement_scans; whatever error reaches
+                    // here is final.
+                    return Some(Err(StepError::Prepare {
+                        error,
+                        file_name: block.name,
+                        src: block.contents,
+                        offset: block.offset,
+                    }));
                 }
             }
         }
@@ -760,6 +738,42 @@ impl Runtime {
             Ok((rest, stmt))
         }
     }
+
+    /// `prepare_with_parameters`, retrying after csv/tsv replacement scans
+    /// (`select * from "data.csv"` auto-creates a temp vtab over the file).
+    ///
+    /// A single statement can reference several distinct data files (e.g. a
+    /// join), so this loops until no more replacement scans apply — capped to
+    /// guarantee termination.
+    pub fn prepare_with_replacement_scans(
+        &self,
+        sql: &str,
+    ) -> Result<(Option<usize>, Option<Statement>), SQLiteError> {
+        const MAX_REPLACEMENT_SCANS: usize = 16;
+        let mut scans = 0;
+        loop {
+            match self.prepare_with_parameters(sql) {
+                Ok(ok) => return Ok(ok),
+                Err(error) => {
+                    if scans >= MAX_REPLACEMENT_SCANS {
+                        return Err(error);
+                    }
+                    match replacement_scans::replacement_scan(&error, &self.connection) {
+                        // Execute the CREATE VIRTUAL TABLE, then re-prepare.
+                        Some(Ok(stmt)) => {
+                            stmt.execute()?;
+                            scans += 1;
+                        }
+                        // The vtab DDL itself failed to prepare.
+                        Some(Err(scan_error)) => return Err(scan_error),
+                        // Not replacement-scannable: surface the original error.
+                        None => return Err(error),
+                    }
+                }
+            }
+        }
+    }
+
     pub fn lookup_parameter<S: AsRef<str>>(&self, key: S) -> Option<OwnedValue> {
         let mut stmt = self
             .connection
@@ -1183,6 +1197,85 @@ select not_exist();",
             }
             other => panic!("expected a Prepare error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_prepare_with_replacement_scans_happy_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("nums.csv");
+        std::fs::write(&csv, "a,b\n1,2\n").unwrap();
+
+        let rt = Runtime::new(None).unwrap();
+        let sql = format!("select a, b from \"{}\"", csv.to_str().unwrap());
+        let (_, stmt) = rt.prepare_with_replacement_scans(&sql).unwrap();
+        let mut stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(row[0].as_str(), "1");
+        assert_eq!(row[1].as_str(), "2");
+    }
+
+    #[test]
+    fn test_prepare_with_replacement_scans_two_files_join() {
+        // One statement referencing two distinct csv files must trigger two
+        // successive replacement scans before preparing successfully.
+        let dir = tempfile::tempdir().unwrap();
+        let left = dir.path().join("left.csv");
+        let right = dir.path().join("right.csv");
+        std::fs::write(&left, "id,name\n1,alpha\n").unwrap();
+        std::fs::write(&right, "id,score\n1,99\n").unwrap();
+
+        let rt = Runtime::new(None).unwrap();
+        let sql = format!(
+            "select l.name, r.score from \"{}\" l join \"{}\" r on l.id = r.id",
+            left.to_str().unwrap(),
+            right.to_str().unwrap()
+        );
+        let (_, stmt) = rt.prepare_with_replacement_scans(&sql).unwrap();
+        let mut stmt = stmt.unwrap();
+        let row = stmt.next().unwrap().unwrap();
+        assert_eq!(row[0].as_str(), "alpha");
+        assert_eq!(row[1].as_str(), "99");
+    }
+
+    #[test]
+    fn test_prepare_with_replacement_scans_missing_file_errors() {
+        let rt = Runtime::new(None).unwrap();
+        let err = rt
+            .prepare_with_replacement_scans("select * from \"nope_missing.csv\"")
+            .unwrap_err();
+        assert_eq!(err.message, "no such table: nope_missing.csv");
+    }
+
+    #[test]
+    fn test_call_recreates_replacement_scan_vtab() {
+        // A registered procedure whose body references a csv must be callable
+        // even when the temp vtab doesn't exist yet (e.g. after `.open` reset
+        // the temp schema) — the .call prepare path goes through
+        // prepare_with_replacement_scans.
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("p.csv");
+        std::fs::write(&csv, "a\n7\n").unwrap();
+
+        let mut rt = Runtime::new(None).unwrap();
+        rt.register_procedure(Procedure {
+            name: "getcsv".to_string(),
+            sql: format!("select a from \"{}\"", csv.to_str().unwrap()),
+            result_type: procedure::ResultType::Rows,
+            parameters: vec![],
+            columns: vec![],
+            result_class: None,
+        });
+
+        rt.enqueue("[input]", ".call getcsv", BlockSource::Repl);
+        let mut stmt = match rt.next_stepx() {
+            Some(Ok(step)) => match step.result {
+                StepResult::SqlStatement { stmt, .. } => stmt,
+                other => panic!("expected SqlStatement, got {other:?}"),
+            },
+            other => panic!("expected a step, got {other:?}"),
+        };
+        let row = stmt.next().unwrap().expect("one row");
+        assert_eq!(row[0].as_str(), "7");
     }
 
     #[test]

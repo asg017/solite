@@ -1705,4 +1705,29 @@ select not_exist();",
             rt.run_file_end(saved);
         }
     }
+
+    #[test]
+    fn test_new_readonly_missing_file_errors_and_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.db");
+        let result = Runtime::new_readonly(path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(!path.exists(), "read-only open must not create the file");
+    }
+
+    #[test]
+    fn test_new_readonly_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ok.db");
+        // create a real database first
+        let rt = Runtime::new(Some(path.to_str().unwrap().to_string())).unwrap();
+        rt.connection
+            .execute("CREATE TABLE t(a)")
+            .unwrap();
+        drop(rt);
+
+        let rt = Runtime::new_readonly(path.to_str().unwrap()).unwrap();
+        // writes must be rejected on a read-only connection
+        assert!(rt.connection.execute("INSERT INTO t VALUES (1)").is_err());
+    }
 }

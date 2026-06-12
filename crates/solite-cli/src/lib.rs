@@ -74,7 +74,7 @@ pub fn run_main() {
         cli::Commands::Sqlite3(args) => commands::sqlite3::sqlite3(args.args),
         cli::Commands::Diff(args) => commands::diff::diff(args.args),
         cli::Commands::Rsync(args) => commands::rsync::rsync(args.args),
-        cli::Commands::Schema(args) => commands::schema::schema(args.database),
+        cli::Commands::Schema(args) => commands::schema::schema(args.database, allow_ssh),
         cli::Commands::Backup(args) => commands::backup::backup(args),
         cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),
         cli::Commands::Serve(args) => commands::serve::serve(args),

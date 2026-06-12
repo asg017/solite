@@ -24,21 +24,16 @@
 //! solite bench query.sql
 //! ```
 
-mod format;
-mod stats;
-
 use crossterm::style::Stylize;
 use indicatif::ProgressBar;
 use solite_core::{
     dot::bench::render_steps,
+    dot::bench::stats::{average, format_runtime, max, min, stddev},
     sqlite::{bytecode_steps, Connection},
     Runtime,
 };
 
 use crate::cli::BenchArgs;
-
-use format::format_runtime;
-use stats::{average, max, min, stddev};
 
 /// Error type for benchmark operations. Open/prepare/execute errors are
 /// reported through `anyhow` in `bench_impl`.

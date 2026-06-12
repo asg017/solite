@@ -155,7 +155,7 @@ def test_run_mode_bench(solite_cli, tmp_path):
     assert result.success
     assert "not supported" not in result.stdout + result.stderr
     assert "Benchmark" in result.stdout
-    assert "Range (min ... max)" in result.stdout
+    assert "Range (min … max)" in result.stdout
 
 
 def test_run_procedure_binds_dollar_params(solite_cli, tmp_path):

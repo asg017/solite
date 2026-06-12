@@ -266,7 +266,7 @@ def test_repl_bench(solite_cli):
     assert "not supported" not in combined
     assert "Benchmark" in out["stdout"]
     assert "iterations" in out["stdout"]
-    assert "Range (min ... max)" in out["stdout"]
+    assert "Range (min … max)" in out["stdout"]
 
 
 def test_repl_vegalite_writes_spec(solite_cli):

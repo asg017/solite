@@ -15,11 +15,13 @@
 //! Reports mean execution time, standard deviation, and min/max values
 //! across 10 iterations, along with detailed bytecode execution statistics.
 
+pub mod stats;
+
 use crate::sqlite::{bytecode_steps, BytecodeStep, Statement};
 use crate::{ParseDotError, Runtime};
-use jiff::{Span, SpanRound, Unit};
+use jiff::Span;
 use serde::Serialize;
-use std::cmp::Ordering;
+use stats::{average, format_runtime, max, min, stddev};
 
 /// Command to benchmark a SQL query.
 #[derive(Serialize, Debug)]
@@ -50,113 +52,36 @@ pub struct BenchResult {
 
 impl BenchResult {
     /// Calculate the average execution time.
-    pub fn average(&self) -> Span {
+    ///
+    /// Returns None when no iterations were recorded.
+    pub fn average(&self) -> Option<Span> {
         average(&self.times)
     }
 
     /// Generate a human-readable report.
     pub fn report(&self) -> String {
-        let avg = self.average();
-        let std = stddev(&self.times);
-        let mn = min(&self.times);
-        let mx = max(&self.times);
+        let fmt = |span: Option<Span>| {
+            span.map(format_runtime)
+                .unwrap_or_else(|| "N/A".to_string())
+        };
+        let avg = fmt(self.average());
+        let std = fmt(stddev(&self.times));
+        let mn = fmt(min(&self.times));
+        let mx = fmt(max(&self.times));
         let niter = self.niter;
 
         format!(
-            "{}\n  Time  (mean +/- s):   {} +/- {} ({} iterations)\n  Range (min ... max):  {} ... {}",
+            "{}\n  Time  (mean ± σ):   {} ± {} ({} iterations)\n  Range (min … max):  {} … {}",
             match &self.name {
                 Some(name) => format!("Benchmark: {}", name),
                 None => "Benchmark".to_string(),
             },
-            format_runtime(avg),
-            format_runtime(std),
+            avg,
+            std,
             niter,
-            format_runtime(mn),
-            format_runtime(mx),
+            mn,
+            mx,
         )
-    }
-}
-
-/// Calculate the average of a slice of spans.
-fn average(times: &[Span]) -> Span {
-    if times.is_empty() {
-        return Span::new();
-    }
-
-    let micros: Vec<f64> = times
-        .iter()
-        .filter_map(|span| span.total(Unit::Microsecond).ok())
-        .collect();
-
-    if micros.is_empty() {
-        return Span::new();
-    }
-
-    Span::new().microseconds(statistical::mean(&micros) as i64)
-}
-
-/// Calculate the standard deviation of a slice of spans.
-fn stddev(times: &[Span]) -> Span {
-    if times.is_empty() {
-        return Span::new();
-    }
-
-    let micros: Vec<f64> = times
-        .iter()
-        .filter_map(|span| span.total(Unit::Microsecond).ok())
-        .collect();
-
-    if micros.is_empty() {
-        return Span::new();
-    }
-
-    let mean = statistical::mean(&micros);
-    let std = statistical::standard_deviation(&micros, Some(mean));
-
-    Span::new().microseconds(std as i64)
-}
-
-/// Find the minimum span.
-fn min(times: &[Span]) -> Span {
-    times
-        .iter()
-        .min_by(|a, b| compare_spans(a, b))
-        .cloned()
-        .unwrap_or_else(Span::new)
-}
-
-/// Find the maximum span.
-fn max(times: &[Span]) -> Span {
-    times
-        .iter()
-        .max_by(|a, b| compare_spans(a, b))
-        .cloned()
-        .unwrap_or_else(Span::new)
-}
-
-/// Compare two spans for ordering.
-fn compare_spans(a: &Span, b: &Span) -> Ordering {
-    a.compare(*b).unwrap_or(Ordering::Equal)
-}
-
-/// Format a span as a human-readable runtime string.
-fn format_runtime(span: Span) -> String {
-    let threshold = Span::new().milliseconds(50);
-    let is_small = span.compare(threshold).map_or(true, |ord| ord.is_lt());
-
-    if is_small {
-        let total = span.total(Unit::Millisecond).unwrap_or(0.0);
-        format!("{:.3}ms", total)
-    } else {
-        let rounded = span.round(
-            SpanRound::new()
-                .largest(Unit::Minute)
-                .smallest(Unit::Millisecond),
-        );
-        match rounded {
-            Ok(r) => format!("{:?}", r),
-            Err(_) => format!("{:?}", span),
-        }
     }
 }
 
@@ -373,39 +298,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_average_empty() {
-        let times: Vec<Span> = vec![];
-        let avg = average(&times);
-        // Empty times should produce an empty span
-        let total = avg.total(Unit::Microsecond).unwrap_or(0.0);
-        assert_eq!(total, 0.0);
-    }
-
-    #[test]
-    fn test_average_single() {
-        let times = vec![Span::new().milliseconds(100)];
-        let avg = average(&times);
-        // Should be approximately 100ms
-        let total = avg.total(Unit::Millisecond).unwrap();
-        assert!((total - 100.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_format_runtime_small() {
-        let span = Span::new().milliseconds(10);
-        let formatted = format_runtime(span);
-        assert!(formatted.contains("ms"));
-    }
-
-    #[test]
-    fn test_format_runtime_large() {
-        let span = Span::new().seconds(5);
-        let formatted = format_runtime(span);
-        // Should format as seconds, not milliseconds
-        assert!(formatted.contains("s") || formatted.contains("second"));
-    }
-
-    #[test]
     fn test_bench_result_report() {
         let result = BenchResult {
             name: Some("Test Query".to_string()),
@@ -422,6 +314,24 @@ mod tests {
         let report = result.report();
         assert!(report.contains("Benchmark: Test Query"));
         assert!(report.contains("3 iterations"));
+        assert!(report.contains("mean ± σ"));
+        assert!(report.contains("min … max"));
+    }
+
+    #[test]
+    fn test_bench_result_report_single_iteration_has_na_stddev() {
+        // n=1: sample stddev is undefined — report N/A, never panic
+        let result = BenchResult {
+            name: None,
+            suite: None,
+            times: vec![Span::new().milliseconds(10)],
+            niter: 1,
+            report: String::new(),
+        };
+
+        let report = result.report();
+        assert!(report.contains("± N/A"), "got: {report}");
+        assert!(report.contains("1 iterations"));
     }
 
     #[test]

@@ -558,10 +558,28 @@ impl Runtime {
                 Err(error) => {
                     match replacement_scans::replacement_scan(&error, &self.connection) {
                         Some(Ok(stmt)) => {
-                            stmt.execute().unwrap();
+                            // The xsv vtab opens the file at execute time, so
+                            // this can still fail (e.g. file deleted after the
+                            // existence check, unreadable, malformed). Surface
+                            // the creation error instead of panicking.
+                            if let Err(scan_error) = stmt.execute() {
+                                return Some(Err(StepError::Prepare {
+                                    error: scan_error,
+                                    file_name: block.name,
+                                    src: block.contents,
+                                    offset: block.offset,
+                                }));
+                            }
                             self.stack.push(block);
                         }
-                        Some(Err(_)) => todo!(),
+                        Some(Err(scan_error)) => {
+                            return Some(Err(StepError::Prepare {
+                                error: scan_error,
+                                file_name: block.name,
+                                src: block.contents,
+                                offset: block.offset,
+                            }));
+                        }
                         None => {
                             return Some(Err(StepError::Prepare {
                                 error,
@@ -1124,6 +1142,47 @@ select not_exist();",
         let row = stmt.next().unwrap().expect("expected one row from the csv");
         assert_eq!(row[0].as_str(), "1");
         assert_eq!(row[1].as_str(), "2");
+    }
+
+    #[test]
+    fn test_replacement_scan_missing_file_is_clean_error() {
+        // Querying a nonexistent csv must surface the original
+        // "no such table" prepare error — not panic (regression:
+        // stmt.execute().unwrap() / todo!() in the replacement-scan arm).
+        let mut rt = Runtime::new(None).unwrap();
+        rt.enqueue(
+            "[input]",
+            "select * from \"solite_definitely_missing_file.csv\";",
+            BlockSource::Repl,
+        );
+        match rt.next_stepx() {
+            Some(Err(StepError::Prepare { error, .. })) => {
+                assert_eq!(
+                    error.message,
+                    "no such table: solite_definitely_missing_file.csv"
+                );
+            }
+            other => panic!("expected a Prepare error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_replacement_scan_missing_tsv_is_clean_error() {
+        let mut rt = Runtime::new(None).unwrap();
+        rt.enqueue(
+            "[input]",
+            "select * from \"solite_definitely_missing_file.tsv\";",
+            BlockSource::Repl,
+        );
+        match rt.next_stepx() {
+            Some(Err(StepError::Prepare { error, .. })) => {
+                assert_eq!(
+                    error.message,
+                    "no such table: solite_definitely_missing_file.tsv"
+                );
+            }
+            other => panic!("expected a Prepare error, got {other:?}"),
+        }
     }
 
     #[test]

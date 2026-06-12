@@ -25,7 +25,7 @@ pub enum QueryError {
     /// Statement preparation returned no statement.
     EmptyPrepare,
     /// Replacement scan failed.
-    ReplacementScanFailed,
+    ReplacementScanFailed(String),
     /// Statement execution failed.
     ExecutionFailed(String),
     /// SQL syntax or preparation error (already reported).
@@ -49,7 +49,7 @@ impl fmt::Display for QueryError {
             }
             QueryError::ParameterSet(msg) => write!(f, "Failed to set parameter: {}", msg),
             QueryError::EmptyPrepare => write!(f, "Statement preparation returned no statement"),
-            QueryError::ReplacementScanFailed => write!(f, "Replacement scan failed"),
+            QueryError::ReplacementScanFailed(msg) => write!(f, "Replacement scan failed: {}", msg),
             QueryError::ExecutionFailed(msg) => write!(f, "Execution failed: {}", msg),
             QueryError::SqlError => write!(f, "SQL error"),
             QueryError::TrailingSql => write!(
@@ -344,7 +344,7 @@ fn prepare_statement(
                         // Continue loop to re-prepare
                         continue;
                     }
-                    Some(Err(_)) => return Err(QueryError::ReplacementScanFailed),
+                    Some(Err(e)) => return Err(QueryError::ReplacementScanFailed(e.message)),
                     None => {
                         crate::errors::report_error("[input]", sql, &err, None);
                         return Err(QueryError::SqlError);

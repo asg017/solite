@@ -406,6 +406,32 @@ mod tests {
     }
 
     #[test]
+    fn test_setup_failure_cites_location() {
+        let err = report_err(
+            "create table t(a int primary key);\ninsert into t values (1);\ninsert into t values (1);",
+        );
+        assert!(err.contains("[test]:3"), "error cites file:line: {err}");
+        assert!(
+            err.contains("UNIQUE constraint failed"),
+            "error includes the SQLite message: {err}"
+        );
+        assert!(
+            !err.contains("result_code"),
+            "error must not be a debug struct dump: {err}"
+        );
+    }
+
+    #[test]
+    fn test_dot_command_rejected_with_name() {
+        let err = report_err("create table t(a int);\n.param set key 1\nselect a from t;");
+        assert!(err.contains(".param"), "error names the command: {err}");
+        assert!(
+            !err.contains("Parameter("),
+            "error must not be an enum debug dump: {err}"
+        );
+    }
+
+    #[test]
     fn test_unknown_annotation_errors() {
         let err = report_err(
             "create table t(a int);\n\n-- name: weird :row :wrongtype\nselect a from t;",

@@ -78,7 +78,7 @@ fn create_connection(base_db_type: &BaseDatabaseType) -> Result<Connection> {
 /// functions (e.g. `ulid()`) and virtual tables (e.g. `vec0`).
 fn open_validation_db() -> Result<Connection> {
     let db =
-        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
+        Connection::open_in_memory().map_err(|e| anyhow!("Failed to open in-memory database: {}", e))?;
     unsafe {
         solite_stdlib::solite_stdlib_init(db.db(), std::ptr::null_mut(), std::ptr::null_mut());
     }
@@ -91,8 +91,8 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
         .to_str()
         .ok_or_else(|| anyhow!("Invalid path: {}", path.display()))?;
 
-    let base_db =
-        Connection::open(path_str).map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
+    let base_db = Connection::open(path_str)
+        .map_err(|e| anyhow!("Failed to open database {}: {}", path.display(), e))?;
 
     let db = open_validation_db()?;
 
@@ -112,7 +112,7 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
     ) {
         Ok((_, Some(stmt))) => stmt,
         Ok((_, None)) => return Err(anyhow!("Failed to prepare schema query")),
-        Err(e) => return Err(anyhow!("SQL error: {:?}", e)),
+        Err(e) => return Err(anyhow!("Failed to prepare schema query: {}", e)),
     };
 
     // Virtual tables must be replayed before everything else: their shadow
@@ -140,14 +140,14 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
                 }
             }
             Err(e) => {
-                return Err(anyhow!("Failed to read schema: {:?}", e));
+                return Err(anyhow!("Failed to read schema from {}: {}", path.display(), e));
             }
         }
     }
 
     for sql in &virtual_tables {
         if let Err(e) = db.execute(sql) {
-            return Err(anyhow!("Failed to copy schema: {:?}", e));
+            return Err(anyhow!("Failed to copy schema statement `{}`: {}", first_line(sql), e));
         }
     }
     for sql in &others {
@@ -157,7 +157,7 @@ fn copy_schema_from_database(path: &Path) -> Result<Connection> {
             if e.message.contains("already exists") {
                 continue;
             }
-            return Err(anyhow!("Failed to copy schema: {:?}", e));
+            return Err(anyhow!("Failed to copy schema statement `{}`: {}", first_line(sql), e));
         }
     }
 
@@ -175,7 +175,7 @@ fn setup_from_sql_file(path: &PathBuf) -> Result<Connection> {
         .map_err(|e| anyhow!("Failed to read file {}: {}", path.display(), e))?;
 
     db.execute_script(&sql)
-        .map_err(|e| anyhow!("Failed to execute schema: {:?}", e))?;
+        .map_err(|e| anyhow!("Failed to execute schema {}: {}", path.display(), e))?;
 
     Ok(db)
 }
@@ -216,7 +216,11 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                     // Not an export, treat as setup
                     report.setup.push(stmt.sql());
                     if let Err(e) = stmt.execute() {
-                        return Err(anyhow!("Failed to execute setup: {:?}", e));
+                        return Err(anyhow!(
+                            "Failed to execute setup statement at {}: {}",
+                            step.reference,
+                            e
+                        ));
                     }
                 }
                 StepResult::ProcedureDefinition(proc) => {
@@ -280,12 +284,53 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                     });
                 }
                 StepResult::DotCommand(cmd) => {
-                    return Err(anyhow!("Unsupported dot command: {:?}", cmd));
+                    return Err(anyhow!(
+                        "Dot commands are not supported in codegen input (found .{} at {})",
+                        dot_command_name(cmd),
+                        step.reference
+                    ));
                 }
             },
         }
     }
     Ok(())
+}
+
+/// Return the first line of a (possibly multi-line) SQL statement, trimmed,
+/// for use in error messages.
+fn first_line(sql: &str) -> &str {
+    sql.lines().next().unwrap_or("").trim()
+}
+
+/// The dot command's name as the user typed it (without the leading `.`),
+/// for error messages. The parsed enum doesn't retain the original text, so
+/// map each variant back to its command name.
+fn dot_command_name(cmd: &solite_core::dot::DotCommand) -> &'static str {
+    use solite_core::dot::DotCommand::*;
+    match cmd {
+        Tables(_) => "tables",
+        Schema(_) => "schema",
+        Graphviz(_) => "graphviz",
+        Open(_) => "open",
+        Load(_) => "load",
+        Tui(_) => "tui",
+        Clear(_) => "clear",
+        Print(_) => "print",
+        Ask(_) => "ask",
+        Help(_) => "help",
+        Shell(_) => "sh",
+        Parameter(_) => "param",
+        Env(_) => "env",
+        Timer(_) => "timer",
+        Export(_) => "export",
+        Vegalite(_) => "vegalite",
+        Bench(_) => "bench",
+        Dotenv(_) => "dotenv",
+        Call(_) => "call",
+        Run(_) => "run",
+        #[cfg(feature = "ritestream")]
+        Stream(_) => "stream",
+    }
 }
 
 /// The annotation tokens accepted on a `-- name:` line.
@@ -376,7 +421,7 @@ fn check_shape_match(
 
 fn handle_step_error(error: StepError) -> anyhow::Error {
     match error {
-        StepError::ParseDot { error: e, .. } => anyhow!("Dot command parse error: {:?}", e),
+        StepError::ParseDot { error: e, .. } => anyhow!("Dot command parse error: {}", e),
         StepError::Prepare {
             file_name,
             src,

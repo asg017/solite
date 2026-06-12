@@ -11,6 +11,15 @@ use crate::sqlite::{quote_identifier, Connection, SQLiteError, Statement};
 ///   original error.
 /// - `Some(Ok(stmt))` — execute `stmt`, then retry the original SQL.
 /// - `Some(Err(e))` — preparing the CREATE VIRTUAL TABLE itself failed.
+/// Strip a recognized compression suffix (`.gz`, `.zst`) so the underlying
+/// format suffix can be matched (`data.csv.gz` → `data.csv`). sqlite-xsv
+/// decompresses gzip and zstd transparently based on the file extension.
+fn strip_compression_suffix(name: &str) -> &str {
+    name.strip_suffix(".gz")
+        .or_else(|| name.strip_suffix(".zst"))
+        .unwrap_or(name)
+}
+
 pub fn replacement_scan(
     error: &SQLiteError,
     connection: &Connection,
@@ -18,16 +27,19 @@ pub fn replacement_scan(
     let table_name = error.message.as_str().strip_prefix("no such table: ")?;
 
     /* TODO:
-     * - [ ] .csv.gz, ztsd, zip, etc
-     * - [ ] JSON, .gz, etc
+     * - [ ] JSON
      * - [ ] NDJSON/JSONL
      * - [ ] .txt files?
      * - [ ] XML??
      */
     let lower = table_name.to_lowercase();
-    let using = if lower.ends_with(".csv") {
+    // The xsv vtab decompresses gzip/zstd based on the final file extension,
+    // so `data.csv.gz` is handled by recognizing the suffix here and letting
+    // the vtab open the full name as-is.
+    let base = strip_compression_suffix(&lower);
+    let using = if base.ends_with(".csv") {
         "csv"
-    } else if lower.ends_with(".tsv") {
+    } else if base.ends_with(".tsv") {
         "tsv(flexible=true)"
     } else {
         return None;

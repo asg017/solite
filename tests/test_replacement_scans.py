@@ -63,3 +63,45 @@ def test_csv_run_happy_path(solite_cli, tmp_path):
     script.write_text('select count(*) as n from "data.csv";\n')
     result = solite_cli(["run", str(script)], cwd=tmp_path)
     assert result.success, result.stderr
+
+
+# --- compressed file suffixes ---
+
+
+def test_csv_gz_replacement_scan(solite_cli, tmp_path):
+    import gzip
+
+    (tmp_path / "data.csv.gz").write_bytes(gzip.compress(b"a,b\n1,2\n"))
+    result = solite_cli(["q", 'select * from "data.csv.gz"'], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == [{"a": "1", "b": "2"}]
+
+
+def test_tsv_gz_replacement_scan(solite_cli, tmp_path):
+    import gzip
+
+    (tmp_path / "data.tsv.gz").write_bytes(gzip.compress(b"a\tb\n1\t2\n"))
+    result = solite_cli(["q", 'select * from "data.tsv.gz"'], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == [{"a": "1", "b": "2"}]
+
+
+def test_csv_zst_replacement_scan(solite_cli, tmp_path):
+    import pytest
+
+    zstandard = pytest.importorskip("zstandard")
+    (tmp_path / "data.csv.zst").write_bytes(
+        zstandard.ZstdCompressor().compress(b"a,b\n1,2\n")
+    )
+    result = solite_cli(["q", 'select * from "data.csv.zst"'], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert json.loads(result.stdout) == [{"a": "1", "b": "2"}]
+
+
+def test_unsupported_suffix_still_errors(solite_cli, tmp_path):
+    # An existing file with an unrecognized suffix falls through to the
+    # normal no-such-table error.
+    (tmp_path / "data.csv.bz2").write_bytes(b"not really bzip2")
+    result = solite_cli(["q", 'select * from "data.csv.bz2"'], cwd=tmp_path)
+    assert not result.success
+    assert "no such table: data.csv.bz2" in result.stderr

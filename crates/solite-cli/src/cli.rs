@@ -3,13 +3,18 @@ use std::{env, path::PathBuf};
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::{BlobLimit, ExportFormat};
 
-/// Extensions treated as SQLite database files, for positional-arg
-/// classification (`solite run`) and the bare `solite <file>` REPL fallback.
+/// Extensions treated as SQLite database files (case-insensitive), for
+/// positional-arg classification (`solite run`) and the bare `solite <file>`
+/// REPL fallback.
 pub(crate) fn is_database_path(path: &std::path::Path) -> bool {
-    matches!(
-        path.extension().and_then(std::ffi::OsStr::to_str),
-        Some("db" | "sqlite" | "sqlite3")
-    )
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "db" | "sqlite" | "sqlite3"
+            )
+        })
 }
 
 /// Shared args for connecting to remote databases over SSH or custom transports.
@@ -749,6 +754,13 @@ mod tests {
         }
         for not in ["a.sql", "a.csv", "a", "a.db.bak", "db"] {
             assert!(!is_database_path(Path::new(not)), "{not}");
+        }
+    }
+
+    #[test]
+    fn database_path_extensions_case_insensitive() {
+        for ok in ["a.DB", "a.Db", "a.SQLITE", "a.SQLite3"] {
+            assert!(is_database_path(Path::new(ok)), "{ok}");
         }
     }
 }

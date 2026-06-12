@@ -66,17 +66,37 @@ enum InputType {
     Script(PathBuf),
     Database(PathBuf),
     Procedure(String),
+    /// Looks like a file path but isn't a recognized file type.
+    Unsupported(String),
 }
 
-/// Classify a positional argument by file extension.
+/// Classify a positional argument by file extension (case-insensitive).
+///
+/// Args that look like file paths (contain a separator, have an extension,
+/// or name an existing file) but aren't a recognized type are rejected with
+/// a clear error instead of being mistaken for procedure names.
 fn classify_arg(s: &str) -> InputType {
     let path = std::path::Path::new(s);
     if crate::cli::is_database_path(path) {
         return InputType::Database(PathBuf::from(s));
     }
-    match path.extension().and_then(OsStr::to_str) {
+    let ext = path
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
         Some("sql") | Some("ipynb") => InputType::Script(PathBuf::from(s)),
-        _ => InputType::Procedure(s.to_string()),
+        _ => {
+            let looks_like_path = s.contains('/')
+                || s.contains(std::path::MAIN_SEPARATOR)
+                || ext.is_some()
+                || path.is_file();
+            if looks_like_path {
+                InputType::Unsupported(s.to_string())
+            } else {
+                InputType::Procedure(s.to_string())
+            }
+        }
     }
 }
 
@@ -130,6 +150,12 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs> {
                     bail!("Multiple procedure names provided");
                 }
                 procedure = Some(name);
+            }
+            InputType::Unsupported(arg) => {
+                bail!(
+                    "Unsupported file type '{arg}': expected .sql, .ipynb, \
+                     or a SQLite database (.db/.sqlite/.sqlite3)"
+                );
             }
         }
     }
@@ -527,6 +553,44 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn classify_uppercase_extensions() {
+        assert!(matches!(classify_arg("script.SQL"), InputType::Script(_)));
+        assert!(matches!(
+            classify_arg("notebook.IPYNB"),
+            InputType::Script(_)
+        ));
+        assert!(matches!(classify_arg("my.DB"), InputType::Database(_)));
+        assert!(matches!(
+            classify_arg("my.SQLite3"),
+            InputType::Database(_)
+        ));
+    }
+
+    #[test]
+    fn classify_unknown_extension() {
+        assert!(matches!(
+            classify_arg("data.txt"),
+            InputType::Unsupported(_)
+        ));
+        assert!(matches!(
+            classify_arg("dump.sqlite.bak"),
+            InputType::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn classify_path_with_separator() {
+        assert!(matches!(
+            classify_arg("path/with/slash"),
+            InputType::Unsupported(_)
+        ));
+        assert!(matches!(
+            classify_arg("/tmp/whatever.txt"),
+            InputType::Unsupported(_)
+        ));
+    }
+
     // parse_args – valid forms
 
     #[test]
@@ -630,5 +694,22 @@ mod tests {
         let err = parse_args(&args(&["script.sql", "proc1", "proc2"])).unwrap_err();
         // proc2 doesn't follow a script, so it fails with "must follow"
         assert!(err.to_string().contains("must follow a .sql file"));
+    }
+
+    #[test]
+    fn error_unsupported_file_type() {
+        let err = parse_args(&args(&["notes.txt"])).unwrap_err();
+        assert!(err.to_string().contains("Unsupported file type 'notes.txt'"));
+        assert!(err.to_string().contains(".sql"));
+
+        let err = parse_args(&args(&["path/with/slash"])).unwrap_err();
+        assert!(err.to_string().contains("Unsupported file type"));
+    }
+
+    #[test]
+    fn uppercase_script_still_takes_procedure() {
+        let p = parse_args(&args(&["script.SQL", "listUsers"])).unwrap();
+        assert_eq!(p.script.unwrap(), PathBuf::from("script.SQL"));
+        assert_eq!(p.procedure.unwrap(), "listUsers");
     }
 }

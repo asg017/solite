@@ -77,3 +77,15 @@ def test_dot_run_missing_file_fails_test_run(solite_cli, tmp_path):
     assert not result.success
     assert "does-not-exist.sql" in result.stderr
     assert "aborting test file" in result.stderr
+
+
+def test_no_rows_assertion_failure_prints_diagnostic(solite_cli, tmp_path):
+    """An assertion failing because the statement returned zero rows must
+    print a located expected/actual diagnostic, not just a red x."""
+    test_file = tmp_path / "t.sql"
+    test_file.write_text("CREATE TABLE t(x);\nSELECT * FROM t; -- 5\n")
+    result = solite_cli(["test", str(test_file)], cwd=tmp_path)
+    assert not result.success
+    assert "t.sql:2" in result.stderr
+    assert "expected: 5" in result.stderr
+    assert "[no results]" in result.stderr

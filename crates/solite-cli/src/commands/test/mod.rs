@@ -286,6 +286,25 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                             } else {
                                 stats.record_failure();
                                 print!("{}", Style::new().red().apply_to("x"));
+
+                                let ref_display = format!("{}", step.reference);
+                                if let Some((_, line, col)) =
+                                    parse_ref_file_line_col(&ref_display)
+                                {
+                                    report_mismatch(
+                                        &source_path.to_string_lossy(),
+                                        &content,
+                                        line,
+                                        col,
+                                        &epilogue,
+                                        "[no results]",
+                                    );
+                                } else if args.verbose {
+                                    eprintln!(
+                                        "\nExpected: '{}' Got: '[no results]'",
+                                        epilogue
+                                    );
+                                }
                             }
                         }
                         Ok(Some(row)) => {
@@ -302,6 +321,25 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
                                 None => {
                                     stats.record_failure();
                                     print!("{}", Style::new().red().apply_to("x"));
+
+                                    let ref_display = format!("{}", step.reference);
+                                    if let Some((_, line, col)) =
+                                        parse_ref_file_line_col(&ref_display)
+                                    {
+                                        report_mismatch(
+                                            &source_path.to_string_lossy(),
+                                            &content,
+                                            line,
+                                            col,
+                                            &epilogue,
+                                            "<zero-column row>",
+                                        );
+                                    } else if args.verbose {
+                                        eprintln!(
+                                            "\nExpected: '{}' Got: '<zero-column row>'",
+                                            epilogue
+                                        );
+                                    }
                                     continue;
                                 }
                             };
@@ -756,6 +794,35 @@ SELECT * FROM t; -- [no results]
 ");
         let result = test_impl(default_args(file));
         assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_value_assertion_fails_on_zero_rows() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "empty_val.sql", "\
+CREATE TABLE t(x);
+SELECT * FROM t; -- 5
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_error_assertion_fails_on_zero_rows() {
+        let tmp = temp_dir();
+        // expected an error, but the statement succeeded with no rows
+        let file = write_sql(&tmp, "empty_err.sql", "\
+CREATE TABLE t(x);
+DELETE FROM t; -- error: should have failed
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
         cleanup(&tmp);
     }
 

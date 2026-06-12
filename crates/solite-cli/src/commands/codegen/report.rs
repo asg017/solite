@@ -240,7 +240,7 @@ fn check_shape_match(
 
 fn handle_step_error(error: StepError) -> anyhow::Error {
     match error {
-        StepError::ParseDot(e) => anyhow!("Dot command parse error: {:?}", e),
+        StepError::ParseDot { error: e, .. } => anyhow!("Dot command parse error: {:?}", e),
         StepError::Prepare {
             file_name,
             src,

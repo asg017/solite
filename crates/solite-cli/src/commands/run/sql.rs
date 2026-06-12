@@ -17,13 +17,15 @@ use super::format::format_duration;
 use super::status::get_statement_status;
 
 /// Execute a SQL statement with progress tracking and output.
+///
+/// Returns `false` when execution failed (the error is reported here).
 pub fn handle_sql(
     runtime: &mut Runtime,
     stmt: &mut Statement,
     step_reference: &str,
     is_trace: bool,
     timer: bool,
-) {
+) -> bool {
     let pb = create_progress_bar();
 
     // Set up tracing if enabled
@@ -50,12 +52,13 @@ pub fn handle_sql(
 
     // Display results as table
     let config = TableConfig::terminal();
-    match solite_table::print_statement(stmt, &config) {
-        Ok(_) => {}
+    let success = match solite_table::print_statement(stmt, &config) {
+        Ok(_) => true,
         Err(err) => {
             eprintln!("Error: {}", err);
+            false
         }
-    }
+    };
 
     // Print status message with timing
     if timer {
@@ -70,6 +73,8 @@ pub fn handle_sql(
     // The handler captures this statement's raw pointer; unregister before the
     // statement can be dropped.
     runtime.connection.clear_progress_handler();
+
+    success
 }
 
 /// Create a styled progress bar.

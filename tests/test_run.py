@@ -148,8 +148,29 @@ select
 """,
         newline="\n",
     )
-    assert solite_cli(["run", "a.sql"], cwd=tmp_path).stdout == snapshot(name="stdout")
-    assert solite_cli(["run", "a.sql"], cwd=tmp_path).stderr == snapshot(name="stderr")
+    result = solite_cli(["run", "a.sql"], cwd=tmp_path)
+    assert result.stdout == snapshot(name="stdout")
+    assert result.stderr == snapshot(name="stderr")
+    # Statements after the failure still run, but the process exits non-zero.
+    assert not result.success
+
+
+def test_run_exit_codes(solite_cli, tmp_path):
+    # All-success script exits 0
+    (tmp_path / "ok.sql").write_text(".timer off\nselect 1;\n", newline="\n")
+    assert solite_cli(["run", "ok.sql"], cwd=tmp_path).success
+
+    # -c with failing SQL exits non-zero
+    result = solite_cli(["run", "-c", "select * from no_such_table;"], cwd=tmp_path)
+    assert not result.success
+
+    # A failing dot command alone flips the exit code
+    (tmp_path / "dot.sql").write_text(
+        ".timer off\n.load ./does-not-exist\nselect 1;\n", newline="\n"
+    )
+    result = solite_cli(["run", "dot.sql"], cwd=tmp_path)
+    assert not result.success
+    assert "Error loading extension" in result.stderr
 
 
 def test_run_ipynb_cell_order(solite_cli, snapshot, tmp_path):

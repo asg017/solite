@@ -170,3 +170,15 @@ def test_run_procedure_binds_dollar_params(solite_cli, tmp_path):
     result = solite_cli(["run", "main.sql"], cwd=tmp_path)
     assert result.success
     assert "hi dollar" in result.stdout
+
+
+def test_run_nested_failure_exits_nonzero(solite_cli, tmp_path):
+    (tmp_path / "child.sql").write_text("select * from no_such_table;\n")
+    (tmp_path / "main.sql").write_text(
+        ".timer off\n.run child.sql\nselect 'still runs';\n"
+    )
+    result = solite_cli(["run", "main.sql"], cwd=tmp_path)
+    # The parent keeps going, but the failure inside the .run file
+    # flips the exit code.
+    assert "still runs" in result.stdout
+    assert not result.success

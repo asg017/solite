@@ -275,12 +275,19 @@ fn create_runtime(flags: &RunArgs, database: Option<&PathBuf>) -> Result<Runtime
 }
 
 /// Drain all queued steps, then write the trace database if `--trace` was set.
+///
+/// Returns an error when any step failed, so the process exits non-zero;
+/// the per-step errors were already reported as they happened.
 fn execute_and_finish(rt: &mut Runtime, flags: &RunArgs) -> Result<()> {
     let mut timer = true;
-    execute_steps(rt, flags.trace.is_some(), &mut timer);
+    let failures = execute_steps(rt, flags.trace.is_some(), &mut timer);
 
     if let Some(ref trace_path) = flags.trace {
         write_trace_output(rt, trace_path)?;
+    }
+
+    if failures > 0 {
+        bail!("{failures} statement(s) failed");
     }
 
     Ok(())
@@ -377,25 +384,34 @@ fn extract_notebook_cells(nb: &Notebook) -> Vec<(usize, String)> {
     }
 }
 
-/// Execute all queued steps.
-fn execute_steps(rt: &mut Runtime, is_trace: bool, timer: &mut bool) {
+/// Execute all queued steps, reporting errors as they happen.
+///
+/// Returns the number of steps that failed.
+fn execute_steps(rt: &mut Runtime, is_trace: bool, timer: &mut bool) -> usize {
+    let mut failures = 0;
     loop {
         match rt.next_stepx() {
             None => break,
             Some(Ok(mut step)) => match step.result {
                 StepResult::SqlStatement { ref mut stmt, .. } => {
-                    handle_sql(rt, stmt, &step.reference.to_string(), is_trace, *timer);
+                    if !handle_sql(rt, stmt, &step.reference.to_string(), is_trace, *timer) {
+                        failures += 1;
+                    }
                 }
                 StepResult::DotCommand(ref mut cmd) => {
-                    handle_dot_command(rt, cmd, timer);
+                    if !handle_dot_command(rt, cmd, timer) {
+                        failures += 1;
+                    }
                 }
                 StepResult::ProcedureDefinition(_) => { /* already registered in runtime */ }
             },
             Some(Err(step_error)) => {
                 handle_step_error(&step_error);
+                failures += 1;
             }
         }
     }
+    failures
 }
 
 /// Handle a step error.
@@ -409,8 +425,12 @@ fn handle_step_error(error: &StepError) {
         } => {
             crate::errors::report_error(file_name, src, error, Some(*offset));
         }
-        StepError::ParseDot(err) => {
-            eprintln!("Parse dot error: {}", err);
+        StepError::ParseDot {
+            file_name,
+            line_number,
+            error,
+        } => {
+            eprintln!("Parse dot error at {}:{}: {}", file_name, line_number, error);
         }
     }
 }

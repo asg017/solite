@@ -45,8 +45,12 @@ pub enum StepError {
         offset: usize,
         error: SQLiteError,
     },
-    #[error("Error parsing dot command: {0}")]
-    ParseDot(ParseDotError),
+    #[error("Error parsing dot command: {error}")]
+    ParseDot {
+        file_name: String,
+        line_number: usize,
+        error: ParseDotError,
+    },
 }
 
 /// A "block" of commands to run - can be SQL, PRQL(?) or dot commands.
@@ -337,7 +341,11 @@ impl Runtime {
                           cmd
                         },
                         Err(err) => {
-                            return Some(Err(StepError::ParseDot(err)));
+                            return Some(Err(StepError::ParseDot {
+                                file_name: block.name.clone(),
+                                line_number: block.rope.byte_to_line(block.offset) + 1,
+                                error: err,
+                            }));
                       }
                     }
                 };
@@ -366,9 +374,11 @@ impl Runtime {
                             .unwrap_or_else(|| PathBuf::from(file));
                         let resolved_str = resolved.to_string_lossy().to_string();
                         if let Err(e) = self.load_file(&resolved_str) {
-                            return Some(Err(StepError::ParseDot(
-                                dot::ParseDotError::InvalidArgument(e),
-                            )));
+                            return Some(Err(StepError::ParseDot {
+                                file_name: block_name,
+                                line_number: line_idx + 1,
+                                error: dot::ParseDotError::InvalidArgument(e),
+                            }));
                         }
                     }
 
@@ -376,12 +386,14 @@ impl Runtime {
                     let proc = match self.get_procedure(&call_cmd.procedure_name) {
                         Some(p) => p.clone(),
                         None => {
-                            return Some(Err(StepError::ParseDot(
-                                dot::ParseDotError::InvalidArgument(format!(
+                            return Some(Err(StepError::ParseDot {
+                                file_name: block_name,
+                                line_number: line_idx + 1,
+                                error: dot::ParseDotError::InvalidArgument(format!(
                                     "Unknown procedure: '{}'",
                                     call_cmd.procedure_name
                                 )),
-                            )));
+                            }));
                         }
                     };
 
@@ -401,12 +413,14 @@ impl Runtime {
                             }));
                         }
                         Ok((_, None)) => {
-                            return Some(Err(StepError::ParseDot(
-                                dot::ParseDotError::InvalidArgument(format!(
+                            return Some(Err(StepError::ParseDot {
+                                file_name: block_name,
+                                line_number: line_idx + 1,
+                                error: dot::ParseDotError::InvalidArgument(format!(
                                     "Procedure '{}' prepared to empty statement",
                                     call_cmd.procedure_name
                                 )),
-                            )));
+                            }));
                         }
                         Err(error) => {
                             return Some(Err(StepError::Prepare {

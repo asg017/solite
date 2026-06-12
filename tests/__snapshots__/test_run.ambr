@@ -45,6 +45,7 @@
   11 │   substr(),
      │   ^^^^^^ wrong number of arguments to function substr()
   
+  Error: 1 statement(s) failed
   
   '''
 # ---

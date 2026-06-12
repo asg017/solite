@@ -708,7 +708,7 @@ pub(super) async fn handle_code(
                     response.send_error("SQLError", &error_string).await?;
                     return Ok(());
                 }
-                StepError::ParseDot(error) => {
+                StepError::ParseDot { error, .. } => {
                     response
                         .send_error("DotCommandError", &error.to_string())
                         .await?;

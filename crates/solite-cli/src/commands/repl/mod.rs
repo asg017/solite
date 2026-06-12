@@ -355,7 +355,7 @@ fn step_loop(runtime: &mut Runtime, timer: &mut bool) {
                 } => {
                     crate::errors::report_error(&file_name, &src, &error, Some(offset));
                 }
-                StepError::ParseDot(error) => eprintln!("Parse error: {}", error),
+                StepError::ParseDot { error, .. } => eprintln!("Parse error: {}", error),
             },
         }
     }

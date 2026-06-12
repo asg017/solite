@@ -48,7 +48,6 @@ pub fn handle_sql(
     });
 
     let execution_start = std::time::Instant::now();
-    pb.finish_and_clear();
 
     // Display results as table
     let config = TableConfig::terminal();
@@ -60,6 +59,13 @@ pub fn handle_sql(
         }
     };
 
+    // The handler captures this statement's raw pointer; unregister as soon
+    // as execution finishes, before the statement can be dropped and before
+    // any further SQL (trace recording below) could trip the opcode
+    // threshold. Only then clear the spinner so no late callback redraws it.
+    runtime.connection.clear_progress_handler();
+    pb.finish_and_clear();
+
     // Print status message with timing
     if timer {
         print_completion_status(stmt, step_reference, execution_start.elapsed());
@@ -69,10 +75,6 @@ pub fn handle_sql(
     if let Some(trace_id) = trace_stmt_id {
         record_trace_steps(runtime, stmt, trace_id);
     }
-
-    // The handler captures this statement's raw pointer; unregister before the
-    // statement can be dropped.
-    runtime.connection.clear_progress_handler();
 
     success
 }
@@ -122,10 +124,7 @@ fn handle_progress(
     reference: &str,
 ) -> bool {
     // Only update progress if more than 42ms has elapsed
-    let elapsed = start - Timestamp::now();
-    let should_update = elapsed.compare(42.milliseconds()).unwrap_or(std::cmp::Ordering::Less).is_gt();
-
-    if !should_update {
+    if !should_render_progress(start, Timestamp::now()) {
         return false;
     }
 
@@ -146,6 +145,15 @@ fn handle_progress(
         .tick();
 
     false
+}
+
+/// True once enough time has elapsed since statement start for the spinner
+/// to be worth drawing; keeps fast statements from flickering a spinner.
+fn should_render_progress(start: Timestamp, now: Timestamp) -> bool {
+    (now - start)
+        .compare(42.milliseconds())
+        .unwrap_or(std::cmp::Ordering::Less)
+        .is_gt()
 }
 
 /// Print completion status with timing.
@@ -201,5 +209,37 @@ fn record_trace_steps(runtime: &Runtime, stmt: &Statement, trace_stmt_id: i64) {
 
     if let Err(e) = trace_stmt.execute() {
         eprintln!("Warning: Failed to record trace steps: {:?}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_render_progress;
+    use jiff::{Timestamp, ToSpan};
+
+    #[test]
+    fn renders_after_threshold() {
+        let start = Timestamp::now();
+        assert!(should_render_progress(start, start + 100.milliseconds()));
+    }
+
+    #[test]
+    fn quiet_before_threshold() {
+        let start = Timestamp::now();
+        assert!(!should_render_progress(start, start + 10.milliseconds()));
+    }
+
+    #[test]
+    fn quiet_at_exact_threshold() {
+        let start = Timestamp::now();
+        assert!(!should_render_progress(start, start + 42.milliseconds()));
+    }
+
+    #[test]
+    fn quiet_when_clock_goes_backwards() {
+        // Regression: the original code computed `start - now`, which made
+        // the elapsed span negative and the spinner never render.
+        let start = Timestamp::now();
+        assert!(!should_render_progress(start, start - 100.milliseconds()));
     }
 }

@@ -6,7 +6,9 @@
 //! # Usage
 //!
 //! ```sql
-//! .schema
+//! .schema            -- all objects
+//! .schema users      -- only `users` and objects on it (indexes, triggers)
+//! .schema 'idx_%'    -- LIKE pattern matching, as in sqlite3
 //! ```
 //!
 //! # Output
@@ -25,7 +27,13 @@ use serde::Serialize;
 
 /// Command to display database schema definitions.
 #[derive(Serialize, Debug, PartialEq)]
-pub struct SchemaCommand {}
+pub struct SchemaCommand {
+    /// Optional LIKE pattern filter on object names. Matches both the
+    /// object name and the table it belongs to (`tbl_name`), so a table
+    /// pattern also returns the table's indexes and triggers, like
+    /// sqlite3's `.schema ?PATTERN?`.
+    pub pattern: Option<String>,
+}
 
 impl SchemaCommand {
     /// Execute the schema command, returning CREATE statements.
@@ -44,6 +52,7 @@ impl SchemaCommand {
             SELECT sql
             FROM sqlite_master
             WHERE sql IS NOT NULL
+              AND (?1 IS NULL OR name LIKE ?1 OR tbl_name LIKE ?1)
             ORDER BY rowid
             "#,
         )?;
@@ -51,6 +60,10 @@ impl SchemaCommand {
         let mut stmt = stmt.ok_or_else(|| {
             DotError::InvalidData("internal: schema query produced no statement".into())
         })?;
+
+        if let Some(pattern) = &self.pattern {
+            stmt.bind_text(1, pattern.as_str())?;
+        }
 
         let mut schemas = Vec::new();
         loop {
@@ -86,7 +99,7 @@ mod tests {
     #[test]
     fn test_schema_empty_database() {
         let runtime = create_test_runtime();
-        let cmd = SchemaCommand {};
+        let cmd = SchemaCommand { pattern: None };
         let result = cmd.execute(&runtime);
         assert!(result.is_ok());
         // Empty database should have no user-created schemas
@@ -104,7 +117,7 @@ mod tests {
             .unwrap();
         stmt.unwrap().execute().unwrap();
 
-        let cmd = SchemaCommand {};
+        let cmd = SchemaCommand { pattern: None };
         let result = cmd.execute(&runtime);
         assert!(result.is_ok());
 
@@ -131,7 +144,7 @@ mod tests {
             .unwrap();
         stmt.unwrap().execute().unwrap();
 
-        let cmd = SchemaCommand {};
+        let cmd = SchemaCommand { pattern: None };
         let result = cmd.execute(&runtime);
         assert!(result.is_ok());
 
@@ -157,7 +170,7 @@ mod tests {
             stmt.unwrap().execute().unwrap();
         }
 
-        let cmd = SchemaCommand {};
+        let cmd = SchemaCommand { pattern: None };
         let schemas = cmd.execute(&runtime).unwrap();
         assert_eq!(schemas.len(), 4);
 
@@ -177,5 +190,57 @@ mod tests {
         assert!(pos("CREATE TABLE users") < pos("CREATE INDEX idx_users_name"));
         assert!(pos("CREATE INDEX idx_users_name") < pos("CREATE VIEW v_users"));
         assert!(pos("CREATE VIEW v_users") < pos("CREATE TRIGGER trg"));
+    }
+
+    fn create_pattern_test_runtime() -> Runtime {
+        let runtime = create_test_runtime();
+        for sql in [
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
+            "CREATE INDEX idx_users_name ON users(name)",
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY)",
+            "CREATE VIEW v_orders AS SELECT * FROM orders",
+        ] {
+            let (_, stmt) = runtime.connection.prepare(sql).unwrap();
+            stmt.unwrap().execute().unwrap();
+        }
+        runtime
+    }
+
+    #[test]
+    fn test_schema_pattern_matches_table_and_its_objects() {
+        let runtime = create_pattern_test_runtime();
+
+        // matching a table name also returns its indexes (tbl_name match),
+        // like sqlite3's `.schema users`
+        let cmd = SchemaCommand {
+            pattern: Some("users".to_string()),
+        };
+        let schemas = cmd.execute(&runtime).unwrap();
+        assert_eq!(schemas.len(), 2);
+        assert!(schemas[0].contains("CREATE TABLE users"));
+        assert!(schemas[1].contains("CREATE INDEX idx_users_name"));
+    }
+
+    #[test]
+    fn test_schema_pattern_wildcards() {
+        let runtime = create_pattern_test_runtime();
+
+        let cmd = SchemaCommand {
+            pattern: Some("idx_%".to_string()),
+        };
+        let schemas = cmd.execute(&runtime).unwrap();
+        assert_eq!(schemas.len(), 1);
+        assert!(schemas[0].contains("CREATE INDEX idx_users_name"));
+    }
+
+    #[test]
+    fn test_schema_pattern_no_match() {
+        let runtime = create_pattern_test_runtime();
+
+        let cmd = SchemaCommand {
+            pattern: Some("nonexistent".to_string()),
+        };
+        let schemas = cmd.execute(&runtime).unwrap();
+        assert!(schemas.is_empty());
     }
 }

@@ -243,7 +243,12 @@ pub fn parse_dot<S: Into<String>>(
                 Some(args.trim().to_string())
             },
         })),
-        "schema" => Ok(DotCommand::Schema(SchemaCommand {})),
+        "schema" => Ok(DotCommand::Schema(SchemaCommand {
+            pattern: match args.trim() {
+                "" => None,
+                pattern => Some(pattern.to_string()),
+            },
+        })),
         "open" => Ok(DotCommand::Open(OpenCommand { path: args })),
         "tui" => Ok(DotCommand::Tui(TuiCommand {})),
         "c" | "clear" => Ok(DotCommand::Clear(ClearCommand {})),

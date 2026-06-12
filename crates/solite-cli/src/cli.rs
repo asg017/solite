@@ -549,6 +549,9 @@ pub struct RsyncArgs {
 pub struct SchemaArgs {
     /// Database file to print CREATE statements for
     pub database: PathBuf,
+
+    /// Only show objects whose name (or owning table) matches this LIKE pattern, e.g. 'users' or 'idx_%'
+    pub pattern: Option<String>,
 }
 
 #[derive(Args, Debug)]

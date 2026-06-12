@@ -88,6 +88,27 @@ def test_schema_virtual_table(solite_cli, tmp_path):
     assert "notes_data" in result.stdout
 
 
+def test_schema_pattern_filtering(solite_cli, tmp_path, schema_db):
+    """A pattern argument shows only matching objects (and their indexes/triggers)."""
+    result = solite_cli(["schema", str(schema_db), "users"], cwd=tmp_path)
+    assert result.success
+    assert "CREATE TABLE users" in result.stdout
+    # objects ON users match via tbl_name, like sqlite3
+    assert "CREATE INDEX idx_users_name" in result.stdout
+    assert "CREATE TRIGGER trg" in result.stdout
+    # the view is not on users and does not match
+    assert "CREATE VIEW v_users" not in result.stdout
+
+    wildcard = solite_cli(["schema", str(schema_db), "idx_%"], cwd=tmp_path)
+    assert wildcard.success
+    assert "CREATE INDEX idx_users_name" in wildcard.stdout
+    assert "CREATE TABLE users" not in wildcard.stdout
+
+    nothing = solite_cli(["schema", str(schema_db), "zzz"], cwd=tmp_path)
+    assert nothing.success
+    assert nothing.stdout.strip() == ""
+
+
 def test_dot_schema_in_run_mode_terminates_statements(solite_cli, tmp_path, schema_db):
     """.schema output in run mode is copy-paste executable (trailing ;)."""
     script = tmp_path / "show.sql"

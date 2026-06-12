@@ -97,8 +97,8 @@ const COMMANDS: &[HelpEntry] = &[
     HelpEntry {
         name: "schema",
         aliases: &[],
-        usage: ".schema",
-        description: "Show CREATE statements for the current database",
+        usage: ".schema [pattern]",
+        description: "Show CREATE statements, optionally filtered by a LIKE pattern on object/table names",
     },
     HelpEntry {
         name: "sh",

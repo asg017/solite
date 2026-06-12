@@ -46,13 +46,14 @@ use mdast_util_to_markdown::to_markdown;
 use solite_core::Runtime;
 
 use crate::cli::{DocsCommand, DocsInlineArgs, DocsNamespace};
-use crate::commands::test::snap::{copy, snapshot_value};
+use crate::commands::test::snap::copy;
 use crate::errors::{report_error, report_error_string};
 
 use sql::{
     BASE_FUNCTIONS_CREATE, BASE_MODULES_CREATE, LOADED_FUNCTIONS_CREATE, LOADED_MODULES_CREATE,
 };
 use table::render_table;
+use value::display_value;
 
 /// Stand-in for `_` in generated heading anchors. The markdown serializer
 /// escapes underscores in text nodes (`_` → `\_`), which would corrupt
@@ -290,7 +291,7 @@ fn process_code_block(
                     match results.len() {
                         0 => result_text.push_str("-- No results\n"),
                         1 => {
-                            let value = snapshot_value(&results[0][0]);
+                            let value = display_value(&results[0][0]);
                             if value.contains('\n') {
                                 // A value containing a newline would break
                                 // out of the `-- ` comment, leaving raw SQL

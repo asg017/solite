@@ -18,6 +18,12 @@ pub struct ValueCopy {
     pub value: ValueCopyValue,
 }
 
+impl ValueCopy {
+    pub fn new(value: ValueCopyValue, subtype: Option<u32>) -> Self {
+        ValueCopy { subtype, value }
+    }
+}
+
 /// Format a copied value for snapshot output.
 pub fn snapshot_value(v: &ValueCopy) -> String {
     match &v.value {

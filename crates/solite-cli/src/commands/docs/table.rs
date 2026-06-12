@@ -1,6 +1,7 @@
 //! Table rendering for documentation output.
 
 use crate::commands::test::snap::ValueCopy;
+use solite_table::types::display_width;
 
 use super::value::display_value;
 
@@ -40,12 +41,13 @@ pub fn render_table(columns: &[String], results: &[Vec<ValueCopy>]) -> String {
         .map(|row| row.iter().map(display_value).collect())
         .collect();
 
-    // Calculate column widths
-    let mut widths: Vec<usize> = columns.iter().map(|c| c.len()).collect();
+    // Calculate column widths (display width, not byte length, so
+    // multibyte text doesn't break the borders)
+    let mut widths: Vec<usize> = columns.iter().map(|c| display_width(c)).collect();
     for row in &str_results {
         for (i, cell) in row.iter().enumerate() {
-            if i < widths.len() && cell.len() > widths[i] {
-                widths[i] = cell.len();
+            if i < widths.len() && display_width(cell) > widths[i] {
+                widths[i] = display_width(cell);
             }
         }
     }
@@ -68,7 +70,7 @@ pub fn render_table(columns: &[String], results: &[Vec<ValueCopy>]) -> String {
     for (i, col) in columns.iter().enumerate() {
         output.push(' ');
         output.push_str(col);
-        output.push_str(&" ".repeat(widths[i] - col.len()));
+        output.push_str(&" ".repeat(widths[i] - display_width(col)));
         output.push(' ');
         if i < columns.len() - 1 {
             output.push(border::VERTICAL);
@@ -95,7 +97,7 @@ pub fn render_table(columns: &[String], results: &[Vec<ValueCopy>]) -> String {
             output.push(' ');
             output.push_str(cell);
             if i < widths.len() {
-                output.push_str(&" ".repeat(widths[i] - cell.len()));
+                output.push_str(&" ".repeat(widths[i] - display_width(cell)));
             }
             output.push(' ');
             if i < widths.len() - 1 {
@@ -118,4 +120,50 @@ pub fn render_table(columns: &[String], results: &[Vec<ValueCopy>]) -> String {
     output.push('\n');
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test::snap::ValueCopyValue;
+
+    fn text(s: &str) -> ValueCopy {
+        ValueCopy::new(ValueCopyValue::Text(s.as_bytes().to_vec()), None)
+    }
+
+    #[test]
+    fn test_multibyte_alignment() {
+        let columns = vec!["a".to_string()];
+        let results = vec![vec![text("héllo wörld")], vec![text("plain ascii x")]];
+        let out = render_table(&columns, &results);
+        let widths: Vec<usize> = out.lines().map(display_width).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "all lines must have equal display width:\n{out}"
+        );
+    }
+
+    #[test]
+    fn test_empty_columns() {
+        assert_eq!(render_table(&[], &[]), "");
+    }
+
+    #[test]
+    fn test_basic_table() {
+        let columns = vec!["name".to_string(), "n".to_string()];
+        let results = vec![
+            vec![text("alex"), ValueCopy::new(ValueCopyValue::Int(1), None)],
+            vec![text("brian"), ValueCopy::new(ValueCopyValue::Int(2), None)],
+        ];
+        let out = render_table(&columns, &results);
+        assert_eq!(
+            out,
+            "┌─────────┬───┐\n\
+             │ name    │ n │\n\
+             ├─────────┼───┤\n\
+             │ 'alex'  │ 1 │\n\
+             │ 'brian' │ 2 │\n\
+             └─────────┴───┘\n"
+        );
+    }
 }

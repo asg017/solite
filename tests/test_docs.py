@@ -177,3 +177,32 @@ def test_docs_inline_anchor_self_heals(solite_cli, tmp_path):
     assert result.success, result.stderr
     assert "{#renamed_fn}" in result.stdout
     assert "{#old_name}" not in result.stdout
+
+
+def test_docs_inline_unicode_table_alignment(solite_cli, tmp_path):
+    """Multibyte text pads by display width, so table borders stay aligned
+    (regression: widths were computed from byte lengths)."""
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "# Demo\n\n```sql\n"
+        "SELECT 'héllo wörld' AS a UNION ALL SELECT 'plain ascii x';\n"
+        "```\n"
+    )
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    table_lines = [l for l in result.stdout.splitlines() if "│" in l or "─" in l]
+    assert table_lines, result.stdout
+    assert len({len(l) for l in table_lines}) == 1, result.stdout
+
+
+def test_docs_inline_no_json_prefix(solite_cli, tmp_path):
+    """Single JSON values render as plain SQL strings, without the snapshot
+    harness's `(json)` prefix."""
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Demo\n\n```sql\nSELECT json_object('a', 1);\n```\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert "(json)" not in result.stdout
+    assert "-- '{\"a\":1}'" in result.stdout

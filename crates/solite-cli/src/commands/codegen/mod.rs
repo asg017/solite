@@ -141,21 +141,28 @@ pub(crate) fn codegen(cmd: CodegenArgs) -> Result<(), ()> {
 }
 
 /// Determine the database type from the schema path.
+///
+/// Database extensions match `classify_arg` in `commands/run/mod.rs`;
+/// matching is case-insensitive.
 fn determine_db_type(
     schema: &Option<std::path::PathBuf>,
 ) -> Result<BaseDatabaseType, String> {
-    match schema {
-        Some(path) if path.extension().is_some_and(|ext| ext == "db") => {
+    let Some(path) = schema else {
+        return Ok(BaseDatabaseType::None);
+    };
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("db") | Some("sqlite") | Some("sqlite3") => {
             Ok(BaseDatabaseType::Database(path.clone()))
         }
-        Some(path) if path.extension().is_some_and(|ext| ext == "sql") => {
-            Ok(BaseDatabaseType::SqlFile(path.clone()))
-        }
-        Some(path) => Err(format!(
-            "Unsupported schema file type: {}. Use .db or .sql",
+        Some("sql") => Ok(BaseDatabaseType::SqlFile(path.clone())),
+        _ => Err(format!(
+            "Unsupported schema file type: {}. Use .db, .sqlite, .sqlite3, or .sql",
             path.display()
         )),
-        None => Ok(BaseDatabaseType::None),
     }
 }
 
@@ -175,6 +182,44 @@ mod tests {
         report_from_file(src, &PathBuf::from("[test]"), BaseDatabaseType::None)
             .expect_err("report should fail")
             .to_string()
+    }
+
+    #[test]
+    fn test_determine_db_type_extensions() {
+        let db_exts = ["x.db", "x.sqlite", "x.sqlite3", "x.DB", "x.SQLite3"];
+        for p in db_exts {
+            assert!(
+                matches!(
+                    determine_db_type(&Some(PathBuf::from(p))),
+                    Ok(BaseDatabaseType::Database(_))
+                ),
+                "{p} should classify as a database"
+            );
+        }
+
+        for p in ["x.sql", "x.SQL"] {
+            assert!(
+                matches!(
+                    determine_db_type(&Some(PathBuf::from(p))),
+                    Ok(BaseDatabaseType::SqlFile(_))
+                ),
+                "{p} should classify as a SQL file"
+            );
+        }
+
+        assert!(matches!(
+            determine_db_type(&None),
+            Ok(BaseDatabaseType::None)
+        ));
+
+        for p in ["x.txt", "x", "x.sqlite3x"] {
+            let err = determine_db_type(&Some(PathBuf::from(p)))
+                .expect_err("unsupported extension should error");
+            assert!(
+                err.contains(".db, .sqlite, .sqlite3, or .sql"),
+                "error lists accepted extensions: {err}"
+            );
+        }
     }
 
     #[test]

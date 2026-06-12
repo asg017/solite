@@ -88,6 +88,19 @@ def test_schema_virtual_table(solite_cli, tmp_path):
     assert "notes_data" in result.stdout
 
 
+def test_dot_schema_in_run_mode_terminates_statements(solite_cli, tmp_path, schema_db):
+    """.schema output in run mode is copy-paste executable (trailing ;)."""
+    script = tmp_path / "show.sql"
+    script.write_text(".schema\n")
+    result = solite_cli(["run", str(schema_db), str(script)], cwd=tmp_path)
+    assert result.success
+    assert "CREATE TABLE users" in result.stdout
+    # each CREATE in the fixture is a single-line statement
+    for line in result.stdout.splitlines():
+        if line.startswith("CREATE "):
+            assert line.endswith(";"), line
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file permissions")
 def test_schema_readonly_file(solite_cli, tmp_path, schema_db):
     os.chmod(schema_db, 0o444)

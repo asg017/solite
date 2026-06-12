@@ -15,7 +15,9 @@
 //! statements from the database's sqlite_master table, in creation order
 //! (sqlite_master rowid order, matching sqlite3's `.schema`). Creation
 //! order guarantees the dump is replayable: tables always precede the
-//! indexes, triggers, and views that reference them.
+//! indexes, triggers, and views that reference them. Every statement is
+//! terminated with a `;` (sqlite_master.sql lacks it) so the output is
+//! directly executable in every consumer (CLI, REPL, run mode, Jupyter).
 
 use crate::dot::DotError;
 use crate::Runtime;
@@ -34,7 +36,8 @@ impl SchemaCommand {
     ///
     /// # Returns
     ///
-    /// A vector of SQL CREATE statements, or an error if the query fails.
+    /// A vector of SQL CREATE statements (each terminated with `;`),
+    /// or an error if the query fails.
     pub fn execute(&self, runtime: &Runtime) -> Result<Vec<String>, DotError> {
         let (_, stmt) = runtime.connection.prepare(
             r#"
@@ -56,7 +59,9 @@ impl SchemaCommand {
                     if let Some(value) = row.first() {
                         let sql = value.as_str();
                         if !sql.is_empty() {
-                            schemas.push(sql.to_owned());
+                            // sqlite_master.sql never includes the trailing
+                            // terminator; add it so output is copy-pasteable
+                            schemas.push(format!("{};", sql));
                         }
                     }
                 }
@@ -106,6 +111,7 @@ mod tests {
         let schemas = result.unwrap();
         assert_eq!(schemas.len(), 1);
         assert!(schemas[0].contains("CREATE TABLE test_schema_table"));
+        assert!(schemas[0].ends_with(';'));
     }
 
     #[test]
@@ -154,6 +160,11 @@ mod tests {
         let cmd = SchemaCommand {};
         let schemas = cmd.execute(&runtime).unwrap();
         assert_eq!(schemas.len(), 4);
+
+        // every statement is terminated so the dump is executable as-is
+        for schema in &schemas {
+            assert!(schema.ends_with(';'), "missing terminator: {schema}");
+        }
 
         let pos = |needle: &str| {
             schemas

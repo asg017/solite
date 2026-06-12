@@ -22,7 +22,7 @@ fn schema_impl(database: PathBuf, allow_ssh: bool) -> anyhow::Result<()> {
     let cmd = SchemaCommand {};
     let schemas = cmd.execute(&runtime)?;
     for schema in schemas {
-        println!("{};", schema);
+        println!("{}", schema);
     }
     Ok(())
 }

@@ -156,6 +156,56 @@ def test_query_blob_output(solite_cli):
     }
 
 
+def test_query_blob_limit(solite_cli, tmp_path):
+    """Exports error on BLOBs over the size limit instead of dumping them."""
+    blob8 = "select zeroblob(8) as payload"
+
+    # a small blob under an explicit limit exports fine
+    result = solite_cli(["q", blob8, "-f", "csv", "--blob-limit", "8"])
+    assert result.success, result.stderr
+    assert result.stdout == "payload\nx'0000000000000000'\n"
+
+    # over an explicit limit: error names the column, both sizes, and the flag
+    result = solite_cli(["q", blob8, "-f", "csv", "--blob-limit", "7"])
+    assert not result.success
+    assert "payload" in result.stderr
+    assert "8 bytes" in result.stderr
+    assert "7-byte" in result.stderr
+    assert "--blob-limit" in result.stderr
+
+    # json/ndjson paths enforce the limit too
+    assert not solite_cli(["q", blob8, "-f", "json", "--blob-limit", "7"]).success
+    assert not solite_cli(["q", blob8, "-f", "ndjson", "--blob-limit", "7"]).success
+
+    # the default limit for file/stdout exports is 10 MiB
+    big = "select zeroblob(10*1024*1024 + 1) as payload"
+    result = solite_cli(["q", big, "-f", "csv"])
+    assert not result.success
+    assert "10485761 bytes" in result.stderr
+    assert "10485760-byte" in result.stderr
+    assert "--blob-limit" in result.stderr
+
+    # --blob-limit raises the limit; human-readable sizes are accepted
+    out = tmp_path / "big.csv"
+    result = solite_cli(["q", big, "-o", str(out), "--blob-limit", "11mb"])
+    assert result.success, result.stderr
+    assert out.stat().st_size > 20 * 1024 * 1024  # hex-encoded blob
+
+    # none/unlimited disables the limit
+    assert solite_cli(["q", blob8, "-f", "csv", "--blob-limit", "none"]).success
+
+    # -f value stays unlimited: explicitly asking for one raw value is
+    # intentional, even with a smaller --blob-limit
+    result = solite_cli(["q", "select zeroblob(5)", "-f", "value", "--blob-limit", "2"])
+    assert result.success, result.stderr
+    assert result.stdout == "\x00\x00\x00\x00\x00"
+
+    # garbage limits are rejected loudly at argument-parse time
+    bad = solite_cli(["q", "select 1", "--blob-limit", "10xb"])
+    assert not bad.success
+    assert "10xb" in bad.stderr
+
+
 def test_query_parameter_types(solite_cli):
     """-p values bind with inferred types, like sqlite3's .parameter set."""
 

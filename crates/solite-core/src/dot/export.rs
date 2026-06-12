@@ -18,7 +18,7 @@
 use crate::dot::DotError;
 #[cfg(feature = "object_store")]
 use crate::exporter::write_output_to_bytes;
-use crate::exporter::{format_from_path, output_from_path, write_output};
+use crate::exporter::{format_from_path, output_from_path, write_output, BlobLimit};
 #[cfg(feature = "object_store")]
 use crate::object_store;
 use crate::sqlite::{OwnedValue, Statement};
@@ -101,7 +101,7 @@ impl ExportCommand {
         {
             let target_str = self.target.to_string_lossy();
             if object_store::is_object_store_url(&target_str) {
-                let data = write_output_to_bytes(&mut self.statement, format)
+                let data = write_output_to_bytes(&mut self.statement, format, BlobLimit::Default)
                     .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
                 object_store::upload(&target_str, data)
                     .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
@@ -111,7 +111,8 @@ impl ExportCommand {
 
         let output = output_from_path(&self.target)
             .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
-        write_output(&mut self.statement, output, format)
+        // .export has no override flag (yet); it uses the file default limit
+        write_output(&mut self.statement, output, format, BlobLimit::Default)
             .map_err(|e| DotError::Io(std::io::Error::other(e.to_string())))?;
 
         Ok(())

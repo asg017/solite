@@ -15,10 +15,10 @@
 //! # Example
 //!
 //! ```ignore
-//! use solite_core::exporter::{ExportFormat, write_output};
+//! use solite_core::exporter::{BlobLimit, ExportFormat, write_output};
 //!
 //! let output = Box::new(std::io::stdout());
-//! write_output(&mut stmt, output, ExportFormat::Json)?;
+//! write_output(&mut stmt, output, ExportFormat::Json, BlobLimit::Default)?;
 //! ```
 
 use arboard::Clipboard;
@@ -56,6 +56,15 @@ pub enum ExportError {
     Clipboard(String),
     /// Compression error.
     Compression(String),
+    /// A BLOB cell exceeded the export size limit.
+    BlobTooLarge {
+        /// Name of the column containing the oversized BLOB.
+        column: String,
+        /// Size of the BLOB in bytes.
+        size: u64,
+        /// The active limit in bytes.
+        limit: u64,
+    },
 }
 
 impl fmt::Display for ExportError {
@@ -76,6 +85,20 @@ impl fmt::Display for ExportError {
             }
             ExportError::Clipboard(msg) => write!(f, "Clipboard error: {}", msg),
             ExportError::Compression(msg) => write!(f, "Compression error: {}", msg),
+            ExportError::BlobTooLarge {
+                column,
+                size,
+                limit,
+            } => write!(
+                f,
+                "BLOB in column '{}' is {} bytes, which exceeds the {}-byte export limit; \
+                 pass --blob-limit <SIZE> (e.g. --blob-limit {}mb or --blob-limit none) to \
+                 export it",
+                column,
+                size,
+                limit,
+                size.div_ceil(1024 * 1024),
+            ),
         }
     }
 }
@@ -124,6 +147,116 @@ pub enum ExportFormat {
     Value,
     /// HTML table to clipboard.
     Clipboard,
+}
+
+/// Default BLOB size limit for clipboard exports (1 MiB).
+pub const DEFAULT_CLIPBOARD_BLOB_LIMIT: u64 = 1024 * 1024;
+
+/// Default BLOB size limit for file/stdout exports (10 MiB).
+pub const DEFAULT_FILE_BLOB_LIMIT: u64 = 10 * 1024 * 1024;
+
+/// Maximum size of a single BLOB cell allowed in exports.
+///
+/// Exceeding the limit is an error ([`ExportError::BlobTooLarge`]), never a
+/// truncation, so exports can't silently dump or mangle a giant blob. The
+/// [`ExportFormat::Value`] path is always unlimited: explicitly requesting a
+/// single raw value is intentional.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlobLimit {
+    /// Format-dependent default: [`DEFAULT_CLIPBOARD_BLOB_LIMIT`] for
+    /// clipboard exports, [`DEFAULT_FILE_BLOB_LIMIT`] otherwise.
+    #[default]
+    Default,
+    /// Explicit limit in bytes.
+    Bytes(u64),
+    /// No limit.
+    Unlimited,
+}
+
+impl BlobLimit {
+    /// Resolve to a concrete byte limit for the given format
+    /// (`None` = unlimited). The `Value` format is never limited.
+    pub fn resolve(&self, format: &ExportFormat) -> Option<u64> {
+        if matches!(format, ExportFormat::Value) {
+            return None;
+        }
+        match self {
+            BlobLimit::Unlimited => None,
+            BlobLimit::Bytes(n) => Some(*n),
+            BlobLimit::Default => Some(match format {
+                ExportFormat::Clipboard => DEFAULT_CLIPBOARD_BLOB_LIMIT,
+                _ => DEFAULT_FILE_BLOB_LIMIT,
+            }),
+        }
+    }
+}
+
+/// Parse a user-supplied blob size limit.
+///
+/// Accepts plain byte counts (`1048576`), sizes with a case-insensitive
+/// `k`/`kb`/`m`/`mb`/`g`/`gb` suffix (`10mb`, `512K`), or
+/// `none`/`unlimited`/`0` for no limit.
+pub fn parse_blob_limit(s: &str) -> Result<BlobLimit, String> {
+    const HINT: &str =
+        "expected a byte count (1048576), a size with a k/kb/m/mb/g/gb suffix (10mb), \
+         or 'none'/'unlimited'/'0' for no limit";
+    let t = s.trim().to_ascii_lowercase();
+    match t.as_str() {
+        "" => return Err(format!("empty blob limit: {HINT}")),
+        "none" | "unlimited" => return Ok(BlobLimit::Unlimited),
+        _ => {}
+    }
+    let (digits, multiplier): (&str, u64) = if let Some(d) =
+        t.strip_suffix("kb").or_else(|| t.strip_suffix('k'))
+    {
+        (d, 1024)
+    } else if let Some(d) = t.strip_suffix("mb").or_else(|| t.strip_suffix('m')) {
+        (d, 1024 * 1024)
+    } else if let Some(d) = t.strip_suffix("gb").or_else(|| t.strip_suffix('g')) {
+        (d, 1024 * 1024 * 1024)
+    } else {
+        (t.as_str(), 1)
+    };
+    let n: u64 = digits
+        .trim()
+        .parse()
+        .map_err(|_| format!("invalid blob limit '{s}': {HINT}"))?;
+    let bytes = n
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("blob limit '{s}' is too large"))?;
+    if bytes == 0 {
+        Ok(BlobLimit::Unlimited)
+    } else {
+        Ok(BlobLimit::Bytes(bytes))
+    }
+}
+
+/// Error if any BLOB cell in the row exceeds `limit` (`None` = unlimited).
+///
+/// Checked on the raw blob size, before any hex/base64 encoding.
+fn check_blob_limit(
+    row: &[ValueRefX],
+    columns: &[String],
+    limit: Option<u64>,
+) -> Result<(), ExportError> {
+    let Some(limit) = limit else {
+        return Ok(());
+    };
+    for (idx, value) in row.iter().enumerate() {
+        if let ValueRefXValue::Blob(bytes) = &value.value {
+            if bytes.len() as u64 > limit {
+                return Err(ExportError::BlobTooLarge {
+                    column: columns
+                        .get(idx)
+                        .cloned()
+                        .unwrap_or_else(|| format!("#{}", idx + 1)),
+                    size: bytes.len() as u64,
+                    limit,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Encode a BLOB as a SQL-style hex literal, e.g. `x'DEADBEEF'`.
@@ -219,7 +352,11 @@ fn write_csv_row<W: Write>(
 }
 
 /// Write statement results as CSV.
-fn write_csv<W: Write>(stmt: &mut Statement, output: W) -> Result<(), ExportError> {
+fn write_csv<W: Write>(
+    stmt: &mut Statement,
+    output: W,
+    blob_limit: Option<u64>,
+) -> Result<(), ExportError> {
     let mut writer = csv::Writer::from_writer(output);
 
     let columns = stmt.column_names().map_err(|e| ExportError::Sql(format!("{:?}", e)))?;
@@ -227,7 +364,10 @@ fn write_csv<W: Write>(stmt: &mut Statement, output: W) -> Result<(), ExportErro
 
     loop {
         match stmt.next() {
-            Ok(Some(row)) => write_csv_row(&mut writer, row)?,
+            Ok(Some(row)) => {
+                check_blob_limit(&row, &columns, blob_limit)?;
+                write_csv_row(&mut writer, row)?;
+            }
             Ok(None) => break,
             Err(e) => return Err(ExportError::Sql(e.to_string())),
         }
@@ -238,7 +378,11 @@ fn write_csv<W: Write>(stmt: &mut Statement, output: W) -> Result<(), ExportErro
 }
 
 /// Write statement results as TSV.
-fn write_tsv<W: Write>(stmt: &mut Statement, output: W) -> Result<(), ExportError> {
+fn write_tsv<W: Write>(
+    stmt: &mut Statement,
+    output: W,
+    blob_limit: Option<u64>,
+) -> Result<(), ExportError> {
     let mut writer = csv::WriterBuilder::new()
         .delimiter(b'\t')
         .from_writer(output);
@@ -248,7 +392,10 @@ fn write_tsv<W: Write>(stmt: &mut Statement, output: W) -> Result<(), ExportErro
 
     loop {
         match stmt.next() {
-            Ok(Some(row)) => write_csv_row(&mut writer, row)?,
+            Ok(Some(row)) => {
+                check_blob_limit(&row, &columns, blob_limit)?;
+                write_csv_row(&mut writer, row)?;
+            }
             Ok(None) => break,
             Err(e) => return Err(ExportError::Sql(e.to_string())),
         }
@@ -259,7 +406,11 @@ fn write_tsv<W: Write>(stmt: &mut Statement, output: W) -> Result<(), ExportErro
 }
 
 /// Write statement results as JSON array.
-fn write_json<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), ExportError> {
+fn write_json<W: Write>(
+    stmt: &mut Statement,
+    mut output: W,
+    blob_limit: Option<u64>,
+) -> Result<(), ExportError> {
     output.write_all(b"[")?;
 
     let columns = stmt.column_names().map_err(|e| ExportError::Sql(format!("{:?}", e)))?;
@@ -268,6 +419,7 @@ fn write_json<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), Expor
     loop {
         match stmt.next() {
             Ok(Some(row)) => {
+                check_blob_limit(&row, &columns, blob_limit)?;
                 if first {
                     first = false;
                 } else {
@@ -285,12 +437,17 @@ fn write_json<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), Expor
 }
 
 /// Write statement results as NDJSON (newline-delimited JSON).
-fn write_ndjson<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), ExportError> {
+fn write_ndjson<W: Write>(
+    stmt: &mut Statement,
+    mut output: W,
+    blob_limit: Option<u64>,
+) -> Result<(), ExportError> {
     let columns = stmt.column_names().map_err(|e| ExportError::Sql(format!("{:?}", e)))?;
 
     loop {
         match stmt.next() {
             Ok(Some(row)) => {
+                check_blob_limit(&row, &columns, blob_limit)?;
                 write_json_row(&mut output, &columns, row)?;
                 output.write_all(b"\n")?;
             }
@@ -303,7 +460,7 @@ fn write_ndjson<W: Write>(stmt: &mut Statement, mut output: W) -> Result<(), Exp
 }
 
 /// Write statement results to clipboard as HTML table.
-fn write_clipboard(stmt: &mut Statement) -> Result<(), ExportError> {
+fn write_clipboard(stmt: &mut Statement, blob_limit: Option<u64>) -> Result<(), ExportError> {
     let mut html = String::from("<table><thead><tr>");
     let mut num_rows = 0;
 
@@ -318,6 +475,7 @@ fn write_clipboard(stmt: &mut Statement) -> Result<(), ExportError> {
     loop {
         match stmt.next() {
             Ok(Some(row)) => {
+                check_blob_limit(&row, &columns, blob_limit)?;
                 html.push_str("<tr>");
                 for cell in row {
                     let value = value_to_string(&cell)?;
@@ -417,17 +575,22 @@ pub fn output_from_path(path: &Path) -> Result<Box<dyn Write>, ExportError> {
 }
 
 /// Write statement results to output in the specified format.
+///
+/// `blob_limit` bounds the raw size of any BLOB cell (see [`BlobLimit`]);
+/// the `Value` format is never limited.
 pub fn write_output(
     stmt: &mut Statement,
     output: Box<dyn Write>,
     format: ExportFormat,
+    blob_limit: BlobLimit,
 ) -> Result<(), ExportError> {
+    let limit = blob_limit.resolve(&format);
     match format {
-        ExportFormat::Csv => write_csv(stmt, output),
-        ExportFormat::Tsv => write_tsv(stmt, output),
-        ExportFormat::Json => write_json(stmt, output),
-        ExportFormat::Ndjson => write_ndjson(stmt, output),
-        ExportFormat::Clipboard => write_clipboard(stmt),
+        ExportFormat::Csv => write_csv(stmt, output, limit),
+        ExportFormat::Tsv => write_tsv(stmt, output, limit),
+        ExportFormat::Json => write_json(stmt, output, limit),
+        ExportFormat::Ndjson => write_ndjson(stmt, output, limit),
+        ExportFormat::Clipboard => write_clipboard(stmt, limit),
         ExportFormat::Value => write_value(stmt, output),
     }
 }
@@ -437,13 +600,15 @@ pub fn write_output(
 pub fn write_output_to_bytes(
     stmt: &mut Statement,
     format: ExportFormat,
+    blob_limit: BlobLimit,
 ) -> Result<Vec<u8>, ExportError> {
     let mut buf = Vec::new();
+    let limit = blob_limit.resolve(&format);
     match format {
-        ExportFormat::Csv => write_csv(stmt, &mut buf)?,
-        ExportFormat::Tsv => write_tsv(stmt, &mut buf)?,
-        ExportFormat::Json => write_json(stmt, &mut buf)?,
-        ExportFormat::Ndjson => write_ndjson(stmt, &mut buf)?,
+        ExportFormat::Csv => write_csv(stmt, &mut buf, limit)?,
+        ExportFormat::Tsv => write_tsv(stmt, &mut buf, limit)?,
+        ExportFormat::Json => write_json(stmt, &mut buf, limit)?,
+        ExportFormat::Ndjson => write_ndjson(stmt, &mut buf, limit)?,
         ExportFormat::Value => write_value(stmt, &mut buf)?,
         ExportFormat::Clipboard => {
             return Err(ExportError::Io(std::io::Error::other(
@@ -602,6 +767,182 @@ mod tests {
         );
         // blob is no longer conflated with NULL
         assert_eq!(value_to_json(&row[2]).unwrap(), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_parse_blob_limit_plain_bytes() {
+        assert_eq!(parse_blob_limit("1048576"), Ok(BlobLimit::Bytes(1048576)));
+        assert_eq!(parse_blob_limit("1"), Ok(BlobLimit::Bytes(1)));
+        assert_eq!(parse_blob_limit(" 42 "), Ok(BlobLimit::Bytes(42)));
+    }
+
+    #[test]
+    fn test_parse_blob_limit_suffixes() {
+        assert_eq!(parse_blob_limit("1k"), Ok(BlobLimit::Bytes(1024)));
+        assert_eq!(parse_blob_limit("1kb"), Ok(BlobLimit::Bytes(1024)));
+        assert_eq!(parse_blob_limit("10m"), Ok(BlobLimit::Bytes(10 * 1024 * 1024)));
+        assert_eq!(parse_blob_limit("10mb"), Ok(BlobLimit::Bytes(10 * 1024 * 1024)));
+        assert_eq!(parse_blob_limit("2g"), Ok(BlobLimit::Bytes(2 * 1024 * 1024 * 1024)));
+        assert_eq!(parse_blob_limit("2gb"), Ok(BlobLimit::Bytes(2 * 1024 * 1024 * 1024)));
+        // suffixes are case-insensitive
+        assert_eq!(parse_blob_limit("1MB"), Ok(BlobLimit::Bytes(1024 * 1024)));
+        assert_eq!(parse_blob_limit("512K"), Ok(BlobLimit::Bytes(512 * 1024)));
+        assert_eq!(parse_blob_limit("1Gb"), Ok(BlobLimit::Bytes(1024 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn test_parse_blob_limit_unlimited() {
+        assert_eq!(parse_blob_limit("none"), Ok(BlobLimit::Unlimited));
+        assert_eq!(parse_blob_limit("NONE"), Ok(BlobLimit::Unlimited));
+        assert_eq!(parse_blob_limit("unlimited"), Ok(BlobLimit::Unlimited));
+        assert_eq!(parse_blob_limit("0"), Ok(BlobLimit::Unlimited));
+        // 0 with a suffix is still zero bytes = unlimited
+        assert_eq!(parse_blob_limit("0kb"), Ok(BlobLimit::Unlimited));
+    }
+
+    #[test]
+    fn test_parse_blob_limit_rejects_garbage() {
+        for bad in ["", "  ", "abc", "10x", "10bk", "-5", "-5mb", "1.5mb", "mb", "k", "9999999999999999999gb"] {
+            let err = parse_blob_limit(bad);
+            assert!(err.is_err(), "expected error for {bad:?}, got {err:?}");
+        }
+        // errors mention what's accepted
+        let msg = parse_blob_limit("10x").unwrap_err();
+        assert!(msg.contains("10x"), "{msg}");
+        assert!(msg.contains("none"), "{msg}");
+    }
+
+    #[test]
+    fn test_blob_limit_resolve_defaults() {
+        // clipboard defaults to 1 MiB, file/stdout formats to 10 MiB
+        assert_eq!(
+            BlobLimit::Default.resolve(&ExportFormat::Clipboard),
+            Some(1024 * 1024)
+        );
+        for format in [
+            ExportFormat::Csv,
+            ExportFormat::Tsv,
+            ExportFormat::Json,
+            ExportFormat::Ndjson,
+        ] {
+            assert_eq!(
+                BlobLimit::Default.resolve(&format),
+                Some(10 * 1024 * 1024),
+                "{format:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_blob_limit_resolve_override_and_unlimited() {
+        assert_eq!(
+            BlobLimit::Bytes(64).resolve(&ExportFormat::Csv),
+            Some(64)
+        );
+        assert_eq!(
+            BlobLimit::Bytes(64).resolve(&ExportFormat::Clipboard),
+            Some(64)
+        );
+        assert_eq!(BlobLimit::Unlimited.resolve(&ExportFormat::Csv), None);
+        // the raw value path is never limited, even with an explicit limit
+        assert_eq!(BlobLimit::Default.resolve(&ExportFormat::Value), None);
+        assert_eq!(BlobLimit::Bytes(1).resolve(&ExportFormat::Value), None);
+    }
+
+    #[test]
+    fn test_csv_blob_over_limit_errors() {
+        let mut stmt = first_value_of("select 1 as id, zeroblob(32) as payload");
+        let mut buf = Vec::new();
+        let err = write_csv(&mut stmt, &mut buf, Some(16)).unwrap_err();
+        match &err {
+            ExportError::BlobTooLarge {
+                column,
+                size,
+                limit,
+            } => {
+                assert_eq!(column, "payload");
+                assert_eq!(*size, 32);
+                assert_eq!(*limit, 16);
+            }
+            other => panic!("expected BlobTooLarge, got {other:?}"),
+        }
+        // the error names the column, sizes, and the override flag
+        let msg = err.to_string();
+        assert!(msg.contains("payload"), "{msg}");
+        assert!(msg.contains("32 bytes"), "{msg}");
+        assert!(msg.contains("16-byte"), "{msg}");
+        assert!(msg.contains("--blob-limit"), "{msg}");
+    }
+
+    #[test]
+    fn test_csv_blob_under_limit_ok() {
+        let mut stmt = first_value_of("select zeroblob(16) as payload");
+        let mut buf = Vec::new();
+        write_csv(&mut stmt, &mut buf, Some(16)).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("x'00000000000000000000000000000000'"), "{out}");
+    }
+
+    #[test]
+    fn test_json_blob_over_limit_errors() {
+        let mut stmt = first_value_of("select zeroblob(32) as payload");
+        let mut buf = Vec::new();
+        let err = write_json(&mut stmt, &mut buf, Some(16)).unwrap_err();
+        assert!(matches!(err, ExportError::BlobTooLarge { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn test_write_output_enforces_default_limit() {
+        // over the 10 MiB file default → error before serializing
+        let mut stmt = first_value_of("select zeroblob(10*1024*1024 + 1) as payload");
+        let err = write_output(
+            &mut stmt,
+            Box::new(std::io::sink()),
+            ExportFormat::Csv,
+            BlobLimit::Default,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ExportError::BlobTooLarge { .. }), "{err:?}");
+
+        // an explicit higher limit allows it
+        let mut stmt = first_value_of("select zeroblob(10*1024*1024 + 1) as payload");
+        write_output(
+            &mut stmt,
+            Box::new(std::io::sink()),
+            ExportFormat::Csv,
+            BlobLimit::Bytes(11 * 1024 * 1024),
+        )
+        .unwrap();
+
+        // and `none` disables enforcement entirely
+        let mut stmt = first_value_of("select zeroblob(10*1024*1024 + 1) as payload");
+        write_output(
+            &mut stmt,
+            Box::new(std::io::sink()),
+            ExportFormat::Ndjson,
+            BlobLimit::Unlimited,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_write_value_blob_is_never_limited() {
+        // -f value is exempt: explicitly requesting one raw value is
+        // intentional, so even a blob over any limit writes fine
+        let mut stmt = first_value_of("select zeroblob(64) as payload");
+        write_output(
+            &mut stmt,
+            Box::new(std::io::sink()),
+            ExportFormat::Value,
+            BlobLimit::Bytes(1),
+        )
+        .unwrap();
+
+        // the raw bytes still come through untouched
+        let mut stmt = first_value_of("select x'DEADBEEF'");
+        let mut buf = Vec::new();
+        write_value(&mut stmt, &mut buf).unwrap();
+        assert_eq!(buf, vec![0xDE, 0xAD, 0xBE, 0xEF]);
     }
 
     #[test]

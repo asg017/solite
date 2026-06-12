@@ -140,6 +140,9 @@
         --load-extension <PATH>
             Load SQLite extension(s) before running the query
   
+        --blob-limit <SIZE>
+            Max size of a single BLOB cell in exports: bytes (1048576), a k/kb/m/mb/g/gb suffix (16mb), or none/unlimited/0 for no limit. Defaults to 10mb (1mb for clipboard); `-f value` is never limited
+  
         --remote-bin <REMOTE_BIN>
             Path to the solite binary on the remote machine (for ssh:// connections)
   

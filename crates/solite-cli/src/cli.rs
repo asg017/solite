@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
-use solite_core::exporter::ExportFormat;
+use solite_core::exporter::{BlobLimit, ExportFormat};
 
 /// Extensions treated as SQLite database files, for positional-arg
 /// classification (`solite run`) and the bare `solite <file>` REPL fallback.
@@ -161,6 +161,12 @@ pub struct QueryArgs {
     /// Load SQLite extension(s) before running the query
     #[arg(long, value_name = "PATH")]
     pub load_extension: Option<Vec<PathBuf>>,
+
+    /// Max size of a single BLOB cell in exports: bytes (1048576), a
+    /// k/kb/m/mb/g/gb suffix (16mb), or none/unlimited/0 for no limit.
+    /// Defaults to 10mb (1mb for clipboard); `-f value` is never limited
+    #[arg(long, value_name = "SIZE", value_parser = solite_core::exporter::parse_blob_limit)]
+    pub blob_limit: Option<BlobLimit>,
 
     #[command(flatten)]
     pub remote: RemoteArgs,

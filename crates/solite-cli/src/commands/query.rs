@@ -174,7 +174,8 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
 
         // Write output
         let mut stmt = stmt;
-        solite_core::exporter::write_output(&mut stmt, output, format)
+        let blob_limit = args.blob_limit.unwrap_or_default();
+        solite_core::exporter::write_output(&mut stmt, output, format, blob_limit)
             .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
     }
 
@@ -376,6 +377,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let format = determine_format(&args);
@@ -391,6 +393,7 @@ mod tests {
             output: Some(PathBuf::from("output.csv")),
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let format = determine_format(&args);
@@ -406,6 +409,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let format = determine_format(&args);
@@ -457,6 +461,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let (db, sql) = parse_arguments(&args, false).unwrap();
@@ -473,6 +478,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let (db, sql) = parse_arguments(&args, false).unwrap();
@@ -489,6 +495,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let (db, sql) = parse_arguments(&args, false).unwrap();
@@ -504,6 +511,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         }
     }
@@ -607,6 +615,7 @@ mod tests {
             output: None,
             load_extension: None,
             parameters: vec![],
+            blob_limit: None,
             remote: Default::default(),
         };
         let (db, sql) = parse_arguments(&args, true).unwrap();

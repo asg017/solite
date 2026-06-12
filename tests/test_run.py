@@ -237,3 +237,146 @@ def test_run_ipynb_cell_order(solite_cli, snapshot, tmp_path):
     assert result.stdout.index("first") < result.stdout.index("second")
     assert result.stdout.index("second") < result.stdout.index("third")
     assert result.stdout == snapshot
+
+
+# --- coverage for run-mode flags and input modes ---
+
+
+def test_run_readonly_blocks_writes(solite_cli, tmp_path):
+    seed = solite_cli(
+        ["run", "data.db", "-c", "create table t(a); insert into t values (1);"],
+        cwd=tmp_path,
+    )
+    assert seed.success
+
+    # Reads succeed
+    result = solite_cli(
+        ["run", "--readonly", "data.db", "-c", ".timer off\nselect a from t;"],
+        cwd=tmp_path,
+    )
+    assert result.success
+    assert "1" in result.stdout
+
+    # Writes fail and flip the exit code
+    result = solite_cli(
+        ["run", "--readonly", "data.db", "-c", "insert into t values (2);"],
+        cwd=tmp_path,
+    )
+    assert not result.success
+    assert "readonly" in result.stderr
+
+
+def test_run_readonly_requires_database(solite_cli, tmp_path):
+    result = solite_cli(["run", "--readonly", "-c", "select 1;"], cwd=tmp_path)
+    assert not result.success
+    assert "--readonly requires a database path" in result.stderr
+
+
+def test_run_trace_happy_path(solite_cli, tmp_path):
+    (tmp_path / "a.sql").write_text(
+        ".timer off\nselect 1;\nselect 2;\nselect 3;\n", newline="\n"
+    )
+    result = solite_cli(["run", "a.sql", "--trace", "t.db"], cwd=tmp_path)
+    assert result.success
+    with sqlite3.connect(tmp_path / "t.db") as db:
+        # one statements row per SQL statement (dot commands aren't traced)
+        assert db.execute("select count(*) from statements").fetchone()[0] == 3
+        assert db.execute("select count(*) from steps").fetchone()[0] > 0
+
+
+def test_run_stdin(solite_cli, tmp_path):
+    result = solite_cli(
+        ["run"], communicate=[b".timer off\nselect 41 + 1;"], cwd=tmp_path
+    )
+    assert result.success
+    assert "42" in result.stdout
+
+
+def test_run_stdin_with_database(solite_cli, tmp_path):
+    seed = solite_cli(
+        ["run", "data.db", "-c", "create table t(a); insert into t values (7);"],
+        cwd=tmp_path,
+    )
+    assert seed.success
+    result = solite_cli(
+        ["run", "data.db"],
+        communicate=[b".timer off\nselect a from t;"],
+        cwd=tmp_path,
+    )
+    assert result.success
+    assert "7" in result.stdout
+
+
+def test_run_script_wins_over_stdin(solite_cli, tmp_path):
+    (tmp_path / "a.sql").write_text(
+        ".timer off\nselect 'from script';\n", newline="\n"
+    )
+    # Piped stdin is silently ignored when a script argument is given
+    result = solite_cli(
+        ["run", "a.sql"], communicate=[b"select 'from stdin';"], cwd=tmp_path
+    )
+    assert result.success
+    assert "from script" in result.stdout
+    assert "from stdin" not in result.stdout
+
+
+def test_run_command_with_database(solite_cli, tmp_path):
+    seed = solite_cli(
+        ["run", "data.db", "-c", "create table t(a); insert into t values (9);"],
+        cwd=tmp_path,
+    )
+    assert seed.success
+    result = solite_cli(
+        ["run", "data.db", "-c", ".timer off\nselect a from t;"], cwd=tmp_path
+    )
+    assert result.success
+    assert "9" in result.stdout
+
+
+def test_run_command_script_mutually_exclusive(solite_cli, tmp_path):
+    (tmp_path / "a.sql").write_text("select 1;\n", newline="\n")
+    result = solite_cli(["run", "a.sql", "-c", "select 2;"], cwd=tmp_path)
+    assert not result.success
+    assert "-c/--command cannot be combined with a .sql file" in result.stderr
+
+
+def test_run_ipynb_legacy_format(solite_cli, tmp_path):
+    nb = make_notebook(
+        [
+            ("code", ".timer off"),
+            ("markdown", "# skipped"),
+            ("code", "select 'legacy works';"),
+        ],
+        nbformat_minor=2,
+    )
+    (tmp_path / "a.ipynb").write_text(json.dumps(nb), newline="\n")
+    result = solite_cli(["run", "a.ipynb"], cwd=tmp_path)
+    assert result.success
+    assert "legacy works" in result.stdout
+    assert "skipped" not in result.stdout
+
+
+def test_run_ipynb_invalid_json(solite_cli, tmp_path):
+    (tmp_path / "a.ipynb").write_text("this is not a notebook", newline="\n")
+    result = solite_cli(["run", "a.ipynb"], cwd=tmp_path)
+    assert not result.success
+    assert "Failed to parse notebook" in result.stderr
+
+
+def test_run_parameter_subcommands(solite_cli, snapshot, tmp_path):
+    (tmp_path / "a.sql").write_text(
+        """
+.timer off
+.param set a 1
+.param set b two
+.parameter list
+.param unset a
+.parameter list
+.param clear
+.parameter list
+""",
+        newline="\n",
+    )
+    result = solite_cli(["run", "a.sql"], cwd=tmp_path)
+    assert result.success
+    assert result.stdout == snapshot

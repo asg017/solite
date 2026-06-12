@@ -1,10 +1,22 @@
 //! Report generation from SQL files.
 
 use anyhow::{anyhow, Result};
+use regex::Regex;
 use solite_core::sqlite::{ColumnMeta, Connection};
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+/// Loose matcher for lines that look like a `-- name:` annotation.
+///
+/// Intentionally broader than the strict parser regex in
+/// `solite_core::procedure` (it also matches `--name:` and `-- name :`):
+/// any preamble line matching this that did NOT parse into a procedure
+/// definition is a malformed annotation, and codegen errors instead of
+/// silently demoting the query to an executed `setup` statement.
+static LOOSE_NAME_LINE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^--\s*name\s*:").expect("valid regex"));
 
 use super::types::{Export, Report};
 
@@ -181,6 +193,24 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
             }
             Some(Ok(ref step)) => match &step.result {
                 StepResult::SqlStatement { stmt, raw_sql: _ } => {
+                    // A statement whose preamble contains something that looks
+                    // like a `-- name:` annotation but didn't parse is an
+                    // authoring error, not a setup statement.
+                    if let Some(preamble) = &step.preamble {
+                        if let Some(bad) = preamble
+                            .lines()
+                            .map(str::trim)
+                            .find(|l| LOOSE_NAME_LINE_RE.is_match(l))
+                        {
+                            return Err(anyhow!(
+                                "Malformed `-- name:` annotation at {}: `{}`\n\
+                                 Expected `-- name: <name> [:rows|:row|:value|:list] [-> ClassName]`",
+                                step.reference,
+                                bad
+                            ));
+                        }
+                    }
+
                     // Not an export, treat as setup
                     report.setup.push(stmt.sql());
                     if let Err(e) = stmt.execute() {

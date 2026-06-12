@@ -501,42 +501,44 @@ impl Runtime {
                     // The preamble may contain multiple comment lines (regions, separators, etc.)
                     // so we look for a `-- name:` line anywhere in the preamble.
                     if let Some(ref preamble_str) = preamble_owned {
-                        let name_line = preamble_str
+                        // Try parsing every preamble line rather than pre-filtering
+                        // on a literal `-- name:` prefix, so anything the parser
+                        // regex accepts (e.g. `--  name:` with extra whitespace)
+                        // is recognized as a procedure definition.
+                        let parsed = preamble_str
                             .lines()
                             .map(|l| l.trim())
-                            .find(|l| l.starts_with("-- name:"));
-                        if let Some(name_line) = name_line {
-                            if let Some((name, annotations, result_class)) = procedure::parse_name_line(name_line) {
-                                let columns = stmt.column_meta();
-                                let parameters: Vec<_> = stmt
-                                    .bind_parameters()
-                                    .iter()
-                                    .map(|p| procedure::parse_parameter(p))
-                                    .collect();
-                                let result_type = procedure::determine_result_type(&annotations, columns.len());
+                            .find_map(procedure::parse_name_line);
+                        if let Some((name, annotations, result_class)) = parsed {
+                            let columns = stmt.column_meta();
+                            let parameters: Vec<_> = stmt
+                                .bind_parameters()
+                                .iter()
+                                .map(|p| procedure::parse_parameter(p))
+                                .collect();
+                            let result_type = procedure::determine_result_type(&annotations, columns.len());
 
-                                let proc = Procedure {
-                                    name: name.clone(),
-                                    sql: stmt.sql(),
-                                    result_type,
-                                    parameters,
-                                    columns,
-                                    result_class,
-                                };
-                                self.procedures.insert(name, proc.clone());
+                            let proc = Procedure {
+                                name: name.clone(),
+                                sql: stmt.sql(),
+                                result_type,
+                                parameters,
+                                columns,
+                                result_class,
+                            };
+                            self.procedures.insert(name, proc.clone());
 
-                                return Some(Ok(Step {
-                                    preamble: preamble_owned,
-                                    epilogue: epilogue_owned,
-                                    reference: StepReference {
-                                        block_name,
-                                        line_number: line_idx + 1,
-                                        column_number: column_idx + 1,
-                                        region: regions,
-                                    },
-                                    result: StepResult::ProcedureDefinition(proc),
-                                }));
-                            }
+                            return Some(Ok(Step {
+                                preamble: preamble_owned,
+                                epilogue: epilogue_owned,
+                                reference: StepReference {
+                                    block_name,
+                                    line_number: line_idx + 1,
+                                    column_number: column_idx + 1,
+                                    region: regions,
+                                },
+                                result: StepResult::ProcedureDefinition(proc),
+                            }));
                         }
                     }
 

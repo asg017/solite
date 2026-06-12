@@ -164,6 +164,12 @@ mod tests {
             .expect("report should succeed")
     }
 
+    fn report_err(src: &str) -> String {
+        report_from_file(src, &PathBuf::from("[test]"), BaseDatabaseType::None)
+            .expect_err("report should fail")
+            .to_string()
+    }
+
     #[test]
     fn test_simple_export() {
         assert_yaml_snapshot!(report("-- name: xxx\nselect 1, 2, 3;"));
@@ -275,6 +281,43 @@ mod tests {
         assert!(r.setup[0].contains("users_name"));
         assert_eq!(r.exports.len(), 1);
         assert_eq!(r.exports[0].columns.len(), 2);
+    }
+
+    #[test]
+    fn test_name_line_extra_whitespace_is_export() {
+        // `--  name:` (two spaces) is accepted by the parser regex; the
+        // runtime pre-filter must agree so it registers as a procedure.
+        let r = report(
+            "create table users(id int);\n\n--  name: getA :row\nselect id from users;",
+        );
+        assert_eq!(r.exports.len(), 1);
+        assert_eq!(r.exports[0].name, "getA");
+        assert_eq!(r.setup.len(), 1);
+    }
+
+    #[test]
+    fn test_malformed_name_line_no_space_errors() {
+        let err = report_err(
+            "create table users(id int);\n\n--name: getA :row\nselect id from users;",
+        );
+        assert!(err.contains("--name: getA :row"), "error cites the line: {err}");
+        assert!(err.contains("[test]:4"), "error cites file:line: {err}");
+    }
+
+    #[test]
+    fn test_malformed_name_line_hyphenated_name_errors() {
+        let err = report_err(
+            "create table users(id int, name text);\n\n-- name: bad-name :row\nselect name from users;",
+        );
+        assert!(err.contains("bad-name"), "error cites the line: {err}");
+    }
+
+    #[test]
+    fn test_malformed_name_line_trailing_tokens_errors() {
+        let err = report_err(
+            "create table users(id int, name text);\n\n-- name: trailing :rows -> Workbook :extra\nselect id, name from users;",
+        );
+        assert!(err.contains(":extra"), "error cites the line: {err}");
     }
 
     #[test]

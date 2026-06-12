@@ -368,13 +368,14 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     }
 }
 
-/// Handle a dot command during test execution. Execution errors in `.run`
-/// SQL are recorded as test failures.
+/// Handle a dot command during test execution. Execution errors of SQL
+/// statements inside a whole-file `.run` are recorded as test failures.
 ///
-/// Dot commands only appear in test files as setup, so any failure
-/// (missing `.run` file, unknown procedure, `.load` error, unsupported
-/// command) is returned as `Err` and aborts the file, mirroring the
-/// setup-statement policy in `test_impl`.
+/// Dot commands only appear in test files as setup, so any other failure
+/// (missing `.run` file, unknown or failing procedure, `.load` error,
+/// unsupported command) is returned as `Err` and aborts the file, mirroring
+/// the setup-statement policy in `test_impl`. The caller records exactly one
+/// failure per `Err`, so nothing here calls `record_failure` for those paths.
 fn handle_dot_command(
     cmd: &DotCommand,
     rt: &mut Runtime,
@@ -389,13 +390,43 @@ fn handle_dot_command(
             .execute(&mut rt.connection)
             .map(|_| ())
             .map_err(|e| format!("Failed to load extension: {:?}", e)),
-        DotCommand::Parameter(param_cmd) => {
-            if let solite_core::dot::ParameterCommand::Set { key, value } = param_cmd {
-                rt.define_parameter(key.clone(), value.to_owned())
-                    .map_err(|e| format!("Failed to set parameter {}: {}", key, e))?;
+        DotCommand::Parameter(param_cmd) => match param_cmd {
+            solite_core::dot::ParameterCommand::Set { key, value } => rt
+                .define_parameter(key.clone(), value.to_owned())
+                .map_err(|e| format!("Failed to set parameter {}: {}", key, e)),
+            solite_core::dot::ParameterCommand::Unset(key) => {
+                rt.delete_parameter(key);
+                Ok(())
             }
-            Ok(())
-        }
+            solite_core::dot::ParameterCommand::List => {
+                match solite_core::dot::param::list_parameters_statement(rt) {
+                    Some(mut stmt) => loop {
+                        match stmt.next() {
+                            Ok(Some(row)) => match (row.first(), row.get(1)) {
+                                (Some(key), Some(value)) => println!(
+                                    "{} = {}",
+                                    value_to_string(key),
+                                    value_to_string(value)
+                                ),
+                                _ => return Err("Failed to list parameters".to_string()),
+                            },
+                            Ok(None) => break Ok(()),
+                            Err(e) => {
+                                break Err(format!("Failed to list parameters: {}", e.message))
+                            }
+                        }
+                    },
+                    None => {
+                        println!("No parameters set");
+                        Ok(())
+                    }
+                }
+            }
+            solite_core::dot::ParameterCommand::Clear => {
+                solite_core::dot::param::clear_parameters(rt);
+                Ok(())
+            }
+        },
         DotCommand::Call(_) => Ok(()), /* resolved to SqlStatement in next_stepx() */
         DotCommand::Run(run_cmd) => {
             if let Some(ref proc_name) = run_cmd.procedure {
@@ -410,16 +441,12 @@ fn handle_dot_command(
                     .cloned()
                     .ok_or_else(|| format!("Unknown procedure: '{}'", proc_name))?;
                 match rt.prepare_with_parameters(&proc.sql) {
-                    Ok((_, Some(stmt))) => {
-                        if let Err(e) = stmt.execute() {
-                            stats.record_failure();
-                            eprintln!(
-                                "Error executing procedure '{}': {}",
-                                proc_name, e.message
-                            );
-                        }
-                        Ok(())
-                    }
+                    Ok((_, Some(stmt))) => stmt.execute().map(|_| ()).map_err(|e| {
+                        format!(
+                            "Failed to execute procedure '{}': {}",
+                            proc_name, e.message
+                        )
+                    }),
                     Ok((_, None)) => Err(format!(
                         "Procedure '{}' prepared to empty statement",
                         proc_name
@@ -920,6 +947,67 @@ INSERT INTO t VALUES (1), (2);
         let file = write_sql(&tmp, "dot_run_ok.sql", "\
 .run fixture.sql
 SELECT COUNT(*) FROM t; -- 2
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_run_failing_procedure_aborts_with_one_failure() {
+        let tmp = temp_dir();
+        write_sql(&tmp, "procs.sql", "\
+-- name: failingProc :void
+INSERT INTO no_such_table VALUES (1);
+");
+        // The later (passing) assertion must not run: exactly one failure
+        let file = write_sql(&tmp, "dot_run_failing_proc.sql", "\
+.run procs.sql failingProc
+SELECT 1; -- 1
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_param_set_and_unset() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "param_unset.sql", "\
+.param set :x 42
+SELECT :x; -- '42'
+.param unset :x
+SELECT :x; -- NULL
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_param_clear_removes_all_parameters() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "param_clear.sql", "\
+.param set :x 1
+.param set :y 2
+.param clear
+SELECT :x; -- NULL
+SELECT :y; -- NULL
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_param_list_supported() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "param_list.sql", "\
+.param set :x 1
+.param list
+SELECT :x; -- '1'
 ");
         let result = test_impl(default_args(file));
         assert!(result.is_ok());

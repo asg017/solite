@@ -184,31 +184,9 @@ fn run_impl(flags: RunArgs) -> Result<()> {
             bail!("-c/--command cannot be combined with a procedure name");
         }
 
-        let mut rt = if flags.readonly {
-            match &database {
-                Some(db) => Runtime::new_readonly(&db.to_string_lossy()),
-                None => bail!("--readonly requires a database path"),
-            }
-        } else {
-            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
-        };
-
-        if flags.trace.is_some() {
-            setup_tracing(&rt)?;
-        }
-
-        apply_parameters(&mut rt, &flags.parameters)?;
-
+        let mut rt = create_runtime(&flags, database.as_ref())?;
         rt.enqueue("<command>", command, BlockSource::CommandFlag);
-
-        let mut timer = true;
-        execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
-
-        if let Some(trace_path) = flags.trace {
-            write_trace_output(&rt, &trace_path)?;
-        }
-
-        return Ok(());
+        return execute_and_finish(&mut rt, &flags);
     }
 
     // Stdin piped input: treat as inline SQL, no scripts/procedures allowed
@@ -222,31 +200,9 @@ fn run_impl(flags: RunArgs) -> Result<()> {
             .read_to_string(&mut sql)
             .context("Failed to read from stdin")?;
 
-        let mut rt = if flags.readonly {
-            match &database {
-                Some(db) => Runtime::new_readonly(&db.to_string_lossy()),
-                None => bail!("--readonly requires a database path"),
-            }
-        } else {
-            Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
-        };
-
-        if flags.trace.is_some() {
-            setup_tracing(&rt)?;
-        }
-
-        apply_parameters(&mut rt, &flags.parameters)?;
-
+        let mut rt = create_runtime(&flags, database.as_ref())?;
         rt.enqueue("<stdin>", &sql, BlockSource::Stdin);
-
-        let mut timer = true;
-        execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
-
-        if let Some(trace_path) = flags.trace {
-            write_trace_output(&rt, &trace_path)?;
-        }
-
-        return Ok(());
+        return execute_and_finish(&mut rt, &flags);
     }
 
     // No args → REPL; only a database → REPL on that db
@@ -261,25 +217,7 @@ fn run_impl(flags: RunArgs) -> Result<()> {
         None => bail!("No SQL script provided"),
     };
 
-    // Create runtime
-    let mut rt = if flags.readonly {
-        match &database {
-            Some(db) => Runtime::new_readonly(&db.to_string_lossy()),
-            None => {
-                bail!("--readonly requires a database path");
-            }
-        }
-    } else {
-        Runtime::new(database.as_ref().map(|p| p.to_string_lossy().to_string()))?
-    };
-
-    // Set up tracing if requested
-    if flags.trace.is_some() {
-        setup_tracing(&rt)?;
-    }
-
-    // Set parameters
-    apply_parameters(&mut rt, &flags.parameters)?;
+    let mut rt = create_runtime(&flags, database.as_ref())?;
 
     match procedure {
         Some(proc_name) => {
@@ -306,15 +244,43 @@ fn run_impl(flags: RunArgs) -> Result<()> {
         None => {
             // Normal script execution
             enqueue_script(&mut rt, &script)?;
-
-            let mut timer = true;
-            execute_steps(&mut rt, flags.trace.is_some(), &mut timer);
-
-            // Write trace output if requested
-            if let Some(trace_path) = flags.trace {
-                write_trace_output(&rt, &trace_path)?;
-            }
+            execute_and_finish(&mut rt, &flags)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Create the runtime for a run invocation: honors `--readonly`, attaches the
+/// trace database when `--trace` is set, and binds `-p` parameters.
+fn create_runtime(flags: &RunArgs, database: Option<&PathBuf>) -> Result<Runtime> {
+    let mut rt = if flags.readonly {
+        match database {
+            Some(db) => Runtime::new_readonly(&db.to_string_lossy()).map_err(|e| {
+                anyhow::anyhow!("Failed to open {} read-only: {}", db.display(), e)
+            })?,
+            None => bail!("--readonly requires a database path"),
+        }
+    } else {
+        Runtime::new(database.map(|p| p.to_string_lossy().to_string()))?
+    };
+
+    if flags.trace.is_some() {
+        setup_tracing(&rt)?;
+    }
+
+    apply_parameters(&mut rt, &flags.parameters)?;
+
+    Ok(rt)
+}
+
+/// Drain all queued steps, then write the trace database if `--trace` was set.
+fn execute_and_finish(rt: &mut Runtime, flags: &RunArgs) -> Result<()> {
+    let mut timer = true;
+    execute_steps(rt, flags.trace.is_some(), &mut timer);
+
+    if let Some(ref trace_path) = flags.trace {
+        write_trace_output(rt, trace_path)?;
     }
 
     Ok(())

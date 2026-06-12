@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{env, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use solite_core::exporter::{BlobLimit, ExportFormat};
@@ -68,21 +68,6 @@ Scripts may contain dot commands (.export, .param set, .run, .load, ...;
 see `.help` in the REPL) and procedure definitions (`-- name: getUser :row`).
 Not available in run mode: .ask, .tui, .clear, .vegalite, .bench.";
 
-impl RunArgs {
-    #[allow(dead_code)]
-    pub fn params(&self) -> HashMap<String, String> {
-        self.parameters
-            .chunks(2)
-            .map(|chunk| {
-                if chunk.len() == 2 {
-                    (chunk[0].clone(), chunk[1].clone())
-                } else {
-                    (chunk[0].clone(), String::new())
-                }
-            })
-            .collect()
-    }
-}
 #[derive(
     Debug,
     Default,

@@ -2,7 +2,7 @@
 
 use solite_core::dot::sh::ShellResult;
 use solite_core::dot::DotCommand;
-use solite_core::{Runtime, StepError, StepResult};
+use solite_core::Runtime;
 
 use crate::colors;
 
@@ -211,7 +211,9 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                 }
                 runtime.restore_parameters(saved);
             } else {
-                // File mode: run_file_begin, step loop, run_file_end
+                // File mode: run_file_begin, step loop, run_file_end.
+                // run_file_begin saved and cleared the stack, so draining
+                // execute_steps to completion runs exactly the .run file.
                 let saved = match runtime.run_file_begin(&run_cmd.file, &run_cmd.parameters) {
                     Ok(s) => s,
                     Err(e) => {
@@ -219,41 +221,7 @@ pub fn handle_dot_command(runtime: &mut Runtime, cmd: &mut DotCommand, timer: &m
                         return;
                     }
                 };
-                loop {
-                    match runtime.next_stepx() {
-                        None => break,
-                        Some(Ok(mut step)) => match step.result {
-                            StepResult::SqlStatement { ref mut stmt, .. } => {
-                                super::sql::handle_sql(
-                                    runtime,
-                                    stmt,
-                                    &step.reference.to_string(),
-                                    false,
-                                    *timer,
-                                );
-                            }
-                            StepResult::DotCommand(ref mut cmd) => {
-                                handle_dot_command(runtime, cmd, timer);
-                            }
-                            StepResult::ProcedureDefinition(_) => {}
-                        },
-                        Some(Err(step_error)) => {
-                            match &step_error {
-                                StepError::Prepare {
-                                    error,
-                                    file_name,
-                                    src,
-                                    offset,
-                                } => {
-                                    crate::errors::report_error(file_name, src, error, Some(*offset));
-                                }
-                                StepError::ParseDot(err) => {
-                                    eprintln!("Parse dot error: {}", err);
-                                }
-                            }
-                        }
-                    }
-                }
+                super::execute_steps(runtime, false, timer);
                 runtime.run_file_end(saved);
             }
         }

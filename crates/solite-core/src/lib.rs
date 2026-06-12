@@ -231,12 +231,12 @@ impl Runtime {
         })
     }
 
-    pub fn new_readonly(path: &str) -> Self {
-        let connection = Connection::open_readonly(path).unwrap();
+    pub fn new_readonly(path: &str) -> Result<Self, SQLiteError> {
+        let connection = Connection::open_readonly(path)?;
         unsafe {
             solite_stdlib_init(connection.db(), std::ptr::null_mut(), std::ptr::null_mut());
         }
-        Runtime {
+        Ok(Runtime {
             connection,
             stack: vec![],
             initialized_sqlite_parameters_table: false,
@@ -244,7 +244,7 @@ impl Runtime {
             loaded_files: std::collections::HashSet::new(),
             virtual_files: HashMap::new(),
             running_files: Vec::new(),
-        }
+        })
     }
 
     pub fn enqueue(&mut self, name: &str, code: &str, source: BlockSource) {
@@ -1138,7 +1138,7 @@ select not_exist();",
         }
 
         // Open readonly and read
-        let rt = Runtime::new_readonly(db_str);
+        let rt = Runtime::new_readonly(db_str).unwrap();
         let (_, stmt) = rt.connection.prepare("SELECT x FROM t").unwrap();
         let mut stmt = stmt.unwrap();
         let row = stmt.next().unwrap().unwrap();
@@ -1160,7 +1160,7 @@ select not_exist();",
         }
 
         // Open readonly and try to write
-        let rt = Runtime::new_readonly(db_str);
+        let rt = Runtime::new_readonly(db_str).unwrap();
         let result = rt.connection.execute_script("INSERT INTO t VALUES ('nope')");
         assert!(result.is_err());
         assert!(

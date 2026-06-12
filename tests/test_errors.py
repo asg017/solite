@@ -41,3 +41,28 @@ def test_query_sql_error_printed_once(solite_cli):
     result = solite_cli(["query", "SELECT * FROM nope_table"])
     assert not result.success
     assert result.stderr.count("no such table") == 1
+
+
+def test_prepare_error_prints_message_and_location(solite_cli, tmp_path):
+    """A statement that fails to *prepare* (no such table) must report the
+    real SQLite message with a file:line diagnostic, not a bare
+    'Error preparing step' string, and must abort the rest of the file."""
+    test_file = tmp_path / "p.sql"
+    test_file.write_text("SELECT 1; -- 1\nSELECT * FROM nope;\nSELECT 2; -- 2\n")
+    result = solite_cli(["test", str(test_file)], cwd=tmp_path)
+    assert not result.success
+    assert "no such table: nope" in result.stderr
+    assert "p.sql:2" in result.stderr
+    assert "aborting test file" in result.stderr
+
+
+def test_prepare_error_assertion_passes(solite_cli, tmp_path):
+    """An `-- error:` assertion on a prepare-time failure passes, and the
+    rest of the file still runs."""
+    test_file = tmp_path / "p.sql"
+    test_file.write_text(
+        "SELECT * FROM nope; -- error: no such table: nope\nSELECT 1; -- 1\n"
+    )
+    result = solite_cli(["test", str(test_file)], cwd=tmp_path)
+    assert result.success
+    assert "2 successes" in result.stdout

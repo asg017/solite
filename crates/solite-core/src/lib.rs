@@ -38,7 +38,7 @@ fn sql_comment_region_name(sql: &str) -> Option<&str> {
 
 #[derive(Serialize, Deserialize, Error, Debug)]
 pub enum StepError {
-    #[error("Error preparing SQL statement:")]
+    #[error("Error preparing SQL statement: {}", .error.message)]
     Prepare {
         file_name: String,
         src: String,
@@ -142,7 +142,11 @@ pub struct Step {
     pub reference: StepReference,
 }
 
-fn extract_epilogue(code: &str, rest_index: usize) -> Option<String> {
+/// Extract a trailing same-line comment (`-- ...` or `/* ... */`) starting
+/// at `rest_index` in `code`. Returns `None` if a newline appears before any
+/// comment. Public so consumers (e.g. the test runner) can recover the
+/// epilogue of statements that failed to prepare and never became a [`Step`].
+pub fn extract_epilogue(code: &str, rest_index: usize) -> Option<String> {
     if rest_index >= code.len() {
         return None;
     }

@@ -50,7 +50,7 @@ use crate::cli::TestArgs;
 
 use parser::{
     compute_offset_from_reference, parse_epilogue_comment, parse_ref_file_line_col,
-    parse_snap_directive,
+    parse_snap_directive, prepare_error_assertion,
 };
 use report::{report_mismatch, TestStats};
 use snap::{handle_orphans, handle_snap_assertion, SnapMode, SnapState};
@@ -95,7 +95,61 @@ fn test_impl(args: TestArgs) -> Result<(), TestError> {
     loop {
         match rt.next_stepx() {
             None => break,
-            Some(Err(e)) => {
+            Some(Err(solite_core::StepError::Prepare {
+                file_name,
+                src,
+                offset,
+                error,
+            })) => {
+                // Prepare-time errors (syntax errors, missing tables, ...)
+                // never produce a Step, so recover any trailing `-- error:`
+                // assertion on the failing statement ourselves.
+                let assertion = prepare_error_assertion(&src, offset);
+                match assertion {
+                    Some((ref expected, resume_offset)) if *expected == error.message => {
+                        stats.record_success();
+                        print!("{}", Style::new().green().apply_to("."));
+                        // The failing statement's block was consumed by the
+                        // error; re-enqueue the remainder so the rest of the
+                        // file still runs. Newline padding preserves line
+                        // numbers in later step references.
+                        let consumed_lines = src[..resume_offset].matches('\n').count();
+                        let remainder =
+                            format!("{}{}", "\n".repeat(consumed_lines), &src[resume_offset..]);
+                        rt.enqueue(
+                            &file_name,
+                            &remainder,
+                            BlockSource::File(source_path.clone()),
+                        );
+                    }
+                    _ => {
+                        stats.record_failure();
+                        print!("{}", Style::new().red().apply_to("x"));
+                        if src.is_empty() {
+                            eprintln!("Error preparing step: {}", error.message);
+                        } else {
+                            crate::errors::report_error(
+                                &file_name,
+                                &src,
+                                &error,
+                                Some(offset),
+                            );
+                        }
+                        if args.verbose {
+                            if let Some((expected, _)) = assertion {
+                                eprintln!(
+                                    "\nExpected error: '{}' got: '{}'",
+                                    expected, error.message
+                                );
+                            }
+                        }
+                        eprintln!("Statement failed to prepare; aborting test file.");
+                        aborted = true;
+                        break;
+                    }
+                }
+            }
+            Some(Err(e @ solite_core::StepError::ParseDot { .. })) => {
                 stats.record_failure();
                 eprintln!("Error preparing step: {}", e);
                 print!("{}", Style::new().red().apply_to("x"));
@@ -700,6 +754,62 @@ INSERT INTO t VALUES (1); -- 42
 ");
         let result = test_impl(default_args(file));
         assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    // ===== Prepare-error assertions =====
+
+    #[test]
+    fn test_prepare_error_assertion_passes() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "prep_ok.sql", "\
+SELECT * FROM nope; -- error: no such table: nope
+SELECT 1; -- 1
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_ok());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_prepare_error_without_assertion_fails_and_aborts() {
+        let tmp = temp_dir();
+        // The later (passing) assertion must not run: exactly one failure
+        let file = write_sql(&tmp, "prep_fail.sql", "\
+SELECT * FROM nope;
+SELECT 1; -- 1
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_wrong_message_fails() {
+        let tmp = temp_dir();
+        let file = write_sql(&tmp, "prep_wrong.sql", "\
+SELECT * FROM nope; -- error: some other message
+");
+        let result = test_impl(default_args(file));
+        assert!(result.is_err());
+        cleanup(&tmp);
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_mixes_with_later_assertions() {
+        let tmp = temp_dir();
+        // Statements after an expected prepare error keep running, and a
+        // later real failure is still caught.
+        let file = write_sql(&tmp, "prep_mix.sql", "\
+SELECT * FROM nope; -- error: no such table: nope
+SELECT 1; -- 999
+");
+        match test_impl(default_args(file)) {
+            Err(TestError::TestsFailed { failures, .. }) => assert_eq!(failures, 1),
+            other => panic!("Expected TestsFailed, got {:?}", other),
+        }
         cleanup(&tmp);
     }
 

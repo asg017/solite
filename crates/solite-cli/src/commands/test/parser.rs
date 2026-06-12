@@ -53,6 +53,25 @@ pub fn parse_ref_file_line_col(ref_display: &str) -> Option<(String, usize, usiz
     Some((file, line, col))
 }
 
+/// Recover an `error: <msg>` assertion for a statement that failed to
+/// *prepare* (and so never produced a `Step` with an epilogue).
+///
+/// Scans from `offset` (the start of the failing statement) to the first
+/// `;` and extracts the trailing same-line comment after it. Returns the
+/// expected error message and the byte offset just past the comment, where
+/// stepping can resume. The scan-to-`;` heuristic can be fooled by `;`
+/// inside string literals, but the statement already failed to prepare, so
+/// a missed assertion only means the file fails (as it would have anyway).
+pub fn prepare_error_assertion(src: &str, offset: usize) -> Option<(String, usize)> {
+    let semi = src.get(offset..)?.find(';')? + offset;
+    let rest_index = semi + 1;
+    let raw_epilogue = solite_core::extract_epilogue(src, rest_index)?;
+    let resume = rest_index + raw_epilogue.len();
+    let cleaned = parse_epilogue_comment(&raw_epilogue);
+    let expected = cleaned.strip_prefix("error:")?.trim().to_string();
+    Some((expected, resume))
+}
+
 /// A parsed `@snap` directive from an epilogue comment.
 #[derive(Debug)]
 pub struct SnapDirective {
@@ -187,6 +206,51 @@ mod tests {
         let content = "line1\nline2";
         assert_eq!(compute_offset_from_reference(content, "f:0:1"), None);
         assert_eq!(compute_offset_from_reference(content, "f:10:1"), None);
+    }
+
+    // --- prepare_error_assertion tests ---
+
+    #[test]
+    fn test_prepare_error_assertion_found() {
+        let src = "SELECT * FROM nope; -- error: no such table: nope\nSELECT 1;\n";
+        let (expected, resume) = prepare_error_assertion(src, 0).unwrap();
+        assert_eq!(expected, "no such table: nope");
+        // resume points at the newline after the comment
+        assert_eq!(&src[resume..], "\nSELECT 1;\n");
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_with_offset() {
+        let src = "SELECT 1;\nSELECT * FROM nope; -- error: no such table: nope\n";
+        let (expected, _) = prepare_error_assertion(src, 10).unwrap();
+        assert_eq!(expected, "no such table: nope");
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_no_comment() {
+        assert_eq!(prepare_error_assertion("SELECT * FROM nope;\n", 0), None);
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_non_error_comment() {
+        assert_eq!(
+            prepare_error_assertion("SELECT * FROM nope; -- 42\n", 0),
+            None
+        );
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_comment_on_next_line() {
+        assert_eq!(
+            prepare_error_assertion("SELECT * FROM nope;\n-- error: nope\n", 0),
+            None
+        );
+    }
+
+    #[test]
+    fn test_prepare_error_assertion_no_semicolon() {
+        assert_eq!(prepare_error_assertion("SELECT * FROM nope", 0), None);
+        assert_eq!(prepare_error_assertion("", 5), None);
     }
 
     // --- @snap directive tests ---

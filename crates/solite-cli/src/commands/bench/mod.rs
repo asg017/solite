@@ -155,7 +155,9 @@ fn print_results(sql: &str, times: &[jiff::Span], steps: Vec<solite_core::sqlite
 
 /// Entry point for the bench command.
 pub fn bench(args: BenchArgs) -> Result<(), ()> {
-    bench_impl(args).map_err(|e| eprintln!("Error: {e:?}"))
+    // `{e:#}` keeps the error chain on a single readable line, matching the
+    // one-line eprintln diagnostics other commands use.
+    bench_impl(args).map_err(|e| eprintln!("Error: {e:#}"))
 }
 
 /// Open a database connection and load any requested extensions into it.
@@ -269,7 +271,6 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
 
         // Run benchmark iterations
         let mut times = vec![];
-        let mut steps = vec![];
         pb.reset();
         pb.set_length(10);
 
@@ -289,9 +290,11 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
                         .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
                 ));
             }
-
-            steps = unsafe { bytecode_steps(stmt.pointer()) }?;
         }
+
+        // Fetch the bytecode trace once, after the loop — ncycle counters
+        // accumulate across executions, so these are totals over all runs.
+        let steps = unsafe { bytecode_steps(stmt.pointer()) }?;
 
         pb.finish_and_clear();
         // Label results with the statement actually benched, not the whole

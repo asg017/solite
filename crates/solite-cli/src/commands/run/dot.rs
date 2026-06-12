@@ -188,8 +188,8 @@ pub fn handle_dot_command(
         DotCommand::Bench(cmd) => match cmd.execute(None) {
             Ok(result) => {
                 println!("{}", result.report());
-                if !result.report.is_empty() {
-                    println!("{}", result.report);
+                if !result.steps_report.is_empty() {
+                    println!("{}", result.steps_report);
                 }
                 true
             }

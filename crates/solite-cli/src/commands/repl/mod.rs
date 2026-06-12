@@ -248,8 +248,8 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Bench(mut cmd) => match cmd.execute(None) {
             Ok(result) => {
                 println!("{}", result.report());
-                if !result.report.is_empty() {
-                    println!("{}", result.report);
+                if !result.steps_report.is_empty() {
+                    println!("{}", result.steps_report);
                 }
             }
             Err(e) => eprintln!("✗ bench failed: {}", e),

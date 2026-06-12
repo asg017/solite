@@ -28,8 +28,6 @@ use stats::{average, format_runtime, max, min, stddev};
 pub struct BenchCommand {
     /// Optional name for the benchmark.
     pub name: Option<String>,
-    /// Optional suite name.
-    pub suite: Option<String>,
     /// Prepared statement to benchmark.
     pub statement: Statement,
     /// Length consumed from rest input.
@@ -40,14 +38,13 @@ pub struct BenchCommand {
 pub struct BenchResult {
     /// Optional benchmark name.
     pub name: Option<String>,
-    /// Optional suite name.
-    pub suite: Option<String>,
     /// Execution times for each iteration.
     pub times: Vec<Span>,
     /// Number of iterations run.
     pub niter: usize,
-    /// Detailed execution report.
-    pub report: String,
+    /// Rendered bytecode-steps table (see [`render_steps`]); the timing
+    /// summary comes from [`BenchResult::report`].
+    pub steps_report: String,
 }
 
 impl BenchResult {
@@ -133,7 +130,6 @@ impl BenchCommand {
 
         Ok(Self {
             name,
-            suite: None,
             statement: stmt,
             rest_length: rest_len.unwrap_or(rest.len()),
         })
@@ -152,12 +148,12 @@ impl BenchCommand {
         &mut self,
         callback: Option<Box<dyn Fn(Span)>>,
     ) -> anyhow::Result<BenchResult> {
-        let mut times = Vec::new();
-        let mut niter = 0;
-        let mut report = String::new();
+        /// Number of timed iterations per benchmark.
+        const ITERATIONS: usize = 10;
 
-        for _ in 0..10 {
-            niter += 1;
+        let mut times = Vec::with_capacity(ITERATIONS);
+
+        for _ in 0..ITERATIONS {
             let start = jiff::Timestamp::now();
 
             self.statement
@@ -173,22 +169,31 @@ impl BenchCommand {
             if let Some(ref cb) = callback {
                 cb(elapsed);
             }
-
-            let steps = unsafe { bytecode_steps(self.statement.pointer()) }?;
-            report = render_steps(steps);
         }
+
+        // Fetch and render the bytecode trace once, after all iterations.
+        // Per-opcode ncycle counters accumulate across executions (only
+        // sqlite3_stmt_scanstatus_reset clears them), so the rendered cycle
+        // counts are totals over all iterations; the percentages are
+        // unaffected.
+        let steps = unsafe { bytecode_steps(self.statement.pointer()) }?;
+        let steps_report = render_steps(steps);
 
         Ok(BenchResult {
             name: self.name.clone(),
-            suite: self.suite.clone(),
             times,
-            niter,
-            report,
+            niter: ITERATIONS,
+            steps_report,
         })
     }
 }
 
 /// Render bytecode execution steps as a formatted report.
+///
+/// `cycles=` values come straight from the bytecode table's per-opcode
+/// `ncycle` counters, which accumulate over every execution of the
+/// statement — when sampled after a benchmark loop they are totals across
+/// all iterations, not a single run.
 pub fn render_steps(steps: Vec<BytecodeStep>) -> String {
     let mut output = String::new();
 
@@ -301,14 +306,13 @@ mod tests {
     fn test_bench_result_report() {
         let result = BenchResult {
             name: Some("Test Query".to_string()),
-            suite: None,
             times: vec![
                 Span::new().milliseconds(10),
                 Span::new().milliseconds(12),
                 Span::new().milliseconds(11),
             ],
             niter: 3,
-            report: String::new(),
+            steps_report: String::new(),
         };
 
         let report = result.report();
@@ -323,10 +327,9 @@ mod tests {
         // n=1: sample stddev is undefined — report N/A, never panic
         let result = BenchResult {
             name: None,
-            suite: None,
             times: vec![Span::new().milliseconds(10)],
             niter: 1,
-            report: String::new(),
+            steps_report: String::new(),
         };
 
         let report = result.report();

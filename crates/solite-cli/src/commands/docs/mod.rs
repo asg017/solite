@@ -86,7 +86,11 @@ impl std::fmt::Display for DocsError {
             DocsError::MarkdownParse(msg) => write!(f, "Failed to parse markdown: {}", msg),
             DocsError::FileWrite(msg) => write!(f, "Failed to write file: {}", msg),
             DocsError::UndocumentedFunctions(funcs) => {
-                write!(f, "Undocumented functions: {}", funcs.join(", "))
+                write!(f, "The following functions are not documented:")?;
+                for func in funcs {
+                    write!(f, "\n  - {}", func)?;
+                }
+                Ok(())
             }
             DocsError::AlreadyReported => write!(f, "SQL error in code block"),
         }
@@ -163,13 +167,10 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     // Write output
     write_output(&args, &out_md)?;
 
-    // Report undocumented functions
+    // Report undocumented functions; printing is left to the Display impl
+    // so the list shows up exactly once
     if !undocumented_funcs.is_empty() {
         undocumented_funcs.sort();
-        eprintln!("The following functions are not documented:");
-        for func in &undocumented_funcs {
-            eprintln!("  - {}", func);
-        }
         return Err(DocsError::UndocumentedFunctions(undocumented_funcs));
     }
 
@@ -585,5 +586,21 @@ pub(crate) fn docs(cmd: DocsNamespace) -> Result<(), ()> {
                 Err(())
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_undocumented_functions_display_lists_each_once() {
+        let err = DocsError::UndocumentedFunctions(vec!["a".into(), "b".into()]);
+        let s = err.to_string();
+        assert_eq!(
+            s,
+            "The following functions are not documented:\n  - a\n  - b"
+        );
+        assert_eq!(s.matches("- a").count(), 1);
     }
 }

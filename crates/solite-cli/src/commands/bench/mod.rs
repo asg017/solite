@@ -5,11 +5,23 @@
 //!
 //! # Features
 //!
-//! - Benchmark SQL statements or SQL files
-//! - Support for custom databases and extensions
+//! - Benchmark SQL statements or SQL files (arguments ending in `.sql` are
+//!   always read as files; a missing file is an error)
+//! - Multi-statement input runs the leading statements once as untimed
+//!   setup and benches the last statement
+//! - `-n`/`--iterations` timed runs (default 10) after `--warmup` untimed
+//!   runs (default 0)
+//! - Custom databases (`--database`: give once to share across all SQL
+//!   arguments, or once per SQL argument to pair by position), extensions
+//!   (`--load-extension`), and attached databases (`--attach PATH NAME`)
 //! - Progress bar during benchmark execution
-//! - Bytecode step visualization
-//! - Statistical summary (mean ± σ, min … max)
+//! - Bytecode step visualization (cycle counts are cumulative over all
+//!   runs of the statement)
+//! - Statistical summary (mean ± σ, min … max; σ is N/A for `-n 1`)
+//!
+//! Statements really execute every run — benchmarking an `INSERT` inserts
+//! rows — and each run steps the statement to completion, so result-set
+//! size dominates timing for large `SELECT`s.
 //!
 //! # Example Usage
 //!
@@ -20,8 +32,11 @@
 //! # Benchmark with a database
 //! solite bench --database mydb.db "SELECT count(*) FROM orders"
 //!
-//! # Benchmark a SQL file
+//! # Benchmark a SQL file (setup statements + final benched statement)
 //! solite bench query.sql
+//!
+//! # More iterations, with warmup
+//! solite bench -n 100 --warmup 5 "SELECT count(*) FROM orders"
 //! ```
 
 use crossterm::style::Stylize;

@@ -246,6 +246,12 @@ extra database to every benchmark connection:
 
   solite bench --attach other.db aux \"SELECT count(*) FROM aux.t\"
 
+Arguments ending in .sql are read as files; leading statements run
+once as untimed setup and the last statement is benched. Statements
+really execute every run — benchmarking an INSERT inserts rows — and
+each run consumes the full result set, so result-set size dominates
+timing for large SELECTs.
+
 Also available inside scripts and the REPL as the multi-line `.bench`
 dot command.";
 

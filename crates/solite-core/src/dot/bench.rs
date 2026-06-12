@@ -1,19 +1,38 @@
 //! Query benchmarking command.
 //!
-//! This module implements the `.bench` command which benchmarks SQL query
-//! execution, running the query multiple times and reporting statistics.
+//! This module implements the `.bench` dot command, which benchmarks a
+//! single SQL statement by running it repeatedly and reporting timing
+//! statistics. It executes in run mode, the REPL, and the Jupyter kernel
+//! (test/snapshot modes don't support it).
 //!
 //! # Usage
 //!
 //! ```sql
-//! .bench SELECT * FROM large_table
-//! .bench --name "My Query" SELECT complex_query...
+//! -- SQL goes on the line(s) after the dot line:
+//! .bench
+//! SELECT * FROM large_table;
+//!
+//! -- flags come on the .bench line, before the SQL:
+//! .bench --name "My Query" --iterations 50 --warmup 3
+//! SELECT count(*) FROM large_table;
 //! ```
 //!
 //! # Output
 //!
-//! Reports mean execution time, standard deviation, and min/max values
-//! across 10 iterations, along with detailed bytecode execution statistics.
+//! Reports mean ± stddev (sample, n-1; `N/A` for a single iteration) and
+//! min … max over `--iterations` timed runs (default 10), run after
+//! `--warmup` untimed executions (default 0), along with the statement's
+//! bytecode steps.
+//!
+//! # Caveats
+//!
+//! - The statement really executes on every run: benchmarking an `INSERT`
+//!   inserts warmup + iterations rows, and timings drift as the table
+//!   grows.
+//! - Each run steps the statement to completion, so result-set size
+//!   dominates timing for large `SELECT`s — that is by design.
+//! - `cycles=` values in the bytecode report accumulate over every
+//!   execution of the statement, not a single run (see [`render_steps`]).
 
 pub mod stats;
 

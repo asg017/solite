@@ -180,3 +180,37 @@ def test_exec_rejects_output_and_format_flags(solite_cli, tmp_path):
     result = solite_cli(["exec", db, "create table t(a)", "-f", "json"])
     assert not result.success
     assert "unexpected argument" in result.stderr
+
+
+def test_exec_csv_replacement_scan_import(solite_cli, tmp_path):
+    """`solite exec 'create table t as select * from "data.csv"'` imports the
+    CSV into a real table — the main CSV-import workflow."""
+    (tmp_path / "data.csv").write_text("id,name\n1,alpha\n2,beta\n")
+    db = tmp_path / "data.db"
+
+    result = solite_cli(
+        ["exec", str(db), 'create table t as select * from "data.csv"'],
+        cwd=tmp_path,
+    )
+    assert result.success, result.stderr
+
+    # Re-open the database: the data persisted into a real table, and the
+    # temp vtab did not leak into the database file.
+    rows = solite_cli(["q", "select * from t order by id", str(db)], cwd=tmp_path)
+    assert rows.success, rows.stderr
+    assert json.loads(rows.stdout) == [
+        {"id": "1", "name": "alpha"},
+        {"id": "2", "name": "beta"},
+    ]
+    schema = solite_cli(["q", "select count(*) as n from sqlite_master", str(db)])
+    assert json.loads(schema.stdout) == [{"n": 1}]
+
+
+def test_exec_missing_csv_errors_cleanly(solite_cli, tmp_path):
+    result = solite_cli(
+        ["exec", 'select * from "missing.csv"'],
+        cwd=tmp_path,
+    )
+    assert not result.success
+    assert "panicked" not in result.stderr
+    assert "no such table: missing.csv" in result.stderr

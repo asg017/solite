@@ -64,7 +64,7 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
     let mut remaining: &str = &sql;
     let mut executed_any = false;
     loop {
-        match runtime.prepare_with_parameters(remaining) {
+        match runtime.prepare_with_replacement_scans(remaining) {
             Ok((rest, Some(stmt))) => {
                 let mut stmt = stmt;
                 // Statements with result columns (RETURNING clauses, or bare

@@ -1,3 +1,30 @@
+import json
+
+
+def make_notebook(cells, nbformat_minor=5):
+    """Build a minimal v4 notebook dict. `cells` is a list of
+    ("code"|"markdown", source-string) tuples."""
+    nb_cells = []
+    for i, (cell_type, source) in enumerate(cells):
+        cell = {
+            "cell_type": cell_type,
+            "metadata": {},
+            "source": source.splitlines(keepends=True),
+        }
+        if nbformat_minor >= 5:
+            cell["id"] = f"cell-{i}"
+        if cell_type == "code":
+            cell["execution_count"] = None
+            cell["outputs"] = []
+        nb_cells.append(cell)
+    return {
+        "cells": nb_cells,
+        "metadata": {},
+        "nbformat": 4,
+        "nbformat_minor": nbformat_minor,
+    }
+
+
 def test_run_basic(solite_cli, snapshot, tmp_path):
     (tmp_path / "a.sql").write_text(
         """
@@ -123,3 +150,23 @@ select
     )
     assert solite_cli(["run", "a.sql"], cwd=tmp_path).stdout == snapshot(name="stdout")
     assert solite_cli(["run", "a.sql"], cwd=tmp_path).stderr == snapshot(name="stderr")
+
+
+def test_run_ipynb_cell_order(solite_cli, snapshot, tmp_path):
+    nb = make_notebook(
+        [
+            ("code", ".timer off"),
+            ("markdown", "# this cell is skipped"),
+            ("code", "select 'first';"),
+            ("code", "select 'second';"),
+            ("code", "select 'third';"),
+        ]
+    )
+    (tmp_path / "a.ipynb").write_text(json.dumps(nb), newline="\n")
+    result = solite_cli(["run", "a.ipynb"], cwd=tmp_path)
+    assert result.success
+    # Cells execute top-to-bottom: .timer off in the first cell applies to all
+    # later cells, and the selects print in document order.
+    assert result.stdout.index("first") < result.stdout.index("second")
+    assert result.stdout.index("second") < result.stdout.index("third")
+    assert result.stdout == snapshot

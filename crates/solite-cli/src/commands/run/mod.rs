@@ -370,7 +370,9 @@ fn enqueue_script(rt: &mut Runtime, script: &std::path::Path) -> Result<()> {
                 .with_context(|| format!("Failed to parse notebook {}", script.display()))?;
 
             let cells = extract_notebook_cells(&nb);
-            for (idx, code) in cells {
+            // The runtime stack pops blocks LIFO, so enqueue cells in reverse
+            // to execute them in document order.
+            for (idx, code) in cells.into_iter().rev() {
                 rt.enqueue(
                     &format!("{}:{}", script.to_string_lossy(), idx),
                     &code,

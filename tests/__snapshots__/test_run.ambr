@@ -66,6 +66,30 @@
   
   '''
 # ---
+# name: test_run_ipynb_cell_order
+  '''
+  ✓ timer set off
+  ┌─────────┐
+  │ 'first' │
+  ├─────────┤
+  │ first   │
+  └─────────┘
+  1 column × 1 row
+  ┌──────────┐
+  │ 'second' │
+  ├──────────┤
+  │ second   │
+  └──────────┘
+  1 column × 1 row
+  ┌─────────┐
+  │ 'third' │
+  ├─────────┤
+  │ third   │
+  └─────────┘
+  1 column × 1 row
+  
+  '''
+# ---
 # name: test_run_param_file_blob
   '''
   ✓ timer set off

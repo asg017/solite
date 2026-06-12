@@ -209,6 +209,20 @@ fn parse_bool(s: &str) -> Result<bool, ParseDotError> {
     }
 }
 
+/// Strip one pair of matching surrounding quotes (`'...'` or `"..."`) from
+/// a dot-command argument, mirroring how the sqlite3 shell dequotes its
+/// arguments (so `.schema 'idx_%'` behaves like `.schema idx_%`).
+fn strip_surrounding_quotes(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
+        if first == last && (first == b'\'' || first == b'"') {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
+}
+
 /// Parse a dot command from its components.
 ///
 /// # Arguments
@@ -244,7 +258,7 @@ pub fn parse_dot<S: Into<String>>(
             },
         })),
         "schema" => Ok(DotCommand::Schema(SchemaCommand {
-            pattern: match args.trim() {
+            pattern: match strip_surrounding_quotes(args.trim()) {
                 "" => None,
                 pattern => Some(pattern.to_string()),
             },
@@ -367,6 +381,31 @@ pub fn parse_dot<S: Into<String>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_strip_surrounding_quotes() {
+        assert_eq!(strip_surrounding_quotes("'idx_%'"), "idx_%");
+        assert_eq!(strip_surrounding_quotes("\"idx_%\""), "idx_%");
+        assert_eq!(strip_surrounding_quotes("idx_%"), "idx_%");
+        // mismatched or lone quotes are left alone
+        assert_eq!(strip_surrounding_quotes("'idx_%\""), "'idx_%\"");
+        assert_eq!(strip_surrounding_quotes("'"), "'");
+        assert_eq!(strip_surrounding_quotes(""), "");
+    }
+
+    #[test]
+    fn test_parse_dot_schema_pattern_dequoted() {
+        let mut runtime = Runtime::new(None).unwrap();
+        match parse_dot("schema", "'idx_%'", "", &mut runtime).unwrap() {
+            DotCommand::Schema(cmd) => assert_eq!(cmd.pattern, Some("idx_%".to_string())),
+            other => panic!("expected schema command, got {other:?}"),
+        }
+
+        match parse_dot("schema", "", "", &mut runtime).unwrap() {
+            DotCommand::Schema(cmd) => assert_eq!(cmd.pattern, None),
+            other => panic!("expected schema command, got {other:?}"),
+        }
+    }
 
     #[test]
     fn test_parse_bool_true_variants() {

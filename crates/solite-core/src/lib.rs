@@ -522,6 +522,7 @@ impl Runtime {
                                 name: name.clone(),
                                 sql: stmt.sql(),
                                 result_type,
+                                annotations,
                                 parameters,
                                 columns,
                                 result_class,

@@ -220,6 +220,8 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                     }
                 }
                 StepResult::ProcedureDefinition(proc) => {
+                    validate_annotations(proc, &step.reference)?;
+
                     if let Some(first_at) =
                         seen_exports.insert(proc.name.clone(), step.reference.to_string())
                     {
@@ -282,6 +284,47 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                 }
             },
         }
+    }
+    Ok(())
+}
+
+/// The annotation tokens accepted on a `-- name:` line.
+const KNOWN_ANNOTATIONS: [&str; 4] = ["rows", "row", "value", "list"];
+
+/// Validate the raw annotation tokens of a procedure definition.
+///
+/// Core silently ignores unknown tokens and resolves conflicting result
+/// types by a fixed priority order (REPL/run tolerate sloppiness there);
+/// codegen is the authoring gate, so a typo like `:vaule` or an ambiguous
+/// `:row :value` is a hard error here.
+fn validate_annotations(
+    proc: &solite_core::procedure::Procedure,
+    reference: &solite_core::StepReference,
+) -> Result<()> {
+    let mut result_types: Vec<&str> = vec![];
+    for annotation in &proc.annotations {
+        if KNOWN_ANNOTATIONS.contains(&annotation.as_str()) {
+            result_types.push(annotation.as_str());
+        } else {
+            return Err(anyhow!(
+                "Unknown annotation `:{}` on query `{}` at {}; accepted annotations are :rows, :row, :value, :list",
+                annotation,
+                proc.name,
+                reference
+            ));
+        }
+    }
+    if result_types.len() > 1 {
+        return Err(anyhow!(
+            "Conflicting result-type annotations on query `{}` at {}: {}",
+            proc.name,
+            reference,
+            result_types
+                .iter()
+                .map(|a| format!(":{a}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
     Ok(())
 }

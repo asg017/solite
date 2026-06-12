@@ -361,6 +361,24 @@ mod tests {
     }
 
     #[test]
+    fn test_unknown_annotation_errors() {
+        let err = report_err(
+            "create table t(a int);\n\n-- name: weird :row :wrongtype\nselect a from t;",
+        );
+        assert!(err.contains(":wrongtype"), "error names the unknown token: {err}");
+        assert!(err.contains(":rows, :row, :value, :list"), "error lists accepted set: {err}");
+    }
+
+    #[test]
+    fn test_conflicting_result_types_error() {
+        let err = report_err(
+            "create table t(a int);\n\n-- name: conflicted :row :value\nselect a from t;",
+        );
+        assert!(err.contains("Conflicting"), "error describes the conflict: {err}");
+        assert!(err.contains(":row :value"), "error lists the tokens: {err}");
+    }
+
+    #[test]
     fn test_duplicate_export_names_error() {
         let err = report_err(
             "create table t(a int);\n\n-- name: getThing :value\nselect a from t;\n\n-- name: getThing :value\nselect count(*) from t;",

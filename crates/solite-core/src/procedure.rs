@@ -65,6 +65,11 @@ pub struct Procedure {
     pub sql: String,
     /// The result type annotation
     pub result_type: ResultType,
+    /// The raw annotation tokens from the `-- name:` line (without the
+    /// leading colon, e.g. `["row"]`). `result_type` is derived from these;
+    /// the raw list is kept so consumers (e.g. codegen) can validate that
+    /// every token is a known annotation and that result types don't conflict.
+    pub annotations: Vec<String>,
     /// Parameters used in the query
     pub parameters: Vec<ProcedureParam>,
     /// Column metadata for the result set

@@ -45,15 +45,24 @@ impl SchemaCommand {
             "#,
         )?;
 
-        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
+        let mut stmt = stmt.ok_or_else(|| {
+            DotError::InvalidData("internal: schema query produced no statement".into())
+        })?;
 
         let mut schemas = Vec::new();
-        while let Ok(Some(row)) = stmt.next() {
-            if let Some(value) = row.first() {
-                let sql = value.as_str();
-                if !sql.is_empty() {
-                    schemas.push(sql.to_owned());
+        loop {
+            match stmt.next() {
+                Ok(Some(row)) => {
+                    if let Some(value) = row.first() {
+                        let sql = value.as_str();
+                        if !sql.is_empty() {
+                            schemas.push(sql.to_owned());
+                        }
+                    }
                 }
+                Ok(None) => break,
+                // propagate instead of silently returning a truncated dump
+                Err(e) => return Err(e.into()),
             }
         }
 

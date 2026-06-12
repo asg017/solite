@@ -49,16 +49,25 @@ impl TablesCommand {
             "#,
         )?;
 
-        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
+        let mut stmt = stmt.ok_or_else(|| {
+            DotError::InvalidData("internal: table listing query produced no statement".into())
+        })?;
 
         if let Some(schema) = &self.schema {
             stmt.bind_text(1, schema.as_str())?;
         }
 
         let mut tables = Vec::new();
-        while let Ok(Some(row)) = stmt.next() {
-            if let Some(value) = row.first() {
-                tables.push(value.as_str().to_owned());
+        loop {
+            match stmt.next() {
+                Ok(Some(row)) => {
+                    if let Some(value) = row.first() {
+                        tables.push(value.as_str().to_owned());
+                    }
+                }
+                Ok(None) => break,
+                // propagate instead of silently returning a truncated list
+                Err(e) => return Err(e.into()),
             }
         }
 

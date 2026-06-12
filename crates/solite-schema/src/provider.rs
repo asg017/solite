@@ -149,25 +149,16 @@ fn introspected_to_analyzer_schema(
         );
     }
 
-    // Add triggers
-    // Note: IntrospectedSchema doesn't track trigger event types, so we default to Insert
-    // In a more complete implementation, we could parse the SQL to determine the event type
+    // Add triggers. The event is parsed from the CREATE TRIGGER header
+    // during introspection; default to Insert when it is unavailable.
     for trigger in introspected.triggers.values() {
-        // Try to determine event type from SQL if available
-        let event = trigger
-            .sql
-            .as_ref()
-            .map(|sql| {
-                let upper = sql.to_uppercase();
-                if upper.contains(" DELETE ") {
-                    TriggerEventType::Delete
-                } else if upper.contains(" UPDATE ") {
-                    TriggerEventType::Update
-                } else {
-                    TriggerEventType::Insert
-                }
-            })
-            .unwrap_or(TriggerEventType::Insert);
+        use crate::introspect::TriggerEvent;
+
+        let event = match trigger.event {
+            Some(TriggerEvent::Delete) => TriggerEventType::Delete,
+            Some(TriggerEvent::Update) => TriggerEventType::Update,
+            Some(TriggerEvent::Insert) | None => TriggerEventType::Insert,
+        };
 
         schema.add_trigger(&trigger.name, &trigger.table_name, event);
     }
@@ -708,6 +699,31 @@ mod tests {
 
             let trg_delete = schema.get_trigger("trg_delete").unwrap();
             assert_eq!(trg_delete.event, solite_analyzer::TriggerEventType::Delete);
+
+            let _ = fs::remove_file(&path);
+        }
+
+        #[test]
+        fn test_file_provider_trigger_event_from_header_not_body() {
+            let path = temp_db_path("file_provider_trigger_header");
+            let conn = create_test_db(&path);
+            conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)", [])
+                .unwrap();
+            conn.execute("CREATE TABLE log (msg TEXT)", []).unwrap();
+            // audit-log pattern: an INSERT trigger whose body contains a
+            // DELETE statement must still be reported as an Insert trigger
+            conn.execute(
+                "CREATE TRIGGER trg_audit AFTER INSERT ON users BEGIN DELETE FROM log; END",
+                [],
+            )
+            .unwrap();
+            drop(conn);
+
+            let provider = FileSchemaProvider::new(&path);
+            let schema = provider.load().unwrap();
+
+            let trg = schema.get_trigger("trg_audit").unwrap();
+            assert_eq!(trg.event, solite_analyzer::TriggerEventType::Insert);
 
             let _ = fs::remove_file(&path);
         }

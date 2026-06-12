@@ -84,6 +84,17 @@ pub struct ViewInfo {
     pub sql: Option<String>,
 }
 
+/// The event a trigger fires on, parsed from the CREATE TRIGGER header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriggerEvent {
+    /// Fires on INSERT.
+    Insert,
+    /// Fires on UPDATE (including UPDATE OF columns).
+    Update,
+    /// Fires on DELETE.
+    Delete,
+}
+
 /// Trigger information extracted from introspection.
 #[derive(Debug, Clone)]
 pub struct TriggerInfo {
@@ -91,8 +102,65 @@ pub struct TriggerInfo {
     pub name: String,
     /// Table this trigger is on.
     pub table_name: String,
+    /// The event the trigger fires on, parsed from the CREATE TRIGGER
+    /// header (None when the SQL is unavailable or unparseable).
+    pub event: Option<TriggerEvent>,
     /// The original CREATE TRIGGER SQL statement.
     pub sql: Option<String>,
+}
+
+/// Parse the firing event out of a CREATE TRIGGER statement header.
+///
+/// Only the header (everything before the `ON <table>` clause) is
+/// considered, so an `AFTER INSERT` trigger whose *body* contains a
+/// DELETE statement (the common audit-log pattern) is not misclassified.
+/// Quoted identifiers and string literals are skipped so a trigger or
+/// table named e.g. `"delete"` cannot be mistaken for the event keyword.
+fn parse_trigger_event(sql: &str) -> Option<TriggerEvent> {
+    // Strip quoted regions ('...', "...", `...`, [...]), replacing them
+    // with a space so surrounding tokens stay separated.
+    let mut stripped = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' | '"' | '`' => {
+                while let Some(c2) = chars.next() {
+                    if c2 == c {
+                        // doubled quote chars escape themselves
+                        if chars.peek() == Some(&c) {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                stripped.push(' ');
+            }
+            '[' => {
+                for c2 in chars.by_ref() {
+                    if c2 == ']' {
+                        break;
+                    }
+                }
+                stripped.push(' ');
+            }
+            _ => stripped.push(c.to_ascii_uppercase()),
+        }
+    }
+
+    // In a CREATE TRIGGER header the event keyword always precedes the
+    // first unquoted ON: CREATE TRIGGER name [BEFORE|AFTER|INSTEAD OF]
+    // [INSERT|UPDATE [OF cols]|DELETE] ON table ...
+    for token in stripped.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_') {
+        match token {
+            "INSERT" => return Some(TriggerEvent::Insert),
+            "UPDATE" => return Some(TriggerEvent::Update),
+            "DELETE" => return Some(TriggerEvent::Delete),
+            "ON" => break,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Schema information extracted from a SQLite database.
@@ -278,6 +346,7 @@ pub fn introspect_connection(conn: &Connection) -> Result<IntrospectedSchema, In
                     let trigger_info = TriggerInfo {
                         name: name.clone(),
                         table_name,
+                        event: sql.as_deref().and_then(parse_trigger_event),
                         sql,
                     };
                     schema.triggers.insert(name.to_lowercase(), trigger_info);
@@ -314,9 +383,15 @@ fn introspect_table(
         }
     }
 
-    // Check if table has WITHOUT ROWID
-    let without_rowid = sql
-        .map(|s| s.to_uppercase().contains("WITHOUT ROWID"))
+    // WITHOUT ROWID is reported authoritatively by pragma_table_list.wr;
+    // substring-matching the CREATE SQL misfires on e.g. a column whose
+    // DEFAULT string or a comment contains "without rowid".
+    let without_rowid: bool = conn
+        .query_row(
+            "SELECT wr FROM pragma_table_list WHERE \"schema\" = 'main' AND name = ?1",
+            [table_name],
+            |row| row.get(0),
+        )
         .unwrap_or(false);
 
     Ok(TableInfo {
@@ -349,23 +424,18 @@ fn introspect_index(
         }
     }
 
-    // Determine if unique by checking the SQL or using PRAGMA index_list
-    let is_unique = sql
-        .map(|s| s.to_uppercase().contains("UNIQUE"))
-        .unwrap_or_else(|| {
-            // Check using PRAGMA index_list
-            let result: Result<bool, _> = conn.query_row(
-                &format!("SELECT \"unique\" FROM pragma_index_list({}) WHERE name = ?", quote_ident(table_name)),
-                [index_name],
-                |row| row.get(0),
-            );
-            result.unwrap_or(false)
-        });
-
-    // Check if partial (has WHERE clause)
-    let is_partial = sql
-        .map(|s| s.to_uppercase().contains(" WHERE "))
-        .unwrap_or(false);
+    // `unique` and `partial` come from pragma_index_list (authoritative).
+    // Substring-matching the CREATE SQL misclassifies e.g. a non-unique
+    // index named "uniqueness_check" or an indexed expression containing
+    // the string ' WHERE '. Both the table name and index name are bound
+    // parameters, so no identifier quoting is needed here.
+    let (is_unique, is_partial) = conn
+        .query_row(
+            "SELECT \"unique\", partial FROM pragma_index_list(?1) WHERE name = ?2",
+            [table_name, index_name],
+            |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+        )
+        .unwrap_or((false, false));
 
     Ok(IndexInfo {
         name: index_name.to_string(),
@@ -505,6 +575,23 @@ mod tests {
     }
 
     #[test]
+    fn test_introspect_rowid_table_with_without_rowid_text() {
+        // A DEFAULT string containing "without rowid" must not be
+        // misclassified (wr comes from pragma_table_list, not the SQL).
+        let conn = create_test_db();
+        conn.execute(
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, kind TEXT DEFAULT 'without rowid')",
+            [],
+        )
+        .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+        let table = schema.get_table("notes").unwrap();
+
+        assert!(!table.without_rowid);
+    }
+
+    #[test]
     fn test_introspect_multiple_tables() {
         let conn = create_test_db();
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)", [])
@@ -593,6 +680,39 @@ mod tests {
         let idx = schema.get_index("idx_active_users").unwrap();
 
         assert!(idx.is_partial);
+    }
+
+    #[test]
+    fn test_introspect_non_unique_index_named_unique() {
+        // A non-unique index whose name contains "unique" must not be
+        // misclassified (regression for the SQL substring heuristic).
+        let conn = create_test_db();
+        conn.execute("CREATE TABLE t (a INTEGER)", []).unwrap();
+        conn.execute("CREATE INDEX uniqueness_check ON t(a)", [])
+            .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+        let idx = schema.get_index("uniqueness_check").unwrap();
+
+        assert!(!idx.is_unique);
+        assert!(!idx.is_partial);
+    }
+
+    #[test]
+    fn test_introspect_non_partial_index_with_where_in_expression() {
+        // An indexed expression containing the string ' WHERE ' must not
+        // be misclassified as a partial index.
+        let conn = create_test_db();
+        conn.execute("CREATE TABLE t (x TEXT DEFAULT ' WHERE ')", [])
+            .unwrap();
+        conn.execute("CREATE INDEX i ON t(iif(x=' WHERE ',1,2))", [])
+            .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+        let idx = schema.get_index("i").unwrap();
+
+        assert!(!idx.is_partial);
+        assert!(!idx.is_unique);
     }
 
     #[test]
@@ -695,6 +815,63 @@ mod tests {
         assert_eq!(trigger.name, "trg_user_insert");
         assert_eq!(trigger.table_name, "users");
         assert!(trigger.sql.is_some());
+    }
+
+    #[test]
+    fn test_trigger_event_parsed_from_header_not_body() {
+        let conn = create_test_db();
+        conn.execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        conn.execute("CREATE TABLE log (x INTEGER)", []).unwrap();
+        // audit-log pattern: an INSERT trigger whose body runs a DELETE
+        conn.execute(
+            "CREATE TRIGGER trg_audit AFTER INSERT ON t BEGIN DELETE FROM log; END",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TRIGGER trg_upd BEFORE UPDATE OF x ON t BEGIN INSERT INTO log VALUES (1); END",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TRIGGER trg_del AFTER DELETE ON t BEGIN SELECT 1; END",
+            [],
+        )
+        .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+        assert_eq!(
+            schema.get_trigger("trg_audit").unwrap().event,
+            Some(TriggerEvent::Insert)
+        );
+        assert_eq!(
+            schema.get_trigger("trg_upd").unwrap().event,
+            Some(TriggerEvent::Update)
+        );
+        assert_eq!(
+            schema.get_trigger("trg_del").unwrap().event,
+            Some(TriggerEvent::Delete)
+        );
+    }
+
+    #[test]
+    fn test_parse_trigger_event_skips_quoted_identifiers() {
+        // a trigger named "delete" firing on INSERT
+        assert_eq!(
+            parse_trigger_event(
+                r#"CREATE TRIGGER "delete" AFTER INSERT ON t BEGIN SELECT 1; END"#
+            ),
+            Some(TriggerEvent::Insert)
+        );
+        // INSTEAD OF on a view
+        assert_eq!(
+            parse_trigger_event(
+                "CREATE TRIGGER trg INSTEAD OF UPDATE ON v BEGIN SELECT 1; END"
+            ),
+            Some(TriggerEvent::Update)
+        );
+        // unparseable header
+        assert_eq!(parse_trigger_event("CREATE TRIGGER trg ON t"), None);
     }
 
     #[test]

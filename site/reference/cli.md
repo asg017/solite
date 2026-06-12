@@ -33,7 +33,7 @@ fresh database. Shadow tables backing virtual tables are included, matching
 sqlite3.
 
 ```
-$ solite schema chinook.db
+$ solite schema app.db
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 CREATE INDEX idx_users_name ON users(name);
 CREATE VIEW v_users AS SELECT * FROM users;
@@ -48,7 +48,7 @@ CREATE TABLE 'notes_config'(k PRIMARY KEY, v) WITHOUT ROWID;
 Filter to one table and the objects on it:
 
 ```
-$ solite schema chinook.db users
+$ solite schema app.db users
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 CREATE INDEX idx_users_name ON users(name);
 ```
@@ -56,7 +56,7 @@ CREATE INDEX idx_users_name ON users(name);
 Because the dump is replayable, it round-trips into a new database:
 
 ```
-$ solite schema chinook.db > schema.sql
+$ solite schema app.db > schema.sql
 $ solite run fresh.db schema.sql
 ```
 
@@ -68,24 +68,34 @@ triggers. Each object carries its original CREATE statement in `sql`.
 Useful for CI schema-change checks, docs generation, and structural diffing
 with `jq`. The pattern argument is not supported with `--format json`.
 
+Column metadata (declared type, primary key membership, NOT NULL) comes
+from `PRAGMA table_info`; `type` is `null` when the declaration omits it
+(e.g. fts5 virtual table columns).
+
 ```
-$ solite schema chinook.db --format json
+$ solite schema app.db --format json
 {
   "tables": [
+    ...
     {
-      "name": "notes",
+      "name": "users",
       "columns": [
         {
-          "name": "body",
-          "type": null,
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "not_null": false
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
           "primary_key": false,
           "not_null": false
         }
       ],
       "without_rowid": false,
-      "sql": "CREATE VIRTUAL TABLE notes USING fts5(body)"
-    },
-    ...
+      "sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+    }
   ],
   "views": [...],
   "indexes": [...],

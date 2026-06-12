@@ -40,7 +40,7 @@ List tables, views, and virtual tables.
 
 ```
 .tables            -- list tables in the 'main' schema
-.tables temp       -- list tables in an attached schema
+.tables temp       -- list tables in another schema ('temp' or an attached one)
 ```
 
 Virtual tables (fts5, R*Tree, extension modules) are listed; their shadow

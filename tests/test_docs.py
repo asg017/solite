@@ -1,3 +1,8 @@
+from pathlib import Path
+
+import pytest
+
+
 def test_docs_inline_without_extension(solite_cli, tmp_path):
     """docs inline must work without --extension (regression: it used to fail
     with "no such table: solite_docs.solite_docs_loaded_functions")."""
@@ -344,3 +349,138 @@ def test_docs_inline_blockquoted_sql_block_untouched(solite_cli, tmp_path):
     )
     assert result.success, result.stderr
     assert (tmp_path / "out2.md").read_text() == out1
+
+
+# --- baseline behaviors -----------------------------------------------------
+
+
+def test_docs_inline_multirow_table(solite_cli, tmp_path):
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Demo\n\n```sql\nSELECT 1 AS n UNION ALL SELECT 2;\n```\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert "/*" in result.stdout and "*/" in result.stdout
+    assert "┌" in result.stdout and "└" in result.stdout
+
+
+def test_docs_inline_zero_rows(solite_cli, tmp_path):
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Demo\n\n```sql\nSELECT 1 WHERE 0;\n```\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert "No results" in result.stdout
+
+
+def test_docs_inline_error_writes_no_output_file(solite_cli, tmp_path):
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Demo\n\n```sql\nSELECT * FROM no_such_table;\n```\n")
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", "out.md"], cwd=tmp_path
+    )
+    assert not result.success
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_docs_inline_in_place_regeneration_stable(solite_cli, tmp_path):
+    """`--output` pointing back at the input (the natural regeneration
+    workflow) is stable across runs."""
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "### `my_func(a, b)`\n\n```sql\nSELECT 1; SELECT 2;\n```\n"
+    )
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", str(doc)], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    first = doc.read_text()
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", str(doc)], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    assert doc.read_text() == first
+    assert first.count("{#my_func}") == 1
+
+
+# --- --extension paths ------------------------------------------------------
+
+
+def _sqlite_include_dir():
+    """Directory holding sqlite3.h + sqlite3ext.h (the amalgamation)."""
+    import os
+
+    candidates = []
+    env = os.environ.get("SOLITE_AMALGAMMATION_DIR")
+    if env:
+        candidates.append(Path(env))
+    candidates.append(Path(__file__).resolve().parent.parent / "vendor" / "sqlite")
+    for candidate in candidates:
+        if (candidate / "sqlite3.h").exists() and (candidate / "sqlite3ext.h").exists():
+            return candidate
+    return None
+
+
+@pytest.fixture(scope="session")
+def docs_extension(tmp_path_factory):
+    """Compile tests/fixtures/docsext.c into a loadable extension, skipping
+    when no C compiler or amalgamation headers are available."""
+    import shutil
+    import subprocess
+    import sys
+
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if cc is None:
+        pytest.skip("no C compiler available")
+    include_dir = _sqlite_include_dir()
+    if include_dir is None:
+        pytest.skip("no SQLite amalgamation headers available")
+
+    suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    out = tmp_path_factory.mktemp("docsext") / f"docsext{suffix}"
+    src = Path(__file__).resolve().parent / "fixtures" / "docsext.c"
+    subprocess.run(
+        [cc, "-fPIC", "-shared", "-I", str(include_dir), "-o", str(out), str(src)],
+        check=True,
+    )
+    return out
+
+
+def test_docs_inline_extension_documented(solite_cli, tmp_path, docs_extension):
+    """--extension happy path: every registered function has a heading."""
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "# My Extension\n\n"
+        "### `documented_func(a, b)`\n\n"
+        "```sql\nSELECT documented_func(1, 2);\n```\n\n"
+        "### `undocumented_func()`\n\nAlso documented after all.\n"
+    )
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--extension", str(docs_extension)],
+        cwd=tmp_path,
+    )
+    assert result.success, result.stderr
+    assert "-- 3" in result.stdout
+
+
+def test_docs_inline_extension_undocumented(solite_cli, tmp_path, docs_extension):
+    """--extension failure path: an undocumented function fails the run and
+    is listed exactly once despite being registered with two arities."""
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "# My Extension\n\n"
+        "### `documented_func(a, b)`\n\n"
+        "```sql\nSELECT documented_func(1, 2);\n```\n"
+    )
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--extension", str(docs_extension)],
+        cwd=tmp_path,
+    )
+    assert not result.success
+    assert result.stderr.count("undocumented_func") == 1
+    assert "documented_func(a, b)" not in result.stderr

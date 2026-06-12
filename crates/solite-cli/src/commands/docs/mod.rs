@@ -661,4 +661,44 @@ mod tests {
             "The following modules are not documented:\n  - vtab_foo"
         );
     }
+
+    #[test]
+    fn test_strip_trailing_anchors() {
+        // no anchor: unchanged
+        assert_eq!(strip_trailing_anchors("### `f(a)`"), "### `f(a)`");
+        // one anchor
+        assert_eq!(strip_trailing_anchors("### `f(a)` {#f}"), "### `f(a)`");
+        // accumulated + escaped anchors from older runs
+        assert_eq!(
+            strip_trailing_anchors("### `my_func(a)` {#my\\_func} {#my_func}"),
+            "### `my_func(a)`"
+        );
+        // braces mid-heading are not anchors
+        assert_eq!(strip_trailing_anchors("### a {b} c"), "### a {b} c");
+    }
+
+    fn first_heading(md: &str) -> Heading {
+        let ast = markdown::to_mdast(md, &markdown::ParseOptions::gfm()).unwrap();
+        for child in ast.children().unwrap() {
+            if let Node::Heading(h) = child {
+                return h.clone();
+            }
+        }
+        panic!("no heading in {md:?}");
+    }
+
+    #[test]
+    fn test_heading_function_name() {
+        assert_eq!(
+            heading_function_name(&first_heading("### `my_func(a, b)`")),
+            Some("my_func".to_string())
+        );
+        // no parens: whole inline code is the name
+        assert_eq!(
+            heading_function_name(&first_heading("#### `vtab_foo`")),
+            Some("vtab_foo".to_string())
+        );
+        // plain-text headings are not documented functions
+        assert_eq!(heading_function_name(&first_heading("### Usage")), None);
+    }
 }

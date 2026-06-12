@@ -12,6 +12,32 @@ def test_bench_missing_sql_file_errors(solite_cli, tmp_path):
     assert "Time" not in result.stdout
 
 
+def test_bench_iterations_flag(solite_cli):
+    result = solite_cli(["bench", "-n", "3", "SELECT 1;"])
+    assert result.success, result.stderr
+    assert "(3 iterations)" in result.stdout
+
+
+def test_bench_single_iteration_reports_na_stddev(solite_cli):
+    """-n 1: sample stddev is undefined — report N/A, never crash."""
+    result = solite_cli(["bench", "-n", "1", "SELECT 1;"])
+    assert result.success, result.stderr
+    assert "(1 iterations)" in result.stdout
+    assert "N/A" in result.stdout
+
+
+def test_bench_zero_iterations_rejected(solite_cli):
+    result = solite_cli(["bench", "-n", "0", "SELECT 1;"])
+    assert not result.success
+    assert result.stderr.strip() != ""
+
+
+def test_bench_warmup_flag(solite_cli):
+    result = solite_cli(["bench", "--warmup", "2", "-n", "2", "SELECT 1;"])
+    assert result.success, result.stderr
+    assert "(2 iterations)" in result.stdout
+
+
 def test_bench_single_database_broadcasts_to_all_queries(solite_cli, tmp_path):
     """One --database with several queries benches all of them against it."""
     db = tmp_path / "app.db"

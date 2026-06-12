@@ -115,6 +115,7 @@ fn create_progress_bar() -> ProgressBar {
 
 /// Print benchmark results for a single SQL query.
 fn print_results(sql: &str, times: &[jiff::Span], steps: Vec<solite_core::sqlite::BytecodeStep>) {
+    let iterations = times.len();
     let avg = average(times)
         .map(format_runtime)
         .unwrap_or_else(|| "N/A".to_string());
@@ -130,7 +131,7 @@ fn print_results(sql: &str, times: &[jiff::Span], steps: Vec<solite_core::sqlite
 
     println!("{sql}:");
     println!(
-        "  Time  ({} ± {}):  {} ± {}",
+        "  Time  ({} ± {}):  {} ± {} ({} iterations)",
         "mean"
             .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
             .bold(),
@@ -140,6 +141,7 @@ fn print_results(sql: &str, times: &[jiff::Span], steps: Vec<solite_core::sqlite
             .bold(),
         std.as_str()
             .with(crate::themes::ctp_mocha_colors::GREEN.clone().into()),
+        iterations,
     );
     println!(
         "  Range ({} … {}):  {} … {}",
@@ -269,12 +271,20 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
             );
         }
 
+        // Untimed warmup executions: absorb cold-cache costs before
+        // measurement begins.
+        for _ in 0..args.warmup {
+            stmt.execute()?;
+            stmt.reset();
+        }
+
         // Run benchmark iterations
+        let iterations = args.iterations as u64;
         let mut times = vec![];
         pb.reset();
-        pb.set_length(10);
+        pb.set_length(iterations);
 
-        for _ in 0..10 {
+        for _ in 0..iterations {
             pb.inc(1);
             let tn = jiff::Timestamp::now();
             stmt.execute()?;

@@ -229,9 +229,10 @@ pub struct ReplArgs {
 }
 
 const BENCH_AFTER_HELP: &str = "\
-Each SQL argument is benchmarked over 10 iterations, reporting
-mean ± stddev (sample, n-1), min … max, and the statement's
-bytecode steps.
+Each SQL argument is benchmarked over -n/--iterations timed runs
+(default 10), after --warmup untimed runs (default 0), reporting
+mean ± stddev (sample, n-1; N/A for a single iteration), min … max,
+and the statement's bytecode steps.
 
 Examples:
   solite bench --database app.db \"SELECT count(*) FROM users\"
@@ -260,6 +261,20 @@ pub struct BenchArgs {
     /// Reserved; currently ignored
     #[arg(long, num_args = 2, value_names = ["PATH", "NAME"], hide = true)]
     pub attach: Option<Vec<PathBuf>>,
+
+    /// Number of timed iterations per benchmark
+    #[arg(
+        long,
+        short = 'n',
+        value_name = "N",
+        default_value_t = 10,
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    pub iterations: u32,
+
+    /// Untimed warmup executions before measurement begins
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    pub warmup: u32,
 
     /// Load SQLite extension(s) before benchmarking
     #[arg(long, value_name = "PATH")]

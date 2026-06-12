@@ -23,11 +23,18 @@ use jiff::Span;
 use serde::Serialize;
 use stats::{average, format_runtime, max, min, stddev};
 
+/// Default number of timed iterations per benchmark.
+pub const DEFAULT_ITERATIONS: usize = 10;
+
 /// Command to benchmark a SQL query.
 #[derive(Serialize, Debug)]
 pub struct BenchCommand {
     /// Optional name for the benchmark.
     pub name: Option<String>,
+    /// Number of timed iterations (default [`DEFAULT_ITERATIONS`], min 1).
+    pub iterations: usize,
+    /// Number of untimed warmup executions before measurement (default 0).
+    pub warmup: usize,
     /// Prepared statement to benchmark.
     pub statement: Statement,
     /// Length consumed from rest input.
@@ -82,6 +89,14 @@ impl BenchResult {
     }
 }
 
+/// Parse a `.bench` count flag value, surfacing the offending value in the
+/// error message (pico-args' default parse error omits it).
+fn bench_count(value: &str) -> Result<usize, String> {
+    value
+        .parse()
+        .map_err(|_| format!("invalid value '{value}'"))
+}
+
 impl BenchCommand {
     /// Create a new bench command from arguments.
     ///
@@ -112,6 +127,12 @@ impl BenchCommand {
         let name: Option<String> = pargs
             .opt_value_from_str("--name")
             .map_err(|e| ParseDotError::InvalidArgument(e.to_string()))?;
+        let iterations: Option<usize> = pargs
+            .opt_value_from_fn("--iterations", bench_count)
+            .map_err(|e| ParseDotError::InvalidArgument(e.to_string()))?;
+        let warmup: Option<usize> = pargs
+            .opt_value_from_fn("--warmup", bench_count)
+            .map_err(|e| ParseDotError::InvalidArgument(e.to_string()))?;
 
         // Anything left over is an unknown flag or stray argument — reject it
         // rather than silently ignore. SQL goes on the line after `.bench`.
@@ -122,6 +143,14 @@ impl BenchCommand {
             )));
         }
 
+        let iterations = iterations.unwrap_or(DEFAULT_ITERATIONS);
+        if iterations == 0 {
+            return Err(ParseDotError::InvalidArgument(
+                "--iterations must be at least 1".to_string(),
+            ));
+        }
+        let warmup = warmup.unwrap_or(0);
+
         let (rest_len, stmt) = runtime
             .prepare_with_parameters(rest)
             .map_err(|e| ParseDotError::Generic(format!("Failed to prepare query: {}", e)))?;
@@ -130,6 +159,8 @@ impl BenchCommand {
 
         Ok(Self {
             name,
+            iterations,
+            warmup,
             statement: stmt,
             rest_length: rest_len.unwrap_or(rest.len()),
         })
@@ -148,12 +179,18 @@ impl BenchCommand {
         &mut self,
         callback: Option<Box<dyn Fn(Span)>>,
     ) -> anyhow::Result<BenchResult> {
-        /// Number of timed iterations per benchmark.
-        const ITERATIONS: usize = 10;
+        // Untimed warmup executions: absorb cold-cache costs (page cache,
+        // statement first run) before measurement begins.
+        for _ in 0..self.warmup {
+            self.statement
+                .execute()
+                .map_err(|e| anyhow::anyhow!("Query execution failed: {}", e))?;
+            self.statement.reset();
+        }
 
-        let mut times = Vec::with_capacity(ITERATIONS);
+        let mut times = Vec::with_capacity(self.iterations);
 
-        for _ in 0..ITERATIONS {
+        for _ in 0..self.iterations {
             let start = jiff::Timestamp::now();
 
             self.statement
@@ -182,7 +219,7 @@ impl BenchCommand {
         Ok(BenchResult {
             name: self.name.clone(),
             times,
-            niter: ITERATIONS,
+            niter: self.iterations,
             steps_report,
         })
     }
@@ -399,6 +436,54 @@ mod tests {
         let err =
             BenchCommand::new("--name \"My Query".to_string(), &mut rt, "\nSELECT 1;").unwrap_err();
         assert!(err.to_string().contains("malformed quoting"), "got: {err}");
+    }
+
+    #[test]
+    fn test_new_iterations_and_warmup_flags() {
+        let mut rt = Runtime::new(None).unwrap();
+        let cmd = BenchCommand::new(
+            "--iterations 3 --warmup 2".to_string(),
+            &mut rt,
+            "\nSELECT 1;",
+        )
+        .unwrap();
+        assert_eq!(cmd.iterations, 3);
+        assert_eq!(cmd.warmup, 2);
+    }
+
+    #[test]
+    fn test_new_default_iterations() {
+        let mut rt = Runtime::new(None).unwrap();
+        let cmd = BenchCommand::new(String::new(), &mut rt, "\nSELECT 1;").unwrap();
+        assert_eq!(cmd.iterations, DEFAULT_ITERATIONS);
+        assert_eq!(cmd.warmup, 0);
+    }
+
+    #[test]
+    fn test_new_zero_iterations_is_an_error() {
+        let mut rt = Runtime::new(None).unwrap();
+        let err =
+            BenchCommand::new("--iterations 0".to_string(), &mut rt, "\nSELECT 1;").unwrap_err();
+        assert!(err.to_string().contains("at least 1"), "got: {err}");
+    }
+
+    #[test]
+    fn test_new_non_numeric_iterations_is_an_error() {
+        let mut rt = Runtime::new(None).unwrap();
+        let err =
+            BenchCommand::new("--iterations lots".to_string(), &mut rt, "\nSELECT 1;").unwrap_err();
+        assert!(err.to_string().contains("lots"), "got: {err}");
+    }
+
+    #[test]
+    fn test_single_iteration_executes_without_panicking() {
+        // n=1: stddev is undefined — must report N/A, not panic
+        let mut rt = Runtime::new(None).unwrap();
+        let mut cmd =
+            BenchCommand::new("--iterations 1".to_string(), &mut rt, "\nSELECT 1;").unwrap();
+        let result = cmd.execute(None).unwrap();
+        assert_eq!(result.times.len(), 1);
+        assert!(result.report().contains("± N/A"));
     }
 
     #[test]

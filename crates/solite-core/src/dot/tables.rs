@@ -1,7 +1,7 @@
 //! Table listing command.
 //!
-//! This module implements the `.tables` command which lists all tables
-//! and views in the database.
+//! This module implements the `.tables` command which lists all tables,
+//! views, and virtual tables in the database.
 //!
 //! # Usage
 //!
@@ -12,8 +12,9 @@
 //!
 //! # Output
 //!
-//! Returns a list of table and view names, excluding internal sqlite_*
-//! system tables.
+//! Returns a list of table, view, and virtual table names, excluding
+//! internal sqlite_* system tables and shadow tables (the backing
+//! storage of virtual tables, hidden by sqlite3's `.tables` too).
 
 use crate::dot::DotError;
 use crate::Runtime;
@@ -42,7 +43,7 @@ impl TablesCommand {
             SELECT name
             FROM pragma_table_list
             WHERE "schema" = COALESCE(?1, 'main')
-              AND type IN ('table', 'view')
+              AND type IN ('table', 'view', 'virtual')
               AND name NOT LIKE 'sqlite_%'
             ORDER BY name
             "#,
@@ -133,6 +134,24 @@ mod tests {
         assert_eq!(tables.len(), 2);
         assert!(tables.contains(&"source".to_string()));
         assert!(tables.contains(&"myview".to_string()));
+    }
+
+    #[test]
+    fn test_tables_includes_virtual_tables_but_not_shadow_tables() {
+        let runtime = create_test_runtime();
+
+        let (_, stmt) = runtime
+            .connection
+            .prepare("CREATE VIRTUAL TABLE notes USING fts5(body)")
+            .unwrap();
+        stmt.unwrap().execute().unwrap();
+
+        let cmd = TablesCommand { schema: None };
+        let tables = cmd.execute(&runtime).unwrap();
+
+        assert!(tables.contains(&"notes".to_string()));
+        // shadow tables backing the fts5 index stay hidden
+        assert!(!tables.iter().any(|t| t.starts_with("notes_")));
     }
 
     #[test]

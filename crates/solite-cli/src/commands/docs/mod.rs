@@ -384,9 +384,11 @@ fn extract_documented_functions(ast: &mut Node) -> Vec<String> {
                         None
                     };
 
-                    // Add anchor link
+                    // Add anchor link, replacing any anchor a previous run
+                    // already appended so reruns don't accumulate copies
                     if let Some(ref f) = function {
                         if let Some(children) = node.children_mut() {
+                            strip_trailing_anchors(children);
                             children.push(Node::Text(Text {
                                 value: format!(
                                     " {{#{}}}",
@@ -403,6 +405,41 @@ fn extract_documented_functions(ast: &mut Node) -> Vec<String> {
             None
         })
         .collect()
+}
+
+/// Remove `{#anchor}` text trailing a heading's children, so re-running
+/// `docs inline` on its own output replaces the anchor instead of appending
+/// another copy. Stripping (rather than skipping the push) also self-heals
+/// stale anchors when a heading's function name changed.
+fn strip_trailing_anchors(children: &mut Vec<Node>) {
+    while let Some(Node::Text(last)) = children.last_mut() {
+        let before = last.value.clone();
+        loop {
+            let trimmed = last.value.trim_end();
+            let stripped = match (trimmed.rfind("{#"), trimmed.ends_with('}')) {
+                (Some(idx), true) => {
+                    let inner = &trimmed[idx + 2..trimmed.len() - 1];
+                    if !inner.is_empty() && !inner.contains(['{', '}']) {
+                        Some(trimmed[..idx].trim_end().to_string())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            match stripped {
+                Some(value) => last.value = value,
+                None => break,
+            }
+        }
+        if last.value.is_empty() {
+            children.pop();
+            continue;
+        }
+        if last.value == before {
+            break;
+        }
+    }
 }
 
 /// Get list of loaded functions from extension.

@@ -141,3 +141,39 @@ def test_docs_inline_error_report(solite_cli, tmp_path):
     assert str(doc) in result.stderr
     assert result.stderr.count("no such table: no_such_table") == 1
     assert "SQLiteError {" not in result.stderr
+
+
+def test_docs_inline_anchor_idempotent(solite_cli, tmp_path):
+    """Re-running docs inline over its own output keeps exactly one
+    `{#anchor}` per heading, with underscores intact (regression: a second
+    pass used to append another anchor and escape the first)."""
+    doc = tmp_path / "doc.md"
+    doc.write_text("### `my_func(a, b)`\n\nbody\n")
+
+    result = solite_cli(
+        ["docs", "inline", str(doc), "--output", "out1.md"], cwd=tmp_path
+    )
+    assert result.success, result.stderr
+    out1 = (tmp_path / "out1.md").read_text()
+    assert out1.count("{#my_func}") == 1
+    assert r"\_" not in out1
+
+    result = solite_cli(
+        ["docs", "inline", str(tmp_path / "out1.md"), "--output", "out2.md"],
+        cwd=tmp_path,
+    )
+    assert result.success, result.stderr
+    out2 = (tmp_path / "out2.md").read_text()
+    assert out2 == out1
+    assert out2.count("{#my_func}") == 1
+
+
+def test_docs_inline_anchor_self_heals(solite_cli, tmp_path):
+    """A stale anchor from a renamed heading is replaced, not accumulated."""
+    doc = tmp_path / "doc.md"
+    doc.write_text("### `renamed_fn(x)` {#old_name}\n\nbody\n")
+
+    result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+    assert "{#renamed_fn}" in result.stdout
+    assert "{#old_name}" not in result.stdout

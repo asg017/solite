@@ -184,6 +184,8 @@ fn setup_from_sql_file(path: &PathBuf) -> Result<Connection> {
 fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
     // class name -> (first query that declared it, its column shape)
     let mut declared_classes: HashMap<String, (String, Vec<ColumnMeta>)> = HashMap::new();
+    // export name -> location (file:line:col) of its first definition
+    let mut seen_exports: HashMap<String, String> = HashMap::new();
 
     loop {
         match rt.next_stepx() {
@@ -218,6 +220,17 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                     }
                 }
                 StepResult::ProcedureDefinition(proc) => {
+                    if let Some(first_at) =
+                        seen_exports.insert(proc.name.clone(), step.reference.to_string())
+                    {
+                        return Err(anyhow!(
+                            "Duplicate export name `{}` at {} (first defined at {})",
+                            proc.name,
+                            step.reference,
+                            first_at
+                        ));
+                    }
+
                     if let Some(class_name) = &proc.result_class {
                         match declared_classes.get(class_name) {
                             None => {

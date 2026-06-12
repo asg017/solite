@@ -321,6 +321,16 @@ mod tests {
     }
 
     #[test]
+    fn test_duplicate_export_names_error() {
+        let err = report_err(
+            "create table t(a int);\n\n-- name: getThing :value\nselect a from t;\n\n-- name: getThing :value\nselect count(*) from t;",
+        );
+        assert!(err.contains("getThing"), "error names the duplicate: {err}");
+        assert!(err.contains("[test]:7"), "error cites the second definition: {err}");
+        assert!(err.contains("[test]:4"), "error cites the first definition: {err}");
+    }
+
+    #[test]
     fn test_stdlib_function_in_export() {
         // The validation connection must have the solite stdlib initialized,
         // just like every other solite context (run, repl, query, test).

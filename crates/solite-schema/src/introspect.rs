@@ -30,6 +30,17 @@ impl From<rusqlite::Error> for IntrospectError {
     }
 }
 
+/// Quote a string as a SQL identifier: wrap in double quotes and double any
+/// embedded double quotes (`we"ird` -> `"we""ird"`). This is the same escaping
+/// SQLite's printf `%w` conversion performs; we do it inline because this
+/// crate links rusqlite directly and does not depend on solite-core. Without
+/// it, a table/index/view/module name containing a `"` (legal in SQLite, and
+/// attacker-controllable when introspecting an untrusted database file) breaks
+/// out of the quoted context and corrupts the generated SQL.
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 /// Table information extracted from introspection.
 #[derive(Debug, Clone, Default)]
 pub struct TableInfo {
@@ -289,7 +300,7 @@ fn introspect_table(
     let mut original_columns = Vec::new();
 
     // Use PRAGMA table_info to get column details
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{}\")", table_name))?;
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", quote_ident(table_name)))?;
     let rows = stmt.query_map([], |row| {
         row.get::<_, String>(1) // column name is at index 1
     })?;
@@ -327,7 +338,7 @@ fn introspect_index(
     let mut columns = Vec::new();
 
     // Use PRAGMA index_info to get indexed columns
-    let mut stmt = conn.prepare(&format!("PRAGMA index_info(\"{}\")", index_name))?;
+    let mut stmt = conn.prepare(&format!("PRAGMA index_info({})", quote_ident(index_name)))?;
     let rows = stmt.query_map([], |row| {
         row.get::<_, Option<String>>(2) // column name is at index 2 (can be NULL for expressions)
     })?;
@@ -344,7 +355,7 @@ fn introspect_index(
         .unwrap_or_else(|| {
             // Check using PRAGMA index_list
             let result: Result<bool, _> = conn.query_row(
-                &format!("SELECT \"unique\" FROM pragma_index_list(\"{}\") WHERE name = ?", table_name),
+                &format!("SELECT \"unique\" FROM pragma_index_list({}) WHERE name = ?", quote_ident(table_name)),
                 [index_name],
                 |row| row.get(0),
             );
@@ -376,7 +387,7 @@ fn introspect_view(
 
     // Use PRAGMA table_info on the view to get column names
     // Views respond to table_info just like tables
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{}\")", view_name))?;
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", quote_ident(view_name)))?;
     let rows = stmt.query_map([], |row| {
         row.get::<_, String>(1) // column name is at index 1
     })?;
@@ -419,7 +430,7 @@ pub fn discover_virtual_table_columns(conn: &Connection) -> Vec<(String, Vec<Str
     for module in &module_names {
         // Try to prepare a SELECT to discover visible columns.
         // This works for eponymous virtual tables without actually executing anything.
-        let sql = format!("SELECT * FROM \"{}\"", module);
+        let sql = format!("SELECT * FROM {}", quote_ident(module));
         if let Ok(probe) = conn.prepare(&sql) {
             let columns: Vec<String> = probe
                 .column_names()
@@ -604,6 +615,36 @@ mod tests {
         let view = schema.get_view("v_users").unwrap();
         assert_eq!(view.name, "v_users");
         assert_eq!(view.columns, vec!["id", "name"]);
+    }
+
+    #[test]
+    fn test_introspect_identifiers_with_embedded_quotes() {
+        // Identifiers containing double quotes are legal in SQLite and can
+        // appear in an untrusted database file. Introspection must escape them
+        // (PRAGMA table_info/index_info interpolate the name) rather than emit
+        // broken SQL and silently drop the object.
+        let conn = create_test_db();
+        conn.execute(r#"CREATE TABLE "we""ird" ("c""ol" INTEGER, plain TEXT)"#, [])
+            .unwrap();
+        conn.execute(r#"CREATE INDEX "id""x" ON "we""ird"("c""ol")"#, [])
+            .unwrap();
+        conn.execute(r#"CREATE VIEW "v""w" AS SELECT plain FROM "we""ird""#, [])
+            .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+
+        // table + its columns discovered (exercises PRAGMA table_info escaping)
+        let table = schema.get_table(r#"we"ird"#).unwrap();
+        assert!(table.original_columns.contains(&r#"c"ol"#.to_string()));
+        assert!(table.original_columns.contains(&"plain".to_string()));
+
+        // index + its column discovered (exercises PRAGMA index_info escaping)
+        let idx = schema.get_index(r#"id"x"#).unwrap();
+        assert_eq!(idx.columns, vec![r#"c"ol"#.to_string()]);
+
+        // view + its column discovered (exercises PRAGMA table_info on a view)
+        let view = schema.get_view(r#"v"w"#).unwrap();
+        assert_eq!(view.columns, vec!["plain".to_string()]);
     }
 
     #[test]

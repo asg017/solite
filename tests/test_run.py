@@ -204,6 +204,21 @@ def test_run_trace_nested_dot_run(solite_cli, tmp_path):
     assert any("from child" in sql for sql in statements)
 
 
+def test_run_trace_overwrites_existing_file(solite_cli, tmp_path):
+    (tmp_path / "a.sql").write_text(".timer off\nselect 'run one';\n", newline="\n")
+    first = solite_cli(["run", "a.sql", "--trace", "t.db"], cwd=tmp_path)
+    assert first.success
+
+    (tmp_path / "a.sql").write_text(".timer off\nselect 'run two';\n", newline="\n")
+    second = solite_cli(["run", "a.sql", "--trace", "t.db"], cwd=tmp_path)
+    assert second.success
+
+    # Second run replaced the first trace database
+    statements = trace_statements(tmp_path / "t.db")
+    assert any("run two" in sql for sql in statements)
+    assert not any("run one" in sql for sql in statements)
+
+
 def test_run_ipynb_cell_order(solite_cli, snapshot, tmp_path):
     nb = make_notebook(
         [

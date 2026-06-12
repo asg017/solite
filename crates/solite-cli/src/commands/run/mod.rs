@@ -275,7 +275,18 @@ fn create_runtime(flags: &RunArgs, database: Option<&PathBuf>) -> Result<Runtime
         Runtime::new(database.map(|p| p.to_string_lossy().to_string()))?
     };
 
-    if flags.trace.is_some() {
+    if let Some(ref trace_path) = flags.trace {
+        // VACUUM INTO refuses to overwrite, so remove any previous trace
+        // up-front; that way a permissions problem surfaces before the
+        // script runs instead of after all its side effects.
+        if trace_path.exists() {
+            std::fs::remove_file(trace_path).with_context(|| {
+                format!(
+                    "Failed to remove existing trace file {}",
+                    trace_path.display()
+                )
+            })?;
+        }
         setup_tracing(&rt)?;
     }
 
@@ -454,11 +465,11 @@ fn write_trace_output(rt: &Runtime, trace_path: &std::path::Path) -> Result<()> 
 
     let path_str = trace_path.to_string_lossy();
     stmt.bind_text(1, &path_str)
-        .map_err(|e| anyhow::anyhow!("{e:?}"))
+        .map_err(|e| anyhow::anyhow!("{e}"))
         .context("Failed to bind trace output path")?;
 
     stmt.execute()
-        .map_err(|e| anyhow::anyhow!("{e:?}"))
+        .map_err(|e| anyhow::anyhow!("{e}"))
         .context("Failed to write trace")?;
 
     Ok(())

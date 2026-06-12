@@ -302,6 +302,12 @@ Parameters: $name or :name, optionally typed ($name::int); a trailing
 `::` marks the parameter as optional ($name::int::).
 Unannotated statements are emitted in the report as `setup`.
 
+Shared result classes: append `-> ClassName` (must come last) to give
+queries a shared result type; queries sharing a class must have matching
+column shapes.
+
+Dot commands (.param, .load, ...) are not supported in codegen input.
+
 Example:
   solite codegen queries.sql --schema schema.sql -o report.json";
 

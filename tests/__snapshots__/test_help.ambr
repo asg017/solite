@@ -44,6 +44,51 @@
   
   '''
 # ---
+# name: test_help[codegen --help]
+  '''
+  Generate a JSON IR from `-- name:` annotated SQL queries
+  
+  Usage: solite codegen [OPTIONS] <FILE>
+  
+  Arguments:
+    <FILE>
+            SQL file with `-- name: <proc> :<type>` annotated queries
+  
+  Options:
+        --allow-ssh
+            Allow connecting to ssh:// database URLs and custom --transport commands
+  
+        --schema <SCHEMA>
+            Schema to validate queries against: a SQLite database file or a .sql file of CREATE statements
+  
+    -o, --output <OUTPUT>
+            Write the JSON report here instead of stdout
+  
+    -h, --help
+            Print help (see a summary with '-h')
+  
+  Annotate queries with a name and result type:
+  
+    -- name: getUserById :row
+    SELECT id, name FROM users WHERE id = $id::int;
+  
+  Result types: :rows (many), :row (one), :value (single value),
+  :list (single column). Omit to auto-detect from the column count.
+  Parameters: $name or :name, optionally typed ($name::int); a trailing
+  `::` marks the parameter as optional ($name::int::).
+  Unannotated statements are emitted in the report as `setup`.
+  
+  Shared result classes: append `-> ClassName` (must come last) to give
+  queries a shared result type; queries sharing a class must have matching
+  column shapes.
+  
+  Dot commands (.param, .load, ...) are not supported in codegen input.
+  
+  Example:
+    solite codegen queries.sql --schema schema.sql -o report.json
+  
+  '''
+# ---
 # name: test_help[execute --help]
   '''
   Execute a write SQL statement on a database

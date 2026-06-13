@@ -694,6 +694,22 @@ pub struct StreamRestoreArgs {
     pub database: PathBuf,
 }
 
+const COMPLETIONS_AFTER_HELP: &str = "\
+Solite uses clap_complete's dynamic engine: the registration script wires a
+hook that re-invokes `solite` at TAB time, so completions cover subcommands
+and flags plus files (extension-aware), procedure names, and SQL keywords/
+tables.
+
+Enable completions by adding the matching line to your shell config:
+
+  bash   echo 'source <(solite completions bash)' >> ~/.bashrc
+  zsh    echo 'source <(solite completions zsh)'  >> ~/.zshrc
+  fish   solite completions fish > ~/.config/fish/completions/solite.fish
+  elvish echo 'eval (solite completions elvish | slurp)' >> ~/.config/elvish/rc.elv
+  pwsh   solite completions powershell | Out-String | Invoke-Expression
+
+Start a new shell (or source the file) for it to take effect.";
+
 #[derive(Args, Debug)]
 pub struct CompletionsArgs {
     /// Shell to generate the registration script for
@@ -782,6 +798,7 @@ pub enum Commands {
     Serve(ServeArgs),
 
     /// Print the shell completion registration script (see `completions --help`)
+    #[command(after_long_help = COMPLETIONS_AFTER_HELP)]
     Completions(CompletionsArgs),
 
     /// Streaming replication, like litestream

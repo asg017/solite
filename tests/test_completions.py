@@ -30,6 +30,15 @@ def test_completions_unknown_shell_errors(solite_cli):
     assert "notashell" in result.stderr
 
 
+def test_completions_help_shows_install_hints(solite_cli):
+    result = solite_cli(["completions", "--help"])
+    assert result.success, result.stderr
+    out = result.stdout
+    assert "solite completions bash" in out, out
+    assert "solite completions zsh" in out, out
+    assert "solite completions fish" in out, out
+
+
 def test_completion_hook_lists_subcommands(solite_cli):
     candidates = _complete(solite_cli, ["solite", ""], 1)
     for expected in ["run", "repl", "test", "completions"]:

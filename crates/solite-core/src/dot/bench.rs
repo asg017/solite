@@ -20,7 +20,6 @@ use crate::{ParseDotError, Runtime};
 use jiff::{Span, SpanRound, Unit};
 use serde::Serialize;
 use std::cmp::Ordering;
-use std::ffi::OsString;
 
 /// Command to benchmark a SQL query.
 #[derive(Serialize, Debug)]
@@ -166,20 +165,40 @@ impl BenchCommand {
     ///
     /// # Arguments
     ///
-    /// * `args` - Optional arguments like `--name "My Benchmark"`
+    /// * `args` - Same-line text after `.bench`: optional flags like
+    ///   `--name "My Benchmark"`
     /// * `runtime` - The runtime context
-    /// * `rest` - The SQL query to benchmark
+    /// * `rest` - The SQL query to benchmark (the lines following the dot
+    ///   line)
     ///
     /// # Errors
     ///
-    /// Returns `ParseDotError` if the SQL cannot be prepared.
+    /// Returns `ParseDotError` if a flag is unknown or malformed, or if the
+    /// SQL cannot be prepared.
     pub fn new(args: String, runtime: &mut Runtime, rest: &str) -> Result<Self, ParseDotError> {
-        let pargs_vec: Vec<OsString> = args.split(' ').map(OsString::from).collect();
-        let mut pargs = pico_args::Arguments::from_vec(pargs_vec);
+        // Tokenize the dot-line arguments shell-style so quoted values like
+        // `--name "My Query"` survive as one argument — a plain `split(' ')`
+        // would break them apart. The SQL itself is never tokenized (it stays
+        // in `rest`), so string literals are left untouched.
+        let tokens = shlex::split(&args).ok_or_else(|| {
+            ParseDotError::InvalidArgument("malformed quoting in .bench arguments".into())
+        })?;
+        let mut pargs = pico_args::Arguments::from_vec(
+            tokens.into_iter().map(std::ffi::OsString::from).collect(),
+        );
 
         let name: Option<String> = pargs
             .opt_value_from_str("--name")
             .map_err(|e| ParseDotError::InvalidArgument(e.to_string()))?;
+
+        // Anything left over is an unknown flag or stray argument — reject it
+        // rather than silently ignore. SQL goes on the line after `.bench`.
+        if let Some(unexpected) = pargs.finish().into_iter().next() {
+            return Err(ParseDotError::InvalidArgument(format!(
+                "unexpected .bench argument '{}' (put SQL on the line after .bench)",
+                unexpected.to_string_lossy()
+            )));
+        }
 
         let (rest_len, stmt) = runtime
             .prepare_with_parameters(rest)
@@ -408,5 +427,69 @@ mod tests {
         let steps: Vec<BytecodeStep> = vec![];
         let output = render_steps(steps);
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_new_sql_on_following_line() {
+        // The standard form: flags (none here) on the `.bench` line, SQL on
+        // the following line(s).
+        let mut rt = Runtime::new(None).unwrap();
+        let rest = "\nSELECT 1;";
+        let cmd = BenchCommand::new(String::new(), &mut rt, rest).unwrap();
+        assert_eq!(cmd.name, None);
+        assert_eq!(cmd.statement.sql().trim(), "SELECT 1;");
+        // Single statement: the whole `rest` is consumed.
+        assert_eq!(cmd.rest_length, rest.len());
+    }
+
+    #[test]
+    fn test_new_multiline_sql_consumes_only_first_statement() {
+        let mut rt = Runtime::new(None).unwrap();
+        let rest = "\nSELECT 1;\nSELECT 2;";
+        let cmd = BenchCommand::new(String::new(), &mut rt, rest).unwrap();
+        assert_eq!(cmd.statement.sql().trim(), "SELECT 1;");
+        // Consumed through the end of `SELECT 1;` — `SELECT 2;` remains.
+        assert_eq!(cmd.rest_length, "\nSELECT 1;".len());
+        assert_eq!(&rest[cmd.rest_length..], "\nSELECT 2;");
+    }
+
+    #[test]
+    fn test_new_quoted_name_with_spaces() {
+        let mut rt = Runtime::new(None).unwrap();
+        let cmd =
+            BenchCommand::new("--name \"My Query\"".to_string(), &mut rt, "\nSELECT 1;").unwrap();
+        assert_eq!(cmd.name, Some("My Query".to_string()));
+        assert_eq!(cmd.statement.sql().trim(), "SELECT 1;");
+    }
+
+    #[test]
+    fn test_new_name_eq_form() {
+        let mut rt = Runtime::new(None).unwrap();
+        let cmd =
+            BenchCommand::new("--name='My Query'".to_string(), &mut rt, "\nSELECT 1;").unwrap();
+        assert_eq!(cmd.name, Some("My Query".to_string()));
+        assert_eq!(cmd.statement.sql().trim(), "SELECT 1;");
+    }
+
+    #[test]
+    fn test_new_unknown_flag_is_an_error() {
+        let mut rt = Runtime::new(None).unwrap();
+        let err = BenchCommand::new("--nmae foo".to_string(), &mut rt, "\nSELECT 1;").unwrap_err();
+        assert!(err.to_string().contains("--nmae"), "got: {err}");
+    }
+
+    #[test]
+    fn test_new_malformed_quote_is_an_error() {
+        let mut rt = Runtime::new(None).unwrap();
+        let err =
+            BenchCommand::new("--name \"My Query".to_string(), &mut rt, "\nSELECT 1;").unwrap_err();
+        assert!(err.to_string().contains("malformed quoting"), "got: {err}");
+    }
+
+    #[test]
+    fn test_new_no_sql_is_an_error() {
+        let mut rt = Runtime::new(None).unwrap();
+        let err = BenchCommand::new(String::new(), &mut rt, "").unwrap_err();
+        assert!(err.to_string().contains("No SQL statement"), "got: {err}");
     }
 }

@@ -15,32 +15,48 @@ use clap_complete::engine::{ArgValueCompleter, CompletionCandidate, PathComplete
 
 use crate::cli::{is_database_path, is_script_path};
 
+/// Candidates for script arguments: `.sql`/`.ipynb` files (plus directories).
+pub(crate) fn script_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
+    PathCompleter::any()
+        .filter(|p| is_script_path(p))
+        .complete(current)
+}
+
+/// Candidates for database arguments: `.db`/`.sqlite`/`.sqlite3` files (plus
+/// directories and the literal `:memory:`).
+pub(crate) fn database_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
+    let mut candidates = PathCompleter::any()
+        .filter(|p| is_database_path(p))
+        .complete(current);
+    push_memory(&mut candidates, current);
+    candidates
+}
+
+/// Candidates for mixed positionals that accept either a script or a database
+/// file. Procedure-name (ticket 04) and inline-SQL (ticket 05) candidates for
+/// these args are composed on top of this.
+pub(crate) fn script_or_database_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
+    PathCompleter::any()
+        .filter(|p| is_script_path(p) || is_database_path(p))
+        .complete(current)
+}
+
 /// Complete script arguments: `.sql`/`.ipynb` files (plus directories).
 pub(crate) fn sql_script_completer() -> ArgValueCompleter {
-    ArgValueCompleter::new(PathCompleter::any().filter(|p| is_script_path(p)))
+    ArgValueCompleter::new(script_candidates)
 }
 
 /// Complete database arguments: `.db`/`.sqlite`/`.sqlite3` files (plus
 /// directories and the literal `:memory:`).
 pub(crate) fn database_completer() -> ArgValueCompleter {
-    ArgValueCompleter::new(|current: &OsStr| {
-        let mut candidates = PathCompleter::any()
-            .filter(|p| is_database_path(p))
-            .complete(current);
-        push_memory(&mut candidates, current);
-        candidates
-    })
+    ArgValueCompleter::new(database_candidates)
 }
 
-/// Complete mixed positionals (`run`/`execute` args, `query.statement`,
-/// `bench.sql`) that accept either a script or a database file. Procedure-name
-/// and inline-SQL candidates for these args come from later tickets.
+/// Complete mixed positionals (`execute` args, `query.statement`, `bench.sql`)
+/// that accept either a script or a database file. (`run` adds procedure names
+/// on top — see [`super::procedures`].)
 pub(crate) fn script_or_database_completer() -> ArgValueCompleter {
-    ArgValueCompleter::new(|current: &OsStr| {
-        PathCompleter::any()
-            .filter(|p| is_script_path(p) || is_database_path(p))
-            .complete(current)
-    })
+    ArgValueCompleter::new(script_or_database_candidates)
 }
 
 /// Offer `:memory:` while it still matches what's been typed. Valid anywhere a

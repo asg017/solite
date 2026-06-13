@@ -6,6 +6,7 @@ use solite_core::exporter::{BlobLimit, ExportFormat};
 use crate::commands::completions::files::{
     database_completer, script_or_database_completer, sql_script_completer,
 };
+use crate::commands::completions::procedures::run_args_completer;
 
 /// Build the `clap::Command` for the dynamic completion engine.
 ///
@@ -60,7 +61,7 @@ pub struct RunArgs {
     /// Positional args, in any order, classified by extension:
     /// .sql/.ipynb = script, .db/.sqlite/.sqlite3 = database
     /// (default: in-memory), anything else = procedure name to call
-    #[arg(value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = run_args_completer())]
     pub args: Vec<String>,
 
     /// Execute SQL/dot commands from the given string (instead of a .sql file)

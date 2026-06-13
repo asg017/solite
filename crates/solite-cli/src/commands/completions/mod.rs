@@ -21,6 +21,7 @@ use clap_complete::env::Shells;
 use crate::cli::CompletionsArgs;
 
 pub(crate) mod files;
+pub(crate) mod procedures;
 
 /// Print the dynamic-completion registration script for the requested shell.
 ///

@@ -61,6 +61,24 @@ def test_database_arg_completes_only_databases(solite_cli, tmp_path):
     assert "d.txt" not in candidates, candidates
 
 
+def test_run_completes_procedure_names(solite_cli, tmp_path):
+    # `solite run <db> queries.sql <TAB>` offers procedures defined in the
+    # referenced file (recovered from argv, since per-arg completers can't see
+    # sibling args).
+    (tmp_path / "queries.sql").write_text(
+        "-- name: getUser :row\n"
+        "SELECT * FROM users WHERE id = $id;\n"
+        "-- name: listUsers :rows\n"
+        "SELECT * FROM users;\n"
+    )
+    (tmp_path / "app.db").write_text("")
+    candidates = _complete(
+        solite_cli, ["solite", "run", "app.db", "queries.sql", ""], 4, cwd=tmp_path
+    )
+    assert "getUser" in candidates, candidates
+    assert "listUsers" in candidates, candidates
+
+
 def test_codegen_file_completes_only_scripts(solite_cli, tmp_path):
     (tmp_path / "a.sql").write_text("SELECT 1;")
     (tmp_path / "b.ipynb").write_text("{}")

@@ -57,6 +57,7 @@ pub mod schema;
 pub mod backup;
 pub mod vacuum;
 pub mod serve;
+pub mod completions;
 #[cfg(feature = "ritestream")]
 pub mod stream;
 

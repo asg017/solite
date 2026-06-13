@@ -22,6 +22,14 @@ pub use commands::tui::bench_support as tui_bench_support;
 
 /// The `solite` binary's entire main function.
 pub fn run_main() {
+    // Shell completion hook. When invoked by a shell's completion integration
+    // the `COMPLETE` env var is set: this generates candidates and exits the
+    // process. On a normal run `COMPLETE` is unset, so this is a no-op and
+    // returns. It MUST run before the bespoke `try_parse_from` fallback below,
+    // which would otherwise misinterpret the unusual argv a completion request
+    // passes (and trip the bare-REPL / `solite <file>.db` paths).
+    clap_complete::CompleteEnv::with_factory(cli::command_for_completion).complete();
+
     let args: Vec<String> = env::args().collect();
 
     let (allow_ssh, x) = match cli::Cli::try_parse_from(&args) {
@@ -80,6 +88,7 @@ pub fn run_main() {
         cli::Commands::Backup(args) => commands::backup::backup(args),
         cli::Commands::Vacuum(args) => commands::vacuum::vacuum(args),
         cli::Commands::Serve(args) => commands::serve::serve(args),
+        cli::Commands::Completions(args) => commands::completions::completions(args),
         #[cfg(feature = "ritestream")]
         cli::Commands::Stream(cmd) => commands::stream::stream(cmd),
     };

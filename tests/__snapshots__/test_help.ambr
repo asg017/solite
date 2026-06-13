@@ -42,6 +42,9 @@
     diff             Output SQL to transform one database into another
     rsync            Efficiently replicate a SQLite database to a remote machine
   
+  Shell:
+    completions      Print the shell completion registration script
+  
   '''
 # ---
 # name: test_help[codegen --help]

@@ -1,7 +1,15 @@
 use std::{env, path::PathBuf};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use solite_core::exporter::{BlobLimit, ExportFormat};
+
+/// Build the `clap::Command` for the dynamic completion engine.
+///
+/// Kept in one place so the `CommandFactory` import surface stays here rather
+/// than leaking into `lib.rs` (the `CompleteEnv` hook) and `commands`.
+pub(crate) fn command_for_completion() -> clap::Command {
+    Cli::command()
+}
 
 /// Extensions treated as SQLite database files (case-insensitive), for
 /// positional-arg classification (`solite run`) and the bare `solite <file>`
@@ -654,6 +662,13 @@ pub struct StreamRestoreArgs {
     pub database: PathBuf,
 }
 
+#[derive(Args, Debug)]
+pub struct CompletionsArgs {
+    /// Shell to generate the registration script for
+    #[arg(value_enum)]
+    pub shell: clap_complete::Shell,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run SQL scripts
@@ -734,6 +749,9 @@ pub enum Commands {
     #[command(hide = true)]
     Serve(ServeArgs),
 
+    /// Print the shell completion registration script (see `completions --help`)
+    Completions(CompletionsArgs),
+
     /// Streaming replication, like litestream
     #[cfg(feature = "ritestream")]
     Stream(StreamNamespace),
@@ -778,6 +796,9 @@ Compatibility:
   sqlite3          Run the sqlite3 shell directly
   diff             Output SQL to transform one database into another
   rsync            Efficiently replicate a SQLite database to a remote machine
+
+Shell:
+  completions      Print the shell completion registration script
 ";
 
 /// Render the top-level help, including feature-gated sections.

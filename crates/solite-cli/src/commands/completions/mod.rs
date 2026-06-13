@@ -20,6 +20,8 @@ use clap_complete::env::Shells;
 
 use crate::cli::CompletionsArgs;
 
+pub(crate) mod files;
+
 /// Print the dynamic-completion registration script for the requested shell.
 ///
 /// The output is meant to be sourced from the user's shell rc file, e.g.

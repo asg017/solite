@@ -3,6 +3,10 @@ use std::{env, path::PathBuf};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use solite_core::exporter::{BlobLimit, ExportFormat};
 
+use crate::commands::completions::files::{
+    database_completer, script_or_database_completer, sql_script_completer,
+};
+
 /// Build the `clap::Command` for the dynamic completion engine.
 ///
 /// Kept in one place so the `CommandFactory` import surface stays here rather
@@ -23,6 +27,16 @@ pub(crate) fn is_database_path(path: &std::path::Path) -> bool {
                 "db" | "sqlite" | "sqlite3"
             )
         })
+}
+
+/// Extensions treated as runnable script files (case-insensitive): SQL files
+/// and Jupyter notebooks. The script half of `solite run`'s positional
+/// classification, mirroring [`is_database_path`]. Shared with the shell and
+/// REPL completers so the candidates match what the commands actually accept.
+pub(crate) fn is_script_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "sql" | "ipynb"))
 }
 
 /// Shared args for connecting to remote databases over SSH or custom transports.
@@ -46,7 +60,7 @@ pub struct RunArgs {
     /// Positional args, in any order, classified by extension:
     /// .sql/.ipynb = script, .db/.sqlite/.sqlite3 = database
     /// (default: in-memory), anything else = procedure name to call
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
     pub args: Vec<String>,
 
     /// Execute SQL/dot commands from the given string (instead of a .sql file)
@@ -147,11 +161,11 @@ pub struct QueryArgs {
     /// SQL to run (read-only; use `solite execute` for writes), a path
     /// to a .sql file containing it, or `-` to read SQL from stdin
     /// (also the default when stdin is piped)
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
     pub statement: Option<String>,
 
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = database_completer())]
     pub database: Option<PathBuf>,
 
     /// Write results to a file; format inferred from extension
@@ -204,7 +218,7 @@ statements run against an in-memory database.";
 pub struct ExecuteArgs {
     /// SQL statement (.sql file, or `-` for stdin) and optional database
     /// path, in any order; classified by extension, then by existence
-    #[arg(num_args = 0..=2, value_hint = clap::ValueHint::AnyPath)]
+    #[arg(num_args = 0..=2, value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
     pub args: Vec<String>,
 
     /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
@@ -233,7 +247,7 @@ Inside the REPL, `.help` lists all dot commands. Environment:
 #[derive(Args, Debug)]
 pub struct ReplArgs {
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = database_completer())]
     pub database: Option<PathBuf>,
 
     #[command(flatten)]
@@ -270,13 +284,13 @@ dot command.";
 #[derive(Args, Debug)]
 pub struct BenchArgs {
     /// SQL statements (or .sql file paths) to benchmark
-    #[arg(required = true, value_hint = clap::ValueHint::AnyPath)]
+    #[arg(required = true, value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
     pub sql: Vec<String>,
 
     /// Database(s) to bench against: give once to share across all SQL
     /// arguments, or once per SQL argument to pair by position
     /// (default: in-memory)
-    #[arg(long, value_hint = clap::ValueHint::AnyPath)]
+    #[arg(long, value_hint = clap::ValueHint::AnyPath, add = database_completer())]
     pub database: Option<Vec<PathBuf>>,
 
     /// Attach an additional database to every benchmark connection;
@@ -326,7 +340,7 @@ Example:
 #[derive(Args, Debug)]
 pub struct CodegenArgs {
     /// SQL file with `-- name: <proc> :<type>` annotated queries
-    #[arg(value_hint = clap::ValueHint::FilePath)]
+    #[arg(value_hint = clap::ValueHint::FilePath, add = sql_script_completer())]
     pub file: PathBuf,
     /// Schema to validate queries against: a SQLite database file or a
     /// .sql file of CREATE statements
@@ -364,7 +378,7 @@ any other dot command (or a failing one) aborts the test file.";
 pub struct TestArgs {
     /// SQL test files with inline `-- expected` assertions; a directory
     /// expands to the *.sql files directly inside it (non-recursive)
-    #[arg(required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath)]
+    #[arg(required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath, add = sql_script_completer())]
     pub files: Vec<PathBuf>,
 
     /// Seed each test file's in-memory database from this SQLite file
@@ -446,6 +460,9 @@ pub enum DocsCommand {
 #[derive(Args, Debug)]
 pub struct DocsInlineArgs {
     /// Markdown file with ```sql code blocks to execute
+    // NOTE: docs input is markdown (.md), not .sql/.ipynb — the ticket's
+    // mapping listed it under the script completer, which would hide .md
+    // files. Left as a plain FilePath hint so all files (incl. .md) complete.
     #[arg(value_hint = clap::ValueHint::FilePath)]
     pub input: PathBuf,
 
@@ -462,7 +479,7 @@ pub struct DocsInlineArgs {
 #[derive(Args, Debug)]
 pub struct TuiArgs {
     /// Database file or ssh:// URL (with --allow-ssh)
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = database_completer())]
     pub database: PathBuf,
     /// Open directly on this table
     pub table: Option<String>,
@@ -489,7 +506,7 @@ Ignore directives in SQL comments:
 #[derive(Args, Debug)]
 pub struct FmtArgs {
     /// SQL files to format (reads from stdin if none provided)
-    #[arg(value_hint = clap::ValueHint::FilePath)]
+    #[arg(value_hint = clap::ValueHint::FilePath, add = sql_script_completer())]
     pub files: Vec<PathBuf>,
 
     /// Write formatted output back to files
@@ -521,7 +538,7 @@ Use --list-rules to see every rule with its description and fixability.";
 #[derive(Args, Debug)]
 pub struct LintArgs {
     /// SQL files to lint (reads from stdin if none provided)
-    #[arg(value_hint = clap::ValueHint::FilePath)]
+    #[arg(value_hint = clap::ValueHint::FilePath, add = sql_script_completer())]
     pub files: Vec<PathBuf>,
 
     /// Config file (default: solite-lint.toml in current/parent dirs,
@@ -580,7 +597,7 @@ pub enum SchemaFormat {
 #[derive(Args, Debug)]
 pub struct SchemaArgs {
     /// Database file to print CREATE statements for
-    #[arg(value_hint = clap::ValueHint::FilePath)]
+    #[arg(value_hint = clap::ValueHint::FilePath, add = database_completer())]
     pub database: PathBuf,
 
     /// Only show objects whose name (or owning table) matches this LIKE pattern, e.g. 'users' or 'idx_%'
@@ -594,7 +611,7 @@ pub struct SchemaArgs {
 #[derive(Args, Debug)]
 pub struct BackupArgs {
     /// Source database path
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = database_completer())]
     pub database: PathBuf,
 
     /// Destination backup file path
@@ -613,7 +630,7 @@ pub struct BackupArgs {
 #[derive(Args, Debug)]
 pub struct VacuumArgs {
     /// Database path to vacuum
-    #[arg(value_hint = clap::ValueHint::AnyPath)]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = database_completer())]
     pub database: PathBuf,
 
     /// Write vacuumed database to a new file instead of in-place

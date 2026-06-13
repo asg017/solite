@@ -37,10 +37,35 @@ def test_completion_hook_lists_subcommands(solite_cli):
 
 
 def test_path_args_complete_filenames(solite_cli, tmp_path):
-    # ValueHint annotations make the engine offer filesystem paths for the
-    # `run` positional. (Ticket 03 narrows these to .sql/.ipynb/.db.)
+    # The `run` positional is a union completer: it offers both scripts and
+    # databases, but not unrelated files.
     (tmp_path / "a.sql").write_text("SELECT 1;")
     (tmp_path / "b.db").write_text("")
+    (tmp_path / "c.txt").write_text("")
     candidates = _complete(solite_cli, ["solite", "run", ""], 2, cwd=tmp_path)
     assert "a.sql" in candidates, candidates
     assert "b.db" in candidates, candidates
+    assert "c.txt" not in candidates, candidates
+
+
+def test_database_arg_completes_only_databases(solite_cli, tmp_path):
+    # `query`'s database positional offers only db-like files (+ :memory:),
+    # never .sql/.txt.
+    (tmp_path / "a.sql").write_text("SELECT 1;")
+    (tmp_path / "c.db").write_text("")
+    (tmp_path / "d.txt").write_text("")
+    candidates = _complete(solite_cli, ["solite", "query", "SELECT 1", ""], 3, cwd=tmp_path)
+    assert "c.db" in candidates, candidates
+    assert ":memory:" in candidates, candidates
+    assert "a.sql" not in candidates, candidates
+    assert "d.txt" not in candidates, candidates
+
+
+def test_codegen_file_completes_only_scripts(solite_cli, tmp_path):
+    (tmp_path / "a.sql").write_text("SELECT 1;")
+    (tmp_path / "b.ipynb").write_text("{}")
+    (tmp_path / "c.db").write_text("")
+    candidates = _complete(solite_cli, ["solite", "codegen", ""], 2, cwd=tmp_path)
+    assert "a.sql" in candidates, candidates
+    assert "b.ipynb" in candidates, candidates
+    assert "c.db" not in candidates, candidates

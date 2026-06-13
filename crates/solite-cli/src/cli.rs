@@ -46,6 +46,7 @@ pub struct RunArgs {
     /// Positional args, in any order, classified by extension:
     /// .sql/.ipynb = script, .db/.sqlite/.sqlite3 = database
     /// (default: in-memory), anything else = procedure name to call
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub args: Vec<String>,
 
     /// Execute SQL/dot commands from the given string (instead of a .sql file)
@@ -59,7 +60,7 @@ pub struct RunArgs {
 
     /// Record an execution trace (statements + per-opcode bytecode stats)
     /// to a SQLite database at this path
-    #[arg(long, value_name = "TRACE_DB")]
+    #[arg(long, value_name = "TRACE_DB", value_hint = clap::ValueHint::AnyPath)]
     pub trace: Option<PathBuf>,
 
     /// Open the database read-only; statements that write will fail
@@ -146,14 +147,16 @@ pub struct QueryArgs {
     /// SQL to run (read-only; use `solite execute` for writes), a path
     /// to a .sql file containing it, or `-` to read SQL from stdin
     /// (also the default when stdin is piped)
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub statement: Option<String>,
 
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: Option<PathBuf>,
 
     /// Write results to a file; format inferred from extension
     /// (.csv, .tsv, .json, .ndjson; .gz/.zst compression supported)
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', value_hint = clap::ValueHint::AnyPath)]
     pub output: Option<PathBuf>,
 
     /// Output format (default: table on a TTY, json otherwise)
@@ -167,7 +170,7 @@ pub struct QueryArgs {
     pub parameters: Vec<String>,
 
     /// Load SQLite extension(s) before running the query
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub load_extension: Option<Vec<PathBuf>>,
 
     /// Max size of a single BLOB cell in exports: bytes (1048576), a
@@ -201,7 +204,7 @@ statements run against an in-memory database.";
 pub struct ExecuteArgs {
     /// SQL statement (.sql file, or `-` for stdin) and optional database
     /// path, in any order; classified by extension, then by existence
-    #[arg(num_args = 0..=2)]
+    #[arg(num_args = 0..=2, value_hint = clap::ValueHint::AnyPath)]
     pub args: Vec<String>,
 
     /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
@@ -230,6 +233,7 @@ Inside the REPL, `.help` lists all dot commands. Environment:
 #[derive(Args, Debug)]
 pub struct ReplArgs {
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: Option<PathBuf>,
 
     #[command(flatten)]
@@ -266,13 +270,13 @@ dot command.";
 #[derive(Args, Debug)]
 pub struct BenchArgs {
     /// SQL statements (or .sql file paths) to benchmark
-    #[arg(required = true)]
+    #[arg(required = true, value_hint = clap::ValueHint::AnyPath)]
     pub sql: Vec<String>,
 
     /// Database(s) to bench against: give once to share across all SQL
     /// arguments, or once per SQL argument to pair by position
     /// (default: in-memory)
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::AnyPath)]
     pub database: Option<Vec<PathBuf>>,
 
     /// Attach an additional database to every benchmark connection;
@@ -295,7 +299,7 @@ pub struct BenchArgs {
     pub warmup: u32,
 
     /// Load SQLite extension(s) before benchmarking
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub load_extension: Option<Vec<PathBuf>>,
 }
 const CODEGEN_AFTER_HELP: &str = "\
@@ -322,13 +326,14 @@ Example:
 #[derive(Args, Debug)]
 pub struct CodegenArgs {
     /// SQL file with `-- name: <proc> :<type>` annotated queries
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub file: PathBuf,
     /// Schema to validate queries against: a SQLite database file or a
     /// .sql file of CREATE statements
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub schema: Option<PathBuf>,
     /// Write the JSON report here instead of stdout
-    #[arg(short, long)]
+    #[arg(short, long, value_hint = clap::ValueHint::AnyPath)]
     pub output: Option<PathBuf>,
 }
 
@@ -359,12 +364,12 @@ any other dot command (or a failing one) aborts the test file.";
 pub struct TestArgs {
     /// SQL test files with inline `-- expected` assertions; a directory
     /// expands to the *.sql files directly inside it (non-recursive)
-    #[arg(required = true, num_args = 1..)]
+    #[arg(required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath)]
     pub files: Vec<PathBuf>,
 
     /// Seed each test file's in-memory database from this SQLite file
     /// (the file itself is never modified)
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub database: Option<PathBuf>,
 
     /// Also print expected/actual detail for failing assertions
@@ -423,7 +428,7 @@ pub struct JupyterUninstallArgs {
 #[derive(Args, Debug)]
 pub struct JupyterUpArgs {
     /// Jupyter connection file (provided by Jupyter when launching the kernel)
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub connection: PathBuf,
 }
 
@@ -441,6 +446,7 @@ pub enum DocsCommand {
 #[derive(Args, Debug)]
 pub struct DocsInlineArgs {
     /// Markdown file with ```sql code blocks to execute
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub input: PathBuf,
 
     /// SQLite extension to load before executing (also used to flag
@@ -449,13 +455,14 @@ pub struct DocsInlineArgs {
     pub extension: Option<String>,
 
     /// Write the resulting markdown here instead of stdout
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', value_hint = clap::ValueHint::AnyPath)]
     pub output: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
 pub struct TuiArgs {
     /// Database file or ssh:// URL (with --allow-ssh)
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: PathBuf,
     /// Open directly on this table
     pub table: Option<String>,
@@ -482,6 +489,7 @@ Ignore directives in SQL comments:
 #[derive(Args, Debug)]
 pub struct FmtArgs {
     /// SQL files to format (reads from stdin if none provided)
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub files: Vec<PathBuf>,
 
     /// Write formatted output back to files
@@ -498,7 +506,7 @@ pub struct FmtArgs {
 
     /// Config file (default: solite-fmt.toml in current/parent dirs,
     /// then ~/.config/solite/fmt.toml)
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub config: Option<PathBuf>,
 }
 
@@ -513,11 +521,12 @@ Use --list-rules to see every rule with its description and fixability.";
 #[derive(Args, Debug)]
 pub struct LintArgs {
     /// SQL files to lint (reads from stdin if none provided)
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub files: Vec<PathBuf>,
 
     /// Config file (default: solite-lint.toml in current/parent dirs,
     /// then ~/.config/solite/lint.toml)
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub config: Option<PathBuf>,
 
     /// Apply auto-fixes where available
@@ -571,6 +580,7 @@ pub enum SchemaFormat {
 #[derive(Args, Debug)]
 pub struct SchemaArgs {
     /// Database file to print CREATE statements for
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub database: PathBuf,
 
     /// Only show objects whose name (or owning table) matches this LIKE pattern, e.g. 'users' or 'idx_%'
@@ -584,9 +594,11 @@ pub struct SchemaArgs {
 #[derive(Args, Debug)]
 pub struct BackupArgs {
     /// Source database path
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: PathBuf,
 
     /// Destination backup file path
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub destination: PathBuf,
 
     /// Which attached database to back up
@@ -601,14 +613,15 @@ pub struct BackupArgs {
 #[derive(Args, Debug)]
 pub struct VacuumArgs {
     /// Database path to vacuum
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: PathBuf,
 
     /// Write vacuumed database to a new file instead of in-place
-    #[arg(long, alias = "output", short = 'o')]
+    #[arg(long, alias = "output", short = 'o', value_hint = clap::ValueHint::AnyPath)]
     pub into: Option<PathBuf>,
 
     /// Positional alias for --into
-    #[arg(hide = true)]
+    #[arg(hide = true, value_hint = clap::ValueHint::AnyPath)]
     pub destination: Option<PathBuf>,
 
     /// Overwrite the --into file if it already exists
@@ -648,6 +661,7 @@ pub enum StreamCommand {
 #[derive(Args, Debug)]
 pub struct StreamSyncArgs {
     /// Path to the database file
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: PathBuf,
     /// Replica URL (s3://bucket/prefix, file:///path, or bare path)
     pub url: String,
@@ -659,6 +673,7 @@ pub struct StreamRestoreArgs {
     /// Replica URL (s3://bucket/prefix, file:///path, or bare path)
     pub url: String,
     /// Destination database path
+    #[arg(value_hint = clap::ValueHint::AnyPath)]
     pub database: PathBuf,
 }
 
@@ -850,6 +865,51 @@ mod tests {
     fn database_path_extensions_case_insensitive() {
         for ok in ["a.DB", "a.Db", "a.SQLITE", "a.SQLite3"] {
             assert!(is_database_path(Path::new(ok)), "{ok}");
+        }
+    }
+
+    /// Look up the `ValueHint` of `arg_id` on subcommand `sub`.
+    fn value_hint(sub: &str, arg_id: &str) -> clap::ValueHint {
+        let cmd = command_for_completion();
+        let subcmd = cmd
+            .get_subcommands()
+            .find(|c| c.get_name() == sub)
+            .unwrap_or_else(|| panic!("subcommand `{sub}` not found"));
+        let hint = subcmd
+            .get_arguments()
+            .find(|a| a.get_id() == arg_id)
+            .unwrap_or_else(|| panic!("arg `{arg_id}` not found on `{sub}`"))
+            .get_value_hint();
+        hint
+    }
+
+    #[test]
+    fn path_args_carry_value_hints() {
+        use clap::ValueHint::{AnyPath, FilePath};
+        // Representative sample across the hint categories; pins them against
+        // accidental removal.
+        for (sub, arg, expected) in [
+            ("codegen", "file", FilePath),
+            ("codegen", "output", AnyPath),
+            ("run", "args", AnyPath),
+            ("run", "trace", AnyPath),
+            ("query", "database", AnyPath),
+            ("query", "load_extension", FilePath),
+            ("test", "files", FilePath),
+            ("schema", "database", FilePath),
+            ("backup", "destination", AnyPath),
+            ("vacuum", "database", AnyPath),
+        ] {
+            assert_eq!(value_hint(sub, arg), expected, "{sub}.{arg}");
+        }
+    }
+
+    #[test]
+    fn passthrough_args_are_unhinted() {
+        // sqlite3/diff/rsync forward raw argv to external binaries; they must
+        // not get solite's path completion.
+        for sub in ["sqlite3", "diff", "rsync"] {
+            assert_eq!(value_hint(sub, "args"), clap::ValueHint::Unknown, "{sub}");
         }
     }
 }

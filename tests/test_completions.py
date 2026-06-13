@@ -34,3 +34,13 @@ def test_completion_hook_lists_subcommands(solite_cli):
     candidates = _complete(solite_cli, ["solite", ""], 1)
     for expected in ["run", "repl", "test", "completions"]:
         assert expected in candidates, f"{expected} not in {candidates}"
+
+
+def test_path_args_complete_filenames(solite_cli, tmp_path):
+    # ValueHint annotations make the engine offer filesystem paths for the
+    # `run` positional. (Ticket 03 narrows these to .sql/.ipynb/.db.)
+    (tmp_path / "a.sql").write_text("SELECT 1;")
+    (tmp_path / "b.db").write_text("")
+    candidates = _complete(solite_cli, ["solite", "run", ""], 2, cwd=tmp_path)
+    assert "a.sql" in candidates, candidates
+    assert "b.db" in candidates, candidates

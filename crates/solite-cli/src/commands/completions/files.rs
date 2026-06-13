@@ -52,13 +52,6 @@ pub(crate) fn database_completer() -> ArgValueCompleter {
     ArgValueCompleter::new(database_candidates)
 }
 
-/// Complete mixed positionals (`execute` args, `query.statement`, `bench.sql`)
-/// that accept either a script or a database file. (`run` adds procedure names
-/// on top — see [`super::procedures`].)
-pub(crate) fn script_or_database_completer() -> ArgValueCompleter {
-    ArgValueCompleter::new(script_or_database_candidates)
-}
-
 /// Offer `:memory:` while it still matches what's been typed. Valid anywhere a
 /// database path is accepted.
 fn push_memory(candidates: &mut Vec<CompletionCandidate>, current: &OsStr) {
@@ -142,7 +135,8 @@ mod tests {
     #[test]
     fn union_completer_offers_scripts_and_dbs() {
         let dir = fixture();
-        let got = candidates_in(&script_or_database_completer(), dir.path(), "");
+        let completer = ArgValueCompleter::new(script_or_database_candidates);
+        let got = candidates_in(&completer, dir.path(), "");
         assert!(got.contains(&"a.sql".to_string()), "{got:?}");
         assert!(got.contains(&"c.db".to_string()), "{got:?}");
         assert!(!got.contains(&"d.txt".to_string()), "{got:?}");

@@ -79,6 +79,24 @@ def test_run_completes_procedure_names(solite_cli, tmp_path):
     assert "listUsers" in candidates, candidates
 
 
+def test_query_sql_arg_completes_tables_with_sibling_db(solite_cli, tmp_path):
+    # `solite query "SELECT * FROM us" app.db <TAB>` (cursor at end of the SQL
+    # arg) offers the `users` table from the sibling db, as a whole
+    # reconstructed string so the shell replaces the entire quoted word.
+    db = tmp_path / "app.db"
+    res = solite_cli(["execute", str(db), "CREATE TABLE users(id, name)"])
+    assert res.success, res.stderr
+    candidates = _complete(
+        solite_cli, ["solite", "query", "SELECT * FROM us", "app.db"], 2, cwd=tmp_path
+    )
+    assert "SELECT * FROM users" in candidates, candidates
+
+
+def test_query_sql_arg_completes_keywords_without_db(solite_cli, tmp_path):
+    candidates = _complete(solite_cli, ["solite", "query", "SEL"], 2, cwd=tmp_path)
+    assert any(c.lower() == "select" for c in candidates), candidates
+
+
 def test_codegen_file_completes_only_scripts(solite_cli, tmp_path):
     (tmp_path / "a.sql").write_text("SELECT 1;")
     (tmp_path / "b.ipynb").write_text("{}")

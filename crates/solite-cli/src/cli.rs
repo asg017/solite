@@ -3,10 +3,9 @@ use std::{env, path::PathBuf};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use solite_core::exporter::{BlobLimit, ExportFormat};
 
-use crate::commands::completions::files::{
-    database_completer, script_or_database_completer, sql_script_completer,
-};
+use crate::commands::completions::files::{database_completer, sql_script_completer};
 use crate::commands::completions::procedures::run_args_completer;
+use crate::commands::completions::sql::{script_database_or_sql_completer, sql_completer};
 
 /// Build the `clap::Command` for the dynamic completion engine.
 ///
@@ -65,7 +64,7 @@ pub struct RunArgs {
     pub args: Vec<String>,
 
     /// Execute SQL/dot commands from the given string (instead of a .sql file)
-    #[arg(long, short = 'c')]
+    #[arg(long, short = 'c', add = sql_completer())]
     pub command: Option<String>,
 
     /// Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file`
@@ -162,7 +161,7 @@ pub struct QueryArgs {
     /// SQL to run (read-only; use `solite execute` for writes), a path
     /// to a .sql file containing it, or `-` to read SQL from stdin
     /// (also the default when stdin is piped)
-    #[arg(value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
+    #[arg(value_hint = clap::ValueHint::AnyPath, add = script_database_or_sql_completer())]
     pub statement: Option<String>,
 
     /// Database file or ssh:// URL (with --allow-ssh). Omit for in-memory
@@ -219,7 +218,7 @@ statements run against an in-memory database.";
 pub struct ExecuteArgs {
     /// SQL statement (.sql file, or `-` for stdin) and optional database
     /// path, in any order; classified by extension, then by existence
-    #[arg(num_args = 0..=2, value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
+    #[arg(num_args = 0..=2, value_hint = clap::ValueHint::AnyPath, add = script_database_or_sql_completer())]
     pub args: Vec<String>,
 
     /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
@@ -285,7 +284,7 @@ dot command.";
 #[derive(Args, Debug)]
 pub struct BenchArgs {
     /// SQL statements (or .sql file paths) to benchmark
-    #[arg(required = true, value_hint = clap::ValueHint::AnyPath, add = script_or_database_completer())]
+    #[arg(required = true, value_hint = clap::ValueHint::AnyPath, add = script_database_or_sql_completer())]
     pub sql: Vec<String>,
 
     /// Database(s) to bench against: give once to share across all SQL

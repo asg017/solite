@@ -52,6 +52,7 @@ pub mod lint;
 pub mod lsp;
 pub mod sqlite3;
 pub mod dbhash;
+pub mod dbtotxt;
 pub mod diff;
 pub mod rsync;
 pub mod schema;

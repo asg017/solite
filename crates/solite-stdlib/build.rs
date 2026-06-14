@@ -313,6 +313,24 @@ fn main() {
     }
     dbhash_build.compile("dbhash");
 
+    // Compile dbtotxt.c with main() renamed so we can call it from Rust.
+    // dbtotxt reads the database file's raw bytes and links no sqlite3
+    // symbols; the include path is harmless. No sqlite3_stdio, so the plain
+    // main -> dbtotxt_main rename works on every platform.
+    let dbtotxt_c = sqlite_dir.join("tool/dbtotxt.c");
+    println!("cargo:rerun-if-changed={}", dbtotxt_c.display());
+    let mut dbtotxt_build = cc::Build::new();
+    dbtotxt_build
+        .file(&dbtotxt_c)
+        .include(&amalgamation_dir)
+        .opt_level(c_opt_level)
+        .define("main", Some("dbtotxt_main"))
+        .warnings(false);
+    if !cfg!(target_os = "windows") {
+        dbtotxt_build.static_flag(true);
+    }
+    dbtotxt_build.compile("dbtotxt");
+
     // Link libedit (macOS system editline) or readline for the sqlite3 shell.
     // On Windows, the shell works without readline/editline.
     if cfg!(target_os = "macos") {

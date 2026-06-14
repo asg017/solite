@@ -593,6 +593,14 @@ pub struct DbhashArgs {
     pub args: Vec<String>,
 }
 
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct DbtotxtArgs {
+    /// Arguments passed directly to dbtotxt
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SchemaFormat {
     /// Raw CREATE statements, one per object, replayable into a new database
@@ -804,6 +812,10 @@ pub enum Commands {
     #[command(name = "sqlite3-dbhash")]
     Dbhash(DbhashArgs),
 
+    /// Render a database file as hex/ASCII text for bug reports
+    #[command(name = "sqlite3-dbtotxt")]
+    Dbtotxt(DbtotxtArgs),
+
     /// Print the schema of a database
     Schema(SchemaArgs),
 
@@ -866,6 +878,7 @@ Compatibility:
   sqlite3-diff     Output SQL to transform one database into another
   sqlite3-rsync    Efficiently replicate a SQLite database to a remote machine
   sqlite3-dbhash   Hash the content of a database, ignoring its representation
+  sqlite3-dbtotxt  Render a database file as hex/ASCII text for bug reports
 
 Shell:
   completions      Print the shell completion registration script
@@ -963,7 +976,13 @@ mod tests {
     fn passthrough_args_are_unhinted() {
         // sqlite3/diff/rsync forward raw argv to external binaries; they must
         // not get solite's path completion.
-        for sub in ["sqlite3", "sqlite3-diff", "sqlite3-rsync", "sqlite3-dbhash"] {
+        for sub in [
+            "sqlite3",
+            "sqlite3-diff",
+            "sqlite3-rsync",
+            "sqlite3-dbhash",
+            "sqlite3-dbtotxt",
+        ] {
             assert_eq!(value_hint(sub, "args"), clap::ValueHint::Unknown, "{sub}");
         }
     }

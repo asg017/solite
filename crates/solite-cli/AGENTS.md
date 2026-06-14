@@ -26,8 +26,8 @@ The `Commands` enum defines all subcommands:
 | `lint` | | SQL linter | `commands/lint.rs` |
 | `lsp` | | Language Server Protocol server | `commands/lsp.rs` |
 | `sqlite3` | | Pass-through to sqlite3 shell | `commands/sqlite3.rs` |
-| `diff` | | Pass-through to sqldiff | `commands/diff.rs` |
-| `rsync` | | Pass-through to sqlite3_rsync | `commands/rsync.rs` |
+| `sqlite3-diff` | | Pass-through to sqldiff | `commands/diff.rs` |
+| `sqlite3-rsync` | | Pass-through to sqlite3_rsync | `commands/rsync.rs` |
 | `schema` | | Print database schema | `commands/schema.rs` |
 | `backup` | | SQLite backup API wrapper | `commands/backup.rs` |
 | `vacuum` | | VACUUM / VACUUM INTO | `commands/vacuum.rs` |
@@ -134,7 +134,7 @@ Thin wrappers around `solite_fmt` and `solite_analyzer` crates respectively. Bot
 
 Delegates to `solite_lsp::run_server()` on a tokio runtime. Communicates via stdio.
 
-### `sqlite3`, `diff`, `rsync`
+### `sqlite3`, `sqlite3-diff`, `sqlite3-rsync`
 
 Pass-through commands that forward all arguments to the bundled sqlite3, sqldiff, and sqlite3_rsync binaries.
 

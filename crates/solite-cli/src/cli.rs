@@ -785,9 +785,11 @@ pub enum Commands {
     Sqlite3(Sqlite3Args),
 
     /// Output SQL to transform one database into another
+    #[command(name = "sqlite3-diff")]
     Diff(DiffArgs),
 
     /// Efficiently replicate a SQLite database to a remote machine
+    #[command(name = "sqlite3-rsync")]
     Rsync(RsyncArgs),
 
     /// Print the schema of a database
@@ -849,8 +851,8 @@ SQL:
 {replication}
 Compatibility:
   sqlite3          Run the sqlite3 shell directly
-  diff             Output SQL to transform one database into another
-  rsync            Efficiently replicate a SQLite database to a remote machine
+  sqlite3-diff     Output SQL to transform one database into another
+  sqlite3-rsync    Efficiently replicate a SQLite database to a remote machine
 
 Shell:
   completions      Print the shell completion registration script
@@ -948,7 +950,7 @@ mod tests {
     fn passthrough_args_are_unhinted() {
         // sqlite3/diff/rsync forward raw argv to external binaries; they must
         // not get solite's path completion.
-        for sub in ["sqlite3", "diff", "rsync"] {
+        for sub in ["sqlite3", "sqlite3-diff", "sqlite3-rsync"] {
             assert_eq!(value_hint(sub, "args"), clap::ValueHint::Unknown, "{sub}");
         }
     }

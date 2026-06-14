@@ -28,23 +28,31 @@ pub(crate) mod sql;
 ///
 /// The output is meant to be sourced from the user's shell rc file, e.g.
 /// `source <(solite completions zsh)`. It registers a hook that sets
-/// `COMPLETE=<shell>` and re-invokes `solite` to produce candidates.
+/// `COMPLETE=<shell>` and re-invokes the binary to produce candidates.
+///
+/// The registered command name defaults to how the binary was invoked
+/// (`args_os()[0]`'s file stem), so a binary installed/renamed as `foo` is
+/// completed as `foo`. Use `--bin` to override when invoked through a wrapper
+/// or alias whose name differs from `argv[0]` (e.g. a `solite-dev` shim that
+/// `exec`s `target/debug/solite`).
 pub fn completions(args: CompletionsArgs) -> Result<(), ()> {
     // `clap_complete::Shell` (the value-enum used by the arg) renders to the
     // same canonical names the dynamic `EnvCompleter`s match on ("bash", "zsh",
     // …), so look the completer up by that name.
-    let name = args.shell.to_string();
+    let shell_name = args.shell.to_string();
     let shells = Shells::builtins();
-    let completer = shells.completer(&name).ok_or_else(|| {
-        eprintln!("Unsupported shell for completions: {name}");
+    let completer = shells.completer(&shell_name).ok_or_else(|| {
+        eprintln!("Unsupported shell for completions: {shell_name}");
     })?;
 
-    // The binary is always invoked as `solite`; use that for both the script
-    // identifier and the completer command.
-    let bin = "solite";
+    // Name to register completions for: the user-facing command. Drives the
+    // script identifier, what the shell binds completion to, and the binary the
+    // hook re-invokes at TAB time — so all three must be the command the user
+    // actually types.
+    let bin = args.bin.clone().unwrap_or_else(invoked_bin_name);
     let mut buf = Vec::new();
     completer
-        .write_registration("COMPLETE", bin, bin, bin, &mut buf)
+        .write_registration("COMPLETE", &bin, &bin, &bin, &mut buf)
         .map_err(|e| {
             eprintln!("Failed to generate completion script: {e}");
         })?;
@@ -52,6 +60,18 @@ pub fn completions(args: CompletionsArgs) -> Result<(), ()> {
     std::io::stdout().write_all(&buf).map_err(|e| {
         eprintln!("Failed to write completion script: {e}");
     })
+}
+
+/// The command name the binary was invoked as: the file stem of `argv[0]`,
+/// falling back to `solite`.
+fn invoked_bin_name() -> String {
+    std::env::args_os()
+        .next()
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_stem)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "solite".to_string())
 }
 
 #[cfg(test)]

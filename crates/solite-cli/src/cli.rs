@@ -715,6 +715,12 @@ pub struct CompletionsArgs {
     /// Shell to generate the registration script for
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+
+    /// Command name to register completions for (default: how the binary was
+    /// invoked). Set this when running through a wrapper/alias whose name
+    /// differs from the binary, e.g. `--bin solite-dev`.
+    #[arg(long)]
+    pub bin: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]

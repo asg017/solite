@@ -296,6 +296,23 @@ fn main() {
     }
     rsync_build.compile("sqlite3_rsync");
 
+    // Compile dbhash.c with main() renamed so we can call it from Rust.
+    // Single file linked against the amalgamation; no sqlite3_stdio, so the
+    // plain main -> dbhash_main rename works on every platform.
+    let dbhash_c = sqlite_dir.join("tool/dbhash.c");
+    println!("cargo:rerun-if-changed={}", dbhash_c.display());
+    let mut dbhash_build = cc::Build::new();
+    dbhash_build
+        .file(&dbhash_c)
+        .include(&amalgamation_dir)
+        .opt_level(c_opt_level)
+        .define("main", Some("dbhash_main"))
+        .warnings(false);
+    if !cfg!(target_os = "windows") {
+        dbhash_build.static_flag(true);
+    }
+    dbhash_build.compile("dbhash");
+
     // Link libedit (macOS system editline) or readline for the sqlite3 shell.
     // On Windows, the shell works without readline/editline.
     if cfg!(target_os = "macos") {

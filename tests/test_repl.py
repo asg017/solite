@@ -43,13 +43,13 @@ def test_help_topic(solite_cli):
 
 def test_db_file_opens_repl(solite_cli, tmp_path):
     # `solite <file>` opens a REPL for any recognized database extension
-    import shutil
-    from pathlib import Path
+    import sqlite3
 
-    src = Path(__file__).parent / "legislators.db"
     for ext in ["db", "sqlite", "sqlite3"]:
         db = tmp_path / f"data.{ext}"
-        shutil.copy(src, db)
+        con = sqlite3.connect(db)
+        con.execute("create table users(id integer, name text)")
+        con.close()
         result = solite_cli([str(db)], communicate=[b".tables\n"], kill=True)
         assert f'Connected to "{db}"' in result.stdout, ext
 

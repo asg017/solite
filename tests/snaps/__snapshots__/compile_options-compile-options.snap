@@ -1,11 +1,8 @@
 Source: ../compile_options.sql
-select * from pragma_compile_options order by 1;
+select * from pragma_compile_options where compile_options not like 'COMPILER=%' order by 1;
 ---
 {
 	 compile_options: 'ATOMIC_INTRINSICS=1'
-}
-{
-	 compile_options: 'COMPILER=clang-17.0.0'
 }
 {
 	 compile_options: 'DEFAULT_AUTOVACUUM'

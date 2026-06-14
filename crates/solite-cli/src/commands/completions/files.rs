@@ -83,7 +83,10 @@ mod tests {
                     .file_name()
                     .map(|f| {
                         let mut out = f.to_string_lossy().into_owned();
-                        if s.ends_with('/') {
+                        // PathCompleter marks directories with the platform
+                        // separator ('\\' on Windows); normalize to '/' so the
+                        // assertions below are portable.
+                        if s.ends_with('/') || s.ends_with(std::path::MAIN_SEPARATOR) {
                             out.push('/');
                         }
                         out

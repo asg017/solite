@@ -5,6 +5,7 @@ snapshot_kind: text
 ---
 - base64
 - clipboard_set
+- compress
 - csv_at
 - csv_line_number
 - csv_path
@@ -60,6 +61,8 @@ snapshot_kind: text
 - spellfix1_phonehash
 - spellfix1_scriptcode
 - spellfix1_translit
+- sqlar_compress
+- sqlar_uncompress
 - str_contains
 - str_lower
 - str_lower_ascii
@@ -77,6 +80,7 @@ snapshot_kind: text
 - ulid_version
 - ulid_with_datetime
 - ulid_with_prefix
+- uncompress
 - url_debug
 - url_escape
 - url_fragment
@@ -115,3 +119,5 @@ snapshot_kind: text
 - xsv_line_number
 - xsv_path
 - xsv_version
+- zipfile
+- zipfile_cds

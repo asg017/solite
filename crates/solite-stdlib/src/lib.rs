@@ -12,6 +12,10 @@ use sqlite_url::sqlite3_url_init;
 // extern is declared below. This import keeps the crate (and its compiled C
 // library) linked.
 use sqlite_vec as _;
+// Forces libz-sys (and thus its compiled zlib + link directives) to be linked.
+// The compress/sqlar/zipfile C extensions reference zlib symbols at link time;
+// without this import Rust drops the unreferenced crate and linking fails.
+use libz_sys as _;
 use sqlite_xsv::sqlite3_xsv_init;
 use std::ffi::{c_char, c_int, c_uint};
 
@@ -101,6 +105,33 @@ extern "C" {
         p_api: *const sqlite3_api_routines,
     ) -> c_int;
 }
+// zlib-backed extensions (see build.rs). compress: compress()/uncompress();
+// sqlar: sqlar_compress()/sqlar_uncompress(); zipfile: the zipfile vtab and
+// zipfile_cds(). All link against zlib (bundled via libz-sys).
+#[link(name = "compress")]
+extern "C" {
+    fn sqlite3_compress_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
+#[link(name = "sqlar")]
+extern "C" {
+    fn sqlite3_sqlar_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
+#[link(name = "zipfile")]
+extern "C" {
+    fn sqlite3_zipfile_init(
+        db: *mut sqlite3,
+        pz_err_msg: *mut *mut c_char,
+        p_api: *const sqlite3_api_routines,
+    ) -> c_int;
+}
 #[link(name = "usleep")]
 extern "C" {
     fn sqlite3_usleep_init(
@@ -126,9 +157,9 @@ extern "C" {
     ) -> c_int;
 }
 
-// Intentionally not bundled: base85 (niche encoding), sqlar/compress/zipfile
-// (need zlib), fastrand (unmaintained). A future "safe mode" build could also
-// exclude the filesystem/network/sleep extensions (http, fileio, usleep).
+// Intentionally not bundled: base85 (niche encoding), fastrand (unmaintained).
+// A future "safe mode" build could also exclude the filesystem/network/sleep
+// extensions (http, fileio, usleep).
 
 /// Returns early with the rc as `c_uint` if an init call failed. Accepts both
 /// the `c_int` C extensions and the `c_uint` sqlite-loadable entry points.
@@ -183,6 +214,9 @@ pub unsafe extern "C" fn solite_stdlib_init(
     try_init!(sqlite3_shathree_init(db, pz_err_msg, p_api));
     try_init!(sqlite3_spellfix_init(db, pz_err_msg, p_api));
     try_init!(sqlite3_uuid_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_compress_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_sqlar_init(db, pz_err_msg, p_api));
+    try_init!(sqlite3_zipfile_init(db, pz_err_msg, p_api));
     try_init!(sqlite3_usleep_init(db, pz_err_msg, p_api));
     0
 }

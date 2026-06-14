@@ -103,6 +103,7 @@ fn build_sqlite_extension(
     sqlite_dir: &Path,
     amalgamation_dir: &Path,
     c_opt_level: u32,
+    extra_includes: &[PathBuf],
 ) {
     let c_file = sqlite_dir.join(format!("ext/misc/{name}.c"));
     let mut build = cc::Build::new();
@@ -111,6 +112,9 @@ fn build_sqlite_extension(
         .opt_level(c_opt_level)
         .warnings(false)
         .include(amalgamation_dir);
+    for inc in extra_includes {
+        build.include(inc);
+    }
     if cfg!(feature = "static") {
         build.define("SQLITE_CORE", None);
     }
@@ -191,11 +195,6 @@ fn main() {
         "sha1",
         "shathree",
         "spellfix",
-        /* temporary, until windows zlib stuff is fixed
-        "compress",
-        "zipfile", //"stmt",
-        "sqlar",
-         */
         "series",
         "uuid",
         "completion",
@@ -203,7 +202,30 @@ fn main() {
     ];
 
     for ext in &extensions {
-        build_sqlite_extension(ext, &sqlite_dir, &amalgamation_dir, c_opt_level);
+        build_sqlite_extension(ext, &sqlite_dir, &amalgamation_dir, c_opt_level, &[]);
+    }
+
+    // zlib-backed extensions (compress/uncompress, sqlar_compress/uncompress,
+    // zipfile vtab). These #include <zlib.h>, so they need zlib's headers at
+    // compile time and the zlib library at link time. libz-sys (a dependency
+    // with the `static` feature) builds zlib from source on every platform —
+    // including Windows/MSVC, where the old pkg-config zlib probe failed — and
+    // exposes its header dir via DEP_Z_INCLUDE. libz-sys also emits the
+    // link directive for zlib itself; cargo orders it after these archives
+    // (which reference it), satisfying GNU ld's link-order requirement.
+    let zlib_include = PathBuf::from(
+        env::var("DEP_Z_INCLUDE")
+            .expect("DEP_Z_INCLUDE not set — is libz-sys a dependency of solite-stdlib?"),
+    );
+    let zlib_extensions = ["compress", "sqlar", "zipfile"];
+    for ext in &zlib_extensions {
+        build_sqlite_extension(
+            ext,
+            &sqlite_dir,
+            &amalgamation_dir,
+            c_opt_level,
+            std::slice::from_ref(&zlib_include),
+        );
     }
 
     let mut build = cc::Build::new();
@@ -376,7 +398,7 @@ fn main() {
     }
 
     // rerun-if-changed for extension source files
-    for ext in &extensions {
+    for ext in extensions.iter().chain(zlib_extensions.iter()) {
         println!(
             "cargo:rerun-if-changed={}",
             sqlite_dir.join(format!("ext/misc/{ext}.c")).display()

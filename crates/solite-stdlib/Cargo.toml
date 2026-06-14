@@ -16,6 +16,10 @@ sqlite-str = {git="https://github.com/asg017/sqlite-str.git", rev="5b41ba22ec4bb
 sqlite-vec = "0.1.6"
 # rm until windows build is fixed :(
 #sqlite-tg = "0.0.1-alpha.18"
+# zlib for the compress/sqlar/zipfile C extensions. The `static` feature
+# builds zlib from bundled source on every platform (incl. Windows/MSVC), so
+# we don't depend on a system zlib like the old pkg-config probe did.
+libz-sys = { version = "1.1", default-features = false, features = ["static"] }
 arboard = "3.4.1"
 #sqlite-fastrand = "0.2.1"
 

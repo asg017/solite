@@ -40,3 +40,4 @@ snapshot_kind: text
 - xsv_fields
 - xsv_reader
 - xsv_rows
+- zipfile

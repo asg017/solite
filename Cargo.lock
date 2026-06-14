@@ -4559,7 +4559,7 @@ version = "0.1.0"
 
 [[package]]
 name = "solite-cli"
-version = "0.0.1-alpha.36"
+version = "0.0.1-alpha.37"
 dependencies = [
  "ansi-to-html",
  "anyhow",

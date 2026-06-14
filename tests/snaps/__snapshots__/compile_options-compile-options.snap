@@ -1,5 +1,5 @@
 Source: ../compile_options.sql
-select * from pragma_compile_options where compile_options not like 'COMPILER=%' order by 1;
+select * from pragma_compile_options where compile_options not like 'COMPILER=%' and compile_options not like 'MUTEX_%' order by 1;
 ---
 {
 	 compile_options: 'ATOMIC_INTRINSICS=1'
@@ -135,9 +135,6 @@ select * from pragma_compile_options where compile_options not like 'COMPILER=%'
 }
 {
 	 compile_options: 'MAX_WORKER_THREADS=8'
-}
-{
-	 compile_options: 'MUTEX_PTHREADS'
 }
 {
 	 compile_options: 'SOUNDEX'

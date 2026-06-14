@@ -38,3 +38,4 @@ jobs:
         run: |
           cargo test
           uv run --project tests pytest -vv
+          cargo run --bin solite -- test tests/snaps/

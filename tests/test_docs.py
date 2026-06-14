@@ -191,7 +191,9 @@ def test_docs_inline_unicode_table_alignment(solite_cli, tmp_path):
     doc.write_text(
         "# Demo\n\n```sql\n"
         "SELECT 'héllo wörld' AS a UNION ALL SELECT 'plain ascii x';\n"
-        "```\n"
+        "```\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
     result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
@@ -219,7 +221,11 @@ def test_docs_inline_gfm_table_and_strikethrough(solite_cli, tmp_path):
     GFM handlers and hard-failed)."""
     doc = tmp_path / "doc.md"
     table = "| col | desc |\n|-----|------|\n| a   | ~~old~~ new |\n"
-    doc.write_text("# Demo\n\n" + table + "\n```sql\nSELECT 1 + 1;\n```\n")
+    doc.write_text(
+        "# Demo\n\n" + table + "\n```sql\nSELECT 1 + 1;\n```\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
     result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
     assert result.success, result.stderr
@@ -231,7 +237,11 @@ def test_docs_inline_frontmatter(solite_cli, tmp_path):
     """YAML frontmatter is preserved and does not crash serialization."""
     doc = tmp_path / "doc.md"
     fm = "---\ntitle: My Extension\n---\n"
-    doc.write_text(fm + "\n# Demo\n\n```sql\nSELECT 1 + 1;\n```\n")
+    doc.write_text(
+        fm + "\n# Demo\n\n```sql\nSELECT 1 + 1;\n```\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
     result = solite_cli(["docs", "inline", str(doc)], cwd=tmp_path)
     assert result.success, result.stderr

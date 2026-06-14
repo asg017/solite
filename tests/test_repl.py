@@ -1,4 +1,13 @@
 import re
+import sys
+
+import pytest
+
+# `\e` editor tests drive a POSIX `#!/bin/sh` script as $EDITOR, and the SIGINT
+# test delivers signal 2 to the child — neither works on Windows.
+skip_on_windows = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX shell / SIGINT-only behavior"
+)
 
 
 def redact_banner(text, replacement):
@@ -51,7 +60,10 @@ def test_db_file_opens_repl(solite_cli, tmp_path):
         con.execute("create table users(id integer, name text)")
         con.close()
         result = solite_cli([str(db)], communicate=[b".tables\n"], kill=True)
-        assert f'Connected to "{db}"' in result.stdout, ext
+        # The banner Debug-formats the path, which doubles backslashes on
+        # Windows; assert on the filename rather than the full path string.
+        assert "Connected to" in result.stdout, ext
+        assert db.name in result.stdout, ext
 
 
 def test_non_db_file_is_usage_error(solite_cli):
@@ -313,6 +325,7 @@ def _editor_script(tmp_path, body):
     return script
 
 
+@skip_on_windows
 def test_editor_command_executes_buffer(solite_cli, tmp_path):
     # \e runs $EDITOR on a scratch file; whatever it writes is executed
     script = _editor_script(
@@ -327,6 +340,7 @@ def test_editor_command_executes_buffer(solite_cli, tmp_path):
     assert "forty_two" in out
 
 
+@skip_on_windows
 def test_editor_command_preloads_last_input(solite_cli, tmp_path):
     # The scratch buffer is seeded with the most recently executed input
     side = tmp_path / "buffer-contents.txt"
@@ -342,6 +356,7 @@ def test_editor_command_preloads_last_input(solite_cli, tmp_path):
     assert "seeded-sql" in side.read_text()
 
 
+@skip_on_windows
 def test_editor_command_records_sql_in_history(solite_cli, tmp_path):
     # History records the SQL that ran, not the literal \e
     script = _editor_script(
@@ -358,6 +373,7 @@ def test_editor_command_records_sql_in_history(solite_cli, tmp_path):
     assert "\\e" not in history
 
 
+@skip_on_windows
 def test_editor_command_abort_executes_nothing(solite_cli, tmp_path):
     # A non-zero editor exit aborts without executing
     script = _editor_script(tmp_path, 'printf "select 7 as aborted;" > "$1"; exit 1')
@@ -397,6 +413,7 @@ def test_history_solite_history_override(solite_cli, tmp_path):
     assert not (home / ".solite_history").exists()
 
 
+@skip_on_windows
 def test_sigint_interrupts_query_without_exiting():
     """SIGINT (Ctrl-C) during a long-running query aborts the statement but
     keeps the REPL alive; a subsequent statement still executes."""

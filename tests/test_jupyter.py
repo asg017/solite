@@ -1,4 +1,7 @@
+import sys
 import time
+
+import pytest
 
 from conftest import ensure_sync, escape_ansi_codes
 
@@ -240,6 +243,10 @@ def test_shutdown(solite_kernel):
     assert not manager.is_alive()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="signal-mode kernel interrupt is not delivered on Windows",
+)
 def test_interrupt(solite_kernel):
     """Interrupting a long-running query errors the cell but keeps the kernel alive."""
     client = solite_kernel.client

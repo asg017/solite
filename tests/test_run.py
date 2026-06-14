@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 
 
@@ -132,7 +133,10 @@ def test_run_param_file_missing(solite_cli, snapshot, tmp_path):
         cwd=tmp_path,
     )
     assert not result.success
-    assert result.stderr == snapshot
+    # The underlying OS error text differs by platform (e.g. Windows says "The
+    # system cannot find the file specified."); normalize it to the code.
+    stderr = re.sub(r"[^\n]*\(os error (\d+)\)", r"<os error \1>", result.stderr)
+    assert stderr == snapshot
 
 
 def test_run_error(solite_cli, snapshot, tmp_path):

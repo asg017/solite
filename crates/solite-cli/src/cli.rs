@@ -601,6 +601,14 @@ pub struct DbtotxtArgs {
     pub args: Vec<String>,
 }
 
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct ExpertArgs {
+    /// Arguments passed directly to sqlite3_expert
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SchemaFormat {
     /// Raw CREATE statements, one per object, replayable into a new database
@@ -816,6 +824,10 @@ pub enum Commands {
     #[command(name = "sqlite3-dbtotxt")]
     Dbtotxt(DbtotxtArgs),
 
+    /// Recommend indexes for a SQL workload
+    #[command(name = "sqlite3-expert")]
+    Expert(ExpertArgs),
+
     /// Print the schema of a database
     Schema(SchemaArgs),
 
@@ -879,6 +891,7 @@ Compatibility:
   sqlite3-rsync    Efficiently replicate a SQLite database to a remote machine
   sqlite3-dbhash   Hash the content of a database, ignoring its representation
   sqlite3-dbtotxt  Render a database file as hex/ASCII text for bug reports
+  sqlite3-expert   Recommend indexes for a SQL workload
 
 Shell:
   completions      Print the shell completion registration script
@@ -982,6 +995,7 @@ mod tests {
             "sqlite3-rsync",
             "sqlite3-dbhash",
             "sqlite3-dbtotxt",
+            "sqlite3-expert",
         ] {
             assert_eq!(value_hint(sub, "args"), clap::ValueHint::Unknown, "{sub}");
         }

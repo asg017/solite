@@ -54,6 +54,7 @@ pub mod sqlite3;
 pub mod dbhash;
 pub mod dbtotxt;
 pub mod diff;
+pub mod expert;
 pub mod rsync;
 pub mod schema;
 pub mod backup;

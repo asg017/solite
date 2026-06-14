@@ -331,6 +331,34 @@ fn main() {
     }
     dbtotxt_build.compile("dbtotxt");
 
+    // Compile sqlite3_expert: expert.c provides main() (renamed), and
+    // sqlite3expert.c is the analysis engine. Both link against the
+    // amalgamation; ext/expert is on the include path for sqlite3expert.h.
+    // No sqlite3_stdio, so the plain main -> sqlite3_expert_main rename works
+    // on every platform.
+    let expert_dir = sqlite_dir.join("ext/expert");
+    let expert_c = expert_dir.join("expert.c");
+    let sqlite3expert_c = expert_dir.join("sqlite3expert.c");
+    println!("cargo:rerun-if-changed={}", expert_c.display());
+    println!("cargo:rerun-if-changed={}", sqlite3expert_c.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        expert_dir.join("sqlite3expert.h").display()
+    );
+    let mut expert_build = cc::Build::new();
+    expert_build
+        .file(&expert_c)
+        .file(&sqlite3expert_c)
+        .include(&amalgamation_dir)
+        .include(&expert_dir)
+        .opt_level(c_opt_level)
+        .define("main", Some("sqlite3_expert_main"))
+        .warnings(false);
+    if !cfg!(target_os = "windows") {
+        expert_build.static_flag(true);
+    }
+    expert_build.compile("sqlite3_expert");
+
     // Link libedit (macOS system editline) or readline for the sqlite3 shell.
     // On Windows, the shell works without readline/editline.
     if cfg!(target_os = "macos") {

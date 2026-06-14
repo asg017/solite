@@ -43,6 +43,7 @@
     sqlite3-rsync    Efficiently replicate a SQLite database to a remote machine
     sqlite3-dbhash   Hash the content of a database, ignoring its representation
     sqlite3-dbtotxt  Render a database file as hex/ASCII text for bug reports
+    sqlite3-expert   Recommend indexes for a SQL workload
   
   Shell:
     completions      Print the shell completion registration script

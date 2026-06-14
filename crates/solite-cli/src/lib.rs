@@ -84,6 +84,7 @@ pub fn run_main() {
         cli::Commands::Rsync(args) => commands::rsync::rsync(args.args),
         cli::Commands::Dbhash(args) => commands::dbhash::dbhash(args.args),
         cli::Commands::Dbtotxt(args) => commands::dbtotxt::dbtotxt(args.args),
+        cli::Commands::Expert(args) => commands::expert::expert(args.args),
         cli::Commands::Schema(args) => {
             commands::schema::schema(args.database, args.pattern, args.format, allow_ssh)
         }

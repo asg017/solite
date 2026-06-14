@@ -1128,6 +1128,11 @@ select not_exist();",
         }
     }
 
+    // Double quotes are illegal in Windows filenames, so the file this test
+    // needs can't exist there; the scenario it guards against can only arise on
+    // platforms that permit a quote in a path. The escaping itself is covered
+    // platform-independently by sqlite::quote_identifier's own unit tests.
+    #[cfg(not(windows))]
     #[test]
     fn test_replacement_scan_escapes_quoted_csv_path() {
         // A CSV path containing a double quote (legal on disk) must be escaped

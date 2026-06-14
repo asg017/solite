@@ -1,9 +1,6 @@
 Source: ../compile_options.sql
-select * from pragma_compile_options where compile_options not like 'COMPILER=%' and compile_options not like 'MUTEX_%' order by 1;
+select * from pragma_compile_options where compile_options not like 'COMPILER=%' and compile_options not like 'MUTEX_%' and compile_options not like 'ATOMIC_INTRINSICS=%' order by 1;
 ---
-{
-	 compile_options: 'ATOMIC_INTRINSICS=1'
-}
 {
 	 compile_options: 'DEFAULT_AUTOVACUUM'
 }

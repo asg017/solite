@@ -299,6 +299,13 @@ fn main() {
     // Compile dbhash.c with main() renamed so we can call it from Rust.
     // Single file linked against the amalgamation; no sqlite3_stdio, so the
     // plain main -> dbhash_main rename works on every platform.
+    //
+    // dbhash.c declares a non-static global singleton named `g`, and so does
+    // sqldiff.c. Both tools link into the single solite binary, so rename this
+    // one to dbhash_g to avoid a duplicate-symbol link error (lld on Linux is
+    // strict about this; macOS's linker is not). Every `g` token in this
+    // translation unit is the singleton or a `g.field` access, so the rename
+    // is consistent and self-contained.
     let dbhash_c = sqlite_dir.join("tool/dbhash.c");
     println!("cargo:rerun-if-changed={}", dbhash_c.display());
     let mut dbhash_build = cc::Build::new();
@@ -307,6 +314,7 @@ fn main() {
         .include(&amalgamation_dir)
         .opt_level(c_opt_level)
         .define("main", Some("dbhash_main"))
+        .define("g", Some("dbhash_g"))
         .warnings(false);
     if !cfg!(target_os = "windows") {
         dbhash_build.static_flag(true);

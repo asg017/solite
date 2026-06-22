@@ -838,3 +838,110 @@ fn test_select_column_filtering_with_from() {
 
     assert!(!completions.iter().any(|c| c.label == "value"), "Should NOT suggest value (already used)");
 }
+
+// ========================================
+// FTS5 hidden column completions
+// ========================================
+//
+// FTS5 tables expose hidden columns (`rank` and a column named after the
+// table) that are legal to reference but excluded from `*` expansion. They
+// should be offered as completion candidates while not appearing in `*`.
+
+/// Build a schema mirroring an introspected FTS5 table `fts_items(title, body)`
+/// with hidden columns `rank` and `fts_items`.
+fn fts5_schema() -> Schema {
+    let mut schema = Schema::new();
+    schema.add_table_with_hidden(
+        "fts_items",
+        vec!["title".to_string(), "body".to_string()],
+        vec!["rank".to_string(), "fts_items".to_string()],
+        true,
+    );
+    schema
+}
+
+#[test]
+fn test_fts5_hidden_columns_suggested_in_select() {
+    let schema = fts5_schema();
+    let ctx = CompletionContext::SelectColumns {
+        tables: vec![TableRef::new("fts_items".to_string(), None)],
+        ctes: vec![],
+    };
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
+
+    // Visible columns are suggested.
+    assert!(completions.iter().any(|c| c.label == "title"));
+    assert!(completions.iter().any(|c| c.label == "body"));
+    // Hidden columns are also offered as candidates.
+    assert!(
+        completions.iter().any(|c| c.label == "rank"),
+        "expected `rank` to be suggested, got: {:?}",
+        completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "fts_items"),
+        "expected table-named hidden column to be suggested, got: {:?}",
+        completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_fts5_hidden_columns_in_where() {
+    let schema = fts5_schema();
+    let ctx = CompletionContext::WhereClause {
+        tables: vec![TableRef::new("fts_items".to_string(), None)],
+        ctes: vec![],
+    };
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
+
+    assert!(completions.iter().any(|c| c.label == "rank"));
+    assert!(completions.iter().any(|c| c.label == "fts_items"));
+}
+
+#[test]
+fn test_fts5_hidden_columns_suggested_after_qualifier() {
+    let schema = fts5_schema();
+    let ctx = CompletionContext::QualifiedColumn {
+        qualifier: "f".to_string(),
+        tables: vec![TableRef::new(
+            "fts_items".to_string(),
+            Some("f".to_string()),
+        )],
+        ctes: vec![],
+    };
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
+
+    assert!(completions.iter().any(|c| c.label == "title"));
+    assert!(completions.iter().any(|c| c.label == "rank"));
+    assert!(completions.iter().any(|c| c.label == "fts_items"));
+}
+
+#[test]
+fn test_fts5_hidden_columns_excluded_from_star_expansion() {
+    // `WITH x AS (SELECT * FROM fts_items) SELECT <cursor> FROM x`: the CTE's
+    // `*` expands to the visible columns only, so hidden columns must NOT leak
+    // through as columns of `x`.
+    let schema = fts5_schema();
+    let ctx = CompletionContext::SelectColumns {
+        tables: vec![TableRef::new("x".to_string(), None)],
+        ctes: vec![crate::context::CteRef {
+            name: "x".to_string(),
+            columns: vec![],
+            star_sources: vec!["fts_items".to_string()],
+        }],
+    };
+    let completions = get_completions_for_context(&ctx, Some(&schema), None);
+
+    assert!(completions.iter().any(|c| c.label == "title"));
+    assert!(completions.iter().any(|c| c.label == "body"));
+    assert!(
+        !completions.iter().any(|c| c.label == "rank"),
+        "`rank` must not appear via `*` expansion, got: {:?}",
+        completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+    assert!(
+        !completions.iter().any(|c| c.label == "fts_items"),
+        "table-named hidden column must not appear via `*` expansion, got: {:?}",
+        completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+}

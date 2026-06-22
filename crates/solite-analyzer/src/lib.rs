@@ -44,10 +44,18 @@ impl Diagnostic {
 /// Table info tracked during analysis
 #[derive(Debug, Clone, Default)]
 pub struct TableInfo {
-    /// Column names (lowercase for case-insensitive lookup)
+    /// Column names (lowercase for case-insensitive lookup). Includes hidden
+    /// columns so that references to them resolve without a "column not found"
+    /// diagnostic.
     pub columns: HashSet<String>,
-    /// Original column names (preserves case for display in autocomplete)
+    /// Original column names (preserves case for display in autocomplete).
+    /// Hidden columns are intentionally excluded — they are not part of `*`
+    /// expansion and live in `hidden_columns` instead.
     pub original_columns: Vec<String>,
+    /// Hidden columns (preserves case). These are legal to reference and are
+    /// offered in completions, but are not expanded by `*` (e.g. FTS5's `rank`
+    /// and the table-named MATCH column).
+    pub hidden_columns: Vec<String>,
     /// Whether this table was created with WITHOUT ROWID option
     pub without_rowid: bool,
     /// Table-level documentation from `--!` comments
@@ -159,9 +167,41 @@ impl Schema {
             TableInfo {
                 columns: col_set,
                 original_columns: columns,
+                hidden_columns: Vec::new(),
                 without_rowid,
                 doc,
                 column_docs,
+            },
+        );
+        self.original_names.insert(table_key, name);
+    }
+
+    /// Add a table that also has hidden columns (e.g. an FTS5 virtual table
+    /// with its `rank` and table-named MATCH columns). Hidden columns are
+    /// legal to reference and are surfaced in completions, but are excluded
+    /// from `*` expansion (`original_columns`).
+    pub fn add_table_with_hidden(
+        &mut self,
+        name: impl Into<String>,
+        columns: Vec<String>,
+        hidden_columns: Vec<String>,
+        without_rowid: bool,
+    ) {
+        let name = name.into();
+        let table_key = name.to_lowercase();
+        let mut col_set = HashSet::new();
+        for col in columns.iter().chain(hidden_columns.iter()) {
+            col_set.insert(col.to_lowercase());
+        }
+        self.tables.insert(
+            table_key.clone(),
+            TableInfo {
+                columns: col_set,
+                original_columns: columns,
+                hidden_columns,
+                without_rowid,
+                doc: None,
+                column_docs: HashMap::new(),
             },
         );
         self.original_names.insert(table_key, name);
@@ -180,6 +220,7 @@ impl Schema {
             TableInfo {
                 columns: col_set,
                 original_columns: columns.clone(),
+                hidden_columns: Vec::new(),
                 without_rowid: true, // views don't have rowid
                 doc: None,
                 column_docs: HashMap::new(),
@@ -263,6 +304,7 @@ impl Schema {
                 TableInfo {
                     columns: col_set,
                     original_columns: view.columns.clone(),
+                    hidden_columns: Vec::new(),
                     without_rowid: true,
                     doc: None,
                     column_docs: HashMap::new(),
@@ -314,6 +356,14 @@ impl Schema {
     pub fn columns_for_table(&self, table_name: &str) -> Option<&[String]> {
         let key = table_name.to_lowercase();
         self.tables.get(&key).map(|t| t.original_columns.as_slice())
+    }
+
+    /// Returns the hidden column names for a table (case-insensitive lookup).
+    /// Hidden columns are legal to reference and offered in completions, but
+    /// are not part of `*` expansion (e.g. FTS5 `rank`).
+    pub fn hidden_columns_for_table(&self, table_name: &str) -> Option<&[String]> {
+        let key = table_name.to_lowercase();
+        self.tables.get(&key).map(|t| t.hidden_columns.as_slice())
     }
 
     /// Returns column names for a table, including "rowid" if the table doesn't have WITHOUT ROWID
@@ -532,6 +582,7 @@ pub fn build_schema(program: &Program) -> Schema {
                     TableInfo {
                         columns,
                         original_columns,
+                        hidden_columns: Vec::new(),
                         without_rowid,
                         doc: create.doc.clone(),
                         column_docs,
@@ -599,6 +650,7 @@ pub fn build_schema(program: &Program) -> Schema {
                     TableInfo {
                         columns: HashSet::new(),
                         original_columns: Vec::new(),
+                        hidden_columns: Vec::new(),
                         without_rowid: true,
                         doc: None,
                         column_docs: HashMap::new(),
@@ -722,6 +774,7 @@ fn build_table_info_from_cte(cte: &CommonTableExpr) -> TableInfo {
     TableInfo {
         columns,
         original_columns,
+        hidden_columns: Vec::new(),
         without_rowid: true, // CTEs don't have rowid
         doc: None,           // CTEs don't have docs
         column_docs: HashMap::new(),
@@ -1242,6 +1295,7 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
                 tables.insert(table_key, TableInfo {
                     columns: seen_columns,
                     original_columns,
+                    hidden_columns: Vec::new(),
                     without_rowid,
                     doc: create.doc.clone(),
                     column_docs,
@@ -1254,6 +1308,7 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
                 tables.insert(table_key, TableInfo {
                     columns: HashSet::new(),
                     original_columns: Vec::new(),
+                    hidden_columns: Vec::new(),
                     without_rowid: true,
                     doc: None,
                     column_docs: HashMap::new(),
@@ -1271,6 +1326,7 @@ pub fn analyze_with_schema(program: &Program, external_schema: Option<&Schema>) 
                 tables.insert(table_key, TableInfo {
                     columns: col_set,
                     original_columns: columns,
+                    hidden_columns: Vec::new(),
                     without_rowid: true,
                     doc: None,
                     column_docs: HashMap::new(),
@@ -2086,6 +2142,7 @@ mod tests {
                 TableInfo {
                     columns: col_set,
                     original_columns,
+                    hidden_columns: Vec::new(),
                     without_rowid: false,
                     doc: None,
                     column_docs: HashMap::new(),

@@ -127,11 +127,20 @@ fn introspected_to_analyzer_schema(
 
     // Add tables
     for table in introspected.tables.values() {
-        schema.add_table(
-            &table.name,
-            table.original_columns.clone(),
-            table.without_rowid,
-        );
+        if table.hidden_columns.is_empty() {
+            schema.add_table(
+                &table.name,
+                table.original_columns.clone(),
+                table.without_rowid,
+            );
+        } else {
+            schema.add_table_with_hidden(
+                &table.name,
+                table.original_columns.clone(),
+                table.hidden_columns.clone(),
+                table.without_rowid,
+            );
+        }
     }
 
     // Add views
@@ -812,6 +821,71 @@ mod tests {
 
             let trg = schema.get_trigger("trg_audit").unwrap();
             assert_eq!(trg.event, solite_analyzer::TriggerEventType::Insert);
+
+            let _ = fs::remove_file(&path);
+        }
+
+        // End-to-end reproduction of the false "column not found" lint that
+        // VS Code surfaces for FTS5 hidden columns. The full pipeline runs:
+        // introspect a real FTS5 table -> analyzer Schema -> analyze SQL that
+        // references the legal hidden columns `rank` and the table-named
+        // column. SQLite accepts `SELECT rank, fts_items FROM fts_items WHERE
+        // fts_items MATCH ...`, so the analyzer must not flag those columns.
+        // These tests assert the desired behavior and fail until the hidden
+        // columns are known to the schema.
+        #[test]
+        fn test_fts5_rank_column_does_not_trigger_lint() {
+            let path = temp_db_path("fts5_rank_lint");
+            let conn = create_test_db(&path);
+            conn.execute_batch("CREATE VIRTUAL TABLE fts_items USING fts5(title, body);")
+                .unwrap();
+            drop(conn);
+
+            let schema = FileSchemaProvider::new(&path).load().unwrap();
+
+            let sql = "SELECT rank FROM fts_items WHERE fts_items MATCH 'x' ORDER BY rank;";
+            let doc = crate::Document::parse(sql, false);
+            let program = doc.program.expect("sql should parse");
+            let diagnostics = solite_analyzer::analyze_with_schema(&program, Some(&schema));
+
+            let column_errors: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| d.message.contains("does not exist"))
+                .collect();
+            assert!(
+                column_errors.is_empty(),
+                "FTS5 `rank` column should be valid, got false positives: {:?}",
+                column_errors
+            );
+
+            let _ = fs::remove_file(&path);
+        }
+
+        #[test]
+        fn test_fts5_table_named_column_does_not_trigger_lint() {
+            let path = temp_db_path("fts5_named_lint");
+            let conn = create_test_db(&path);
+            conn.execute_batch("CREATE VIRTUAL TABLE fts_items USING fts5(title, body);")
+                .unwrap();
+            drop(conn);
+
+            let schema = FileSchemaProvider::new(&path).load().unwrap();
+
+            // The table-named column is referenced in the MATCH expression.
+            let sql = "SELECT title FROM fts_items WHERE fts_items MATCH 'hello';";
+            let doc = crate::Document::parse(sql, false);
+            let program = doc.program.expect("sql should parse");
+            let diagnostics = solite_analyzer::analyze_with_schema(&program, Some(&schema));
+
+            let column_errors: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| d.message.contains("does not exist"))
+                .collect();
+            assert!(
+                column_errors.is_empty(),
+                "FTS5 table-named column should be valid, got false positives: {:?}",
+                column_errors
+            );
 
             let _ = fs::remove_file(&path);
         }

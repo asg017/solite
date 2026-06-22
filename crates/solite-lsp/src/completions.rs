@@ -454,7 +454,12 @@ pub fn get_completions_extended(
                 };
 
                 cols
-                    .map(|cols| {
+                    .map(|mut cols| {
+                        // Hidden columns (e.g. FTS5 `rank`) are legal to
+                        // reference and so are offered after `qualifier.`.
+                        if let Some(hidden) = schema.hidden_columns_for_table(table_name) {
+                            cols.extend(hidden.iter().cloned());
+                        }
                         cols.into_iter()
                             .map(|col| CompletionItem {
                                 label: col.clone(),
@@ -708,11 +713,27 @@ fn suggest_columns_from_tables(
                     let qualifier = table_ref.qualifier().to_string();
                     column_sources.entry(col).or_default().push(qualifier);
                 }
+                // Hidden columns (e.g. FTS5 `rank`) are valid to reference but
+                // excluded from `*`, so offer them as completion candidates.
+                if let Some(hidden) = schema.hidden_columns_for_table(&table_ref.name) {
+                    for col in hidden {
+                        let qualifier = table_ref.qualifier().to_string();
+                        column_sources.entry(col.clone()).or_default().push(qualifier);
+                    }
+                }
             }
         } else if let Some(cols) = schema.columns_for_table_with_rowid(&table_ref.name) {
             for col in cols {
                 let qualifier = table_ref.qualifier().to_string();
                 column_sources.entry(col).or_default().push(qualifier);
+            }
+            // Hidden columns (e.g. FTS5 `rank`) are valid to reference but
+            // excluded from `*`, so offer them as completion candidates.
+            if let Some(hidden) = schema.hidden_columns_for_table(&table_ref.name) {
+                for col in hidden {
+                    let qualifier = table_ref.qualifier().to_string();
+                    column_sources.entry(col.clone()).or_default().push(qualifier);
+                }
             }
         }
     }

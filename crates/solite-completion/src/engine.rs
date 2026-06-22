@@ -367,7 +367,10 @@ pub fn get_completions(
                 };
 
                 cols
-                    .map(|cols| {
+                    .map(|mut cols| {
+                        // Hidden columns (e.g. FTS5 `rank`) are legal to
+                        // reference and so are offered after `qualifier.`.
+                        cols.extend(schema.hidden_columns_for_table(table_name));
                         cols.into_iter()
                             .map(|col| {
                                 let mut item = CompletionItem::new(&col, CompletionKind::Column);
@@ -530,9 +533,21 @@ fn suggest_columns_from_tables(
                     let qualifier = table_ref.qualifier().to_string();
                     column_sources.entry(col).or_default().push(qualifier);
                 }
+                // Hidden columns (e.g. FTS5 `rank`) are valid to reference but
+                // excluded from `*`, so offer them as completion candidates.
+                for col in schema.hidden_columns_for_table(&table_ref.name) {
+                    let qualifier = table_ref.qualifier().to_string();
+                    column_sources.entry(col).or_default().push(qualifier);
+                }
             }
         } else if let Some(cols) = schema.columns_for_table_with_rowid(&table_ref.name) {
             for col in cols {
+                let qualifier = table_ref.qualifier().to_string();
+                column_sources.entry(col).or_default().push(qualifier);
+            }
+            // Hidden columns (e.g. FTS5 `rank`) are valid to reference but
+            // excluded from `*`, so offer them as completion candidates.
+            for col in schema.hidden_columns_for_table(&table_ref.name) {
                 let qualifier = table_ref.qualifier().to_string();
                 column_sources.entry(col).or_default().push(qualifier);
             }

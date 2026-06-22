@@ -88,6 +88,29 @@ impl SchemaSource for LiveSchemaSource<'_> {
         Some(columns)
     }
 
+    fn hidden_columns_for_table(&self, table: &str) -> Vec<String> {
+        // PRAGMA table_xinfo exposes hidden columns (hidden = 1), e.g. an FTS5
+        // table's `rank` and table-named MATCH columns. They are legal to
+        // reference and so are offered as completion candidates.
+        let sql = format!("PRAGMA table_xinfo({})", quote_identifier(table));
+        let mut stmt = match self.runtime.connection.prepare(&sql) {
+            Ok((_, Some(stmt))) => stmt,
+            _ => return vec![],
+        };
+
+        let mut columns = vec![];
+        while let Ok(Some(row)) = stmt.next() {
+            // table_xinfo returns: cid, name, type, notnull, dflt_value, pk, hidden
+            let hidden = row.get(6).map(|v| v.as_int64()).unwrap_or(0);
+            if hidden == 1 {
+                if let Some(name_col) = row.get(1) {
+                    columns.push(name_col.as_str().to_string());
+                }
+            }
+        }
+        columns
+    }
+
     fn index_names(&self) -> Vec<String> {
         let mut stmt = match self.runtime.connection.prepare(
             "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY name",

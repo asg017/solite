@@ -41,7 +41,7 @@ fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-/// Per-column metadata extracted from `PRAGMA table_info`.
+/// Per-column metadata extracted from `PRAGMA table_xinfo`.
 #[derive(Debug, Clone, Default)]
 pub struct ColumnInfo {
     /// Original column name (preserves case).
@@ -52,6 +52,10 @@ pub struct ColumnInfo {
     pub not_null: bool,
     /// Whether the column is part of the primary key.
     pub primary_key: bool,
+    /// Whether the column is hidden from `*` expansion (e.g. an FTS5 `rank`
+    /// or table-named MATCH column). Corresponds to `hidden = 1` in
+    /// `PRAGMA table_xinfo`; generated columns (`hidden` 2/3) are not flagged.
+    pub hidden: bool,
 }
 
 /// Table information extracted from introspection.
@@ -59,10 +63,15 @@ pub struct ColumnInfo {
 pub struct TableInfo {
     /// Original table name (preserves case).
     pub name: String,
-    /// Column names (lowercase for case-insensitive lookup).
+    /// Column names (lowercase for case-insensitive lookup). Includes hidden
+    /// columns so references to them resolve.
     pub columns: HashSet<String>,
-    /// Original column names (preserves case for display).
+    /// Original column names (preserves case for display). Excludes hidden
+    /// columns, which are not part of `*` expansion.
     pub original_columns: Vec<String>,
+    /// Hidden column names (preserves case), e.g. an FTS5 `rank` or
+    /// table-named MATCH column. Legal to reference but excluded from `*`.
+    pub hidden_columns: Vec<String>,
     /// Per-column metadata, in declaration order (parallel to
     /// `original_columns`).
     pub column_details: Vec<ColumnInfo>,
@@ -355,36 +364,51 @@ fn introspect_table(
 ) -> Result<TableInfo, IntrospectError> {
     let mut columns = HashSet::new();
     let mut original_columns = Vec::new();
+    let mut hidden_columns = Vec::new();
     let mut column_details = Vec::new();
 
-    // Use PRAGMA table_info to get column details:
-    // (cid, name, type, notnull, dflt_value, pk)
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", quote_ident(table_name)))?;
+    // Use PRAGMA table_xinfo (rather than table_info) so that hidden columns
+    // are visible to us: (cid, name, type, notnull, dflt_value, pk, hidden).
+    // The `hidden` flag is 0 = normal, 1 = hidden (e.g. FTS5 `rank` and the
+    // table-named MATCH column), 2/3 = generated (VIRTUAL/STORED). Generated
+    // columns are not reported by table_info, so to preserve prior behavior we
+    // skip them here too; only `hidden = 1` columns are tracked separately.
+    let mut stmt = conn.prepare(&format!("PRAGMA table_xinfo({})", quote_ident(table_name)))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(1)?,  // name
             row.get::<_, String>(2)?,  // declared type ("" when omitted)
             row.get::<_, bool>(3)?,    // notnull
             row.get::<_, i64>(5)?,     // pk (1-based position in PK, 0 = not part)
+            row.get::<_, i64>(6)?,     // hidden (0 normal, 1 hidden, 2/3 generated)
         ))
     })?;
 
     for col_result in rows {
-        let (col_name, col_type, not_null, pk) = col_result?;
+        let (col_name, col_type, not_null, pk, hidden) = col_result?;
+        // Skip generated columns (hidden 2/3) to match PRAGMA table_info.
+        if hidden == 2 || hidden == 3 {
+            continue;
+        }
         let col_lower = col_name.to_lowercase();
         if !columns.contains(&col_lower) {
             columns.insert(col_lower);
-            original_columns.push(col_name.clone());
-            column_details.push(ColumnInfo {
-                name: col_name,
-                type_name: if col_type.is_empty() {
-                    None
-                } else {
-                    Some(col_type)
-                },
-                not_null,
-                primary_key: pk > 0,
-            });
+            if hidden == 1 {
+                hidden_columns.push(col_name);
+            } else {
+                original_columns.push(col_name.clone());
+                column_details.push(ColumnInfo {
+                    name: col_name,
+                    type_name: if col_type.is_empty() {
+                        None
+                    } else {
+                        Some(col_type)
+                    },
+                    not_null,
+                    primary_key: pk > 0,
+                    hidden: false,
+                });
+            }
         }
     }
 
@@ -403,6 +427,7 @@ fn introspect_table(
         name: table_name.to_string(),
         columns,
         original_columns,
+        hidden_columns,
         column_details,
         without_rowid,
         sql: sql.map(String::from),
@@ -1114,5 +1139,60 @@ mod tests {
 
         // Should find at least some built-in modules
         assert!(!vtabs.is_empty(), "Should discover at least some virtual tables");
+    }
+
+    // ------------------------------------------------------------------
+    // FTS5 hidden columns (root cause of the false "column not found" lint)
+    //
+    // An FTS5 table exposes two hidden columns that are legal to reference
+    // in SQL: `rank` and a column named after the table itself (used with
+    // MATCH). `PRAGMA table_info` does NOT report these hidden columns, so
+    // introspection currently drops them. Downstream, the analyzer then
+    // flags `SELECT rank, fts_items FROM fts_items` as referencing unknown
+    // columns. These tests assert the *desired* behavior and therefore fail
+    // until introspection includes the hidden columns.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_introspect_fts5_includes_rank_hidden_column() {
+        let conn = create_test_db();
+        conn.execute_batch("CREATE VIRTUAL TABLE fts_items USING fts5(title, body);")
+            .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+        let table = schema
+            .get_table("fts_items")
+            .expect("fts_items should be introspected");
+
+        // Visible content columns are present.
+        assert!(table.columns.contains("title"));
+        assert!(table.columns.contains("body"));
+
+        // Hidden `rank` column is legal to reference but currently missing.
+        assert!(
+            table.columns.contains("rank"),
+            "FTS5 hidden column `rank` should be known to the schema, got: {:?}",
+            table.original_columns
+        );
+    }
+
+    #[test]
+    fn test_introspect_fts5_includes_table_named_hidden_column() {
+        let conn = create_test_db();
+        conn.execute_batch("CREATE VIRTUAL TABLE fts_items USING fts5(title, body);")
+            .unwrap();
+
+        let schema = introspect_connection(&conn).unwrap();
+        let table = schema
+            .get_table("fts_items")
+            .expect("fts_items should be introspected");
+
+        // The table-named hidden column (used with MATCH) is legal to
+        // reference but currently missing.
+        assert!(
+            table.columns.contains("fts_items"),
+            "FTS5 table-named hidden column should be known to the schema, got: {:?}",
+            table.original_columns
+        );
     }
 }

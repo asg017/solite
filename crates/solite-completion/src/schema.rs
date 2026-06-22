@@ -23,6 +23,14 @@ pub trait SchemaSource {
         self.columns_for_table(table)
     }
 
+    /// Get hidden column names for a table (e.g. FTS5 `rank` and the
+    /// table-named MATCH column). These are legal to reference and are offered
+    /// as completion candidates, but are not part of `*` expansion. Returns an
+    /// empty vec when there are none.
+    fn hidden_columns_for_table(&self, _table: &str) -> Vec<String> {
+        vec![]
+    }
+
     /// Check if a table exists in the schema.
     fn has_table(&self, name: &str) -> bool {
         self.table_names().iter().any(|t| t.eq_ignore_ascii_case(name))
@@ -77,6 +85,12 @@ impl SchemaSource for solite_analyzer::Schema {
 
     fn columns_for_table_with_rowid(&self, table: &str) -> Option<Vec<String>> {
         solite_analyzer::Schema::columns_for_table_with_rowid(self, table)
+    }
+
+    fn hidden_columns_for_table(&self, table: &str) -> Vec<String> {
+        solite_analyzer::Schema::hidden_columns_for_table(self, table)
+            .map(|cols| cols.to_vec())
+            .unwrap_or_default()
     }
 
     fn index_names(&self) -> Vec<String> {

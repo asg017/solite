@@ -72,7 +72,7 @@ pub fn run_main() {
         cli::Commands::Repl(args) => commands::repl::repl(args),
         cli::Commands::Test(cmd) => commands::test::test(cmd),
         cli::Commands::Jupyter(cmd) => commands::jupyter::jupyter(cmd),
-        cli::Commands::Docs(cmd) => commands::docs::docs(cmd),
+        cli::Commands::Docgen(args) => commands::docgen::docgen(args),
         cli::Commands::Bench(args) => commands::bench::bench(args),
         cli::Commands::Codegen(cmd) => commands::codegen::codegen(cmd),
         cli::Commands::Tui(cmd) => commands::tui::tui(cmd),

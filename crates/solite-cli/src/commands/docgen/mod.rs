@@ -50,7 +50,7 @@ use std::io::{stdout, Write};
 use markdown::mdast::{Code, Heading, Node};
 use solite_core::Runtime;
 
-use crate::cli::{DocsCommand, DocsInlineArgs, DocsNamespace};
+use crate::cli::DocgenArgs;
 use crate::commands::test::snap::copy;
 use crate::errors::{report_error, report_error_string};
 
@@ -62,7 +62,7 @@ use value::display_value;
 
 /// Errors that can occur during documentation generation.
 #[derive(Debug)]
-pub enum DocsError {
+pub enum DocgenError {
     /// Failed to attach database.
     DatabaseAttach(String),
     /// Failed to execute SQL.
@@ -87,16 +87,16 @@ pub enum DocsError {
     AlreadyReported,
 }
 
-impl std::fmt::Display for DocsError {
+impl std::fmt::Display for DocgenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DocsError::DatabaseAttach(msg) => write!(f, "Failed to attach database: {}", msg),
-            DocsError::SqlError(msg) => write!(f, "SQL error: {}", msg),
-            DocsError::ExtensionLoad(msg) => write!(f, "Failed to load extension: {}", msg),
-            DocsError::FileRead(msg) => write!(f, "Failed to read file: {}", msg),
-            DocsError::MarkdownParse(msg) => write!(f, "Failed to parse markdown: {}", msg),
-            DocsError::FileWrite(msg) => write!(f, "Failed to write file: {}", msg),
-            DocsError::Undocumented { functions, modules } => {
+            DocgenError::DatabaseAttach(msg) => write!(f, "Failed to attach database: {}", msg),
+            DocgenError::SqlError(msg) => write!(f, "SQL error: {}", msg),
+            DocgenError::ExtensionLoad(msg) => write!(f, "Failed to load extension: {}", msg),
+            DocgenError::FileRead(msg) => write!(f, "Failed to read file: {}", msg),
+            DocgenError::MarkdownParse(msg) => write!(f, "Failed to parse markdown: {}", msg),
+            DocgenError::FileWrite(msg) => write!(f, "Failed to write file: {}", msg),
+            DocgenError::Undocumented { functions, modules } => {
                 let mut first = true;
                 for (label, names) in [("functions", functions), ("modules", modules)] {
                     if names.is_empty() {
@@ -113,29 +113,29 @@ impl std::fmt::Display for DocsError {
                 }
                 Ok(())
             }
-            DocsError::ExpectedErrorSucceeded(stmt) => write!(
+            DocgenError::ExpectedErrorSucceeded(stmt) => write!(
                 f,
                 "Statement is expected to fail (`-- @expect-error` directive \
                  or trailing `-- error:` comment) but succeeded:\n{}",
                 stmt
             ),
-            DocsError::AlreadyReported => write!(f, "SQL error in code block"),
+            DocgenError::AlreadyReported => write!(f, "SQL error in code block"),
         }
     }
 }
 
-impl std::error::Error for DocsError {}
+impl std::error::Error for DocgenError {}
 
 /// Process inline documentation.
-fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
-    let rt = Runtime::new(None).map_err(|e| DocsError::SqlError(e.to_string()))?;
+fn inline(args: DocgenArgs) -> Result<(), DocgenError> {
+    let rt = Runtime::new(None).map_err(|e| DocgenError::SqlError(e.to_string()))?;
 
     // Attach in-memory database for tracking
     if let Err(e) = rt
         .connection
         .execute("ATTACH DATABASE ':memory:' AS solite_docs")
     {
-        return Err(DocsError::DatabaseAttach(e.message));
+        return Err(DocgenError::DatabaseAttach(e.message));
     }
 
     // Load extension if provided
@@ -145,13 +145,13 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
 
     // Read and parse markdown
     let docs_in = std::fs::read_to_string(&args.input)
-        .map_err(|e| DocsError::FileRead(format!("{}: {}", args.input.display(), e)))?;
+        .map_err(|e| DocgenError::FileRead(format!("{}: {}", args.input.display(), e)))?;
 
     let mut options = markdown::ParseOptions::gfm();
     options.constructs.frontmatter = true;
 
     let ast = markdown::to_mdast(&docs_in, &options)
-        .map_err(|e| DocsError::MarkdownParse(e.to_string()))?;
+        .map_err(|e| DocgenError::MarkdownParse(e.to_string()))?;
 
     // Walk the AST collecting span edits (code block results, heading
     // anchors) against the original source. Splicing by byte span instead
@@ -214,7 +214,7 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
     if !undocumented_funcs.is_empty() || !undocumented_modules.is_empty() {
         undocumented_funcs.sort();
         undocumented_modules.sort();
-        return Err(DocsError::Undocumented {
+        return Err(DocgenError::Undocumented {
             functions: undocumented_funcs,
             modules: undocumented_modules,
         });
@@ -224,34 +224,34 @@ fn inline(args: DocsInlineArgs) -> Result<(), DocsError> {
 }
 
 /// Set up extension tracking tables and load extension.
-fn setup_extension_tracking(rt: &Runtime, ext: &str) -> Result<(), DocsError> {
+fn setup_extension_tracking(rt: &Runtime, ext: &str) -> Result<(), DocgenError> {
     if let Err(e) = rt.connection.execute(BASE_FUNCTIONS_CREATE) {
-        return Err(DocsError::SqlError(format!(
+        return Err(DocgenError::SqlError(format!(
             "Failed to create base functions table: {}",
             e.message
         )));
     }
 
     if let Err(e) = rt.connection.execute(BASE_MODULES_CREATE) {
-        return Err(DocsError::SqlError(format!(
+        return Err(DocgenError::SqlError(format!(
             "Failed to create base modules table: {}",
             e.message
         )));
     }
 
     if let Err(e) = rt.connection.load_extension(ext, &None) {
-        return Err(DocsError::ExtensionLoad(format!("{}: {}", ext, e)));
+        return Err(DocgenError::ExtensionLoad(format!("{}: {}", ext, e)));
     }
 
     if let Err(e) = rt.connection.execute(LOADED_FUNCTIONS_CREATE) {
-        return Err(DocsError::SqlError(format!(
+        return Err(DocgenError::SqlError(format!(
             "Failed to create loaded functions table: {}",
             e.message
         )));
     }
 
     if let Err(e) = rt.connection.execute(LOADED_MODULES_CREATE) {
-        return Err(DocsError::SqlError(format!(
+        return Err(DocgenError::SqlError(format!(
             "Failed to create loaded modules table: {}",
             e.message
         )));
@@ -278,11 +278,11 @@ fn collect_edits(
     rt: &Runtime,
     node: &Node,
     src: &str,
-    args: &DocsInlineArgs,
+    args: &DocgenArgs,
     edits: &mut Vec<Edit>,
     documented: &mut Vec<String>,
     in_blockquote: bool,
-) -> Result<(), DocsError> {
+) -> Result<(), DocgenError> {
     match node {
         // Only ```sql blocks are executed — other languages (and untagged
         // blocks) are left untouched, as are blocks inside blockquotes
@@ -415,10 +415,10 @@ const EXPECT_ERROR_DIRECTIVE: &str = "-- @expect-error";
 fn process_code_block(
     rt: &Runtime,
     sql: &str,
-    args: &DocsInlineArgs,
+    args: &DocgenArgs,
     src: &str,
     block_offset: usize,
-) -> Result<String, DocsError> {
+) -> Result<String, DocgenError> {
     let mut new_value = String::new();
     let mut curr = sql;
     // Result text generated for the previous statement. When regenerating a
@@ -468,7 +468,7 @@ fn process_code_block(
                             // into a result example. (A genuine result can
                             // never impersonate the marker: strings render
                             // quoted, so no result line starts `-- error:`.)
-                            return Err(DocsError::ExpectedErrorSucceeded(
+                            return Err(DocgenError::ExpectedErrorSucceeded(
                                 text.trim().to_string(),
                             ));
                         }
@@ -501,7 +501,7 @@ fn process_code_block(
                                 &error,
                                 Some(error_caret_offset(&error, curr, curr_offset)),
                             );
-                            return Err(DocsError::AlreadyReported);
+                            return Err(DocgenError::AlreadyReported);
                         }
                     }
                 }
@@ -558,7 +558,7 @@ fn process_code_block(
                     Some(error_caret_offset(&error, curr, curr_offset)),
                 );
                 eprintln!("{}", error_msg);
-                return Err(DocsError::AlreadyReported);
+                return Err(DocgenError::AlreadyReported);
             }
         }
     }
@@ -726,12 +726,12 @@ fn strip_trailing_anchors(heading_src: &str) -> &str {
 
 /// Collect the first column of every row of a query as strings. Serves
 /// both the loaded-functions and loaded-modules tracking tables.
-fn query_names(rt: &Runtime, sql: &str) -> Result<Vec<String>, DocsError> {
+fn query_names(rt: &Runtime, sql: &str) -> Result<Vec<String>, DocgenError> {
     let mut stmt = match rt.connection.prepare(sql) {
         Ok((_, Some(stmt))) => stmt,
         Ok((_, None)) => return Ok(vec![]),
         Err(e) => {
-            return Err(DocsError::SqlError(format!(
+            return Err(DocgenError::SqlError(format!(
                 "Failed to query names ({}): {}",
                 sql, e.message
             )))
@@ -748,7 +748,7 @@ fn query_names(rt: &Runtime, sql: &str) -> Result<Vec<String>, DocsError> {
             }
             Ok(None) => break,
             Err(e) => {
-                return Err(DocsError::SqlError(format!(
+                return Err(DocgenError::SqlError(format!(
                     "Failed to read names ({}): {}",
                     sql, e.message
                 )))
@@ -760,7 +760,7 @@ fn query_names(rt: &Runtime, sql: &str) -> Result<Vec<String>, DocsError> {
 }
 
 /// Write output to file or stdout.
-fn write_output(args: &DocsInlineArgs, content: &str) -> Result<(), DocsError> {
+fn write_output(args: &DocgenArgs, content: &str) -> Result<(), DocgenError> {
     match &args.output {
         Some(output) => {
             let mut f = OpenOptions::new()
@@ -768,33 +768,31 @@ fn write_output(args: &DocsInlineArgs, content: &str) -> Result<(), DocsError> {
                 .truncate(true)
                 .write(true)
                 .open(output)
-                .map_err(|e| DocsError::FileWrite(format!("{}: {}", output.display(), e)))?;
+                .map_err(|e| DocgenError::FileWrite(format!("{}: {}", output.display(), e)))?;
 
             f.write_all(content.as_bytes())
-                .map_err(|e| DocsError::FileWrite(format!("{}: {}", output.display(), e)))?;
+                .map_err(|e| DocgenError::FileWrite(format!("{}: {}", output.display(), e)))?;
 
             println!("Wrote docs to {}", output.display());
         }
         None => {
             writeln!(stdout(), "{}", content)
-                .map_err(|e| DocsError::FileWrite(format!("stdout: {}", e)))?;
+                .map_err(|e| DocgenError::FileWrite(format!("stdout: {}", e)))?;
         }
     }
     Ok(())
 }
 
-/// Entry point for the docs command.
-pub(crate) fn docs(cmd: DocsNamespace) -> Result<(), ()> {
-    match cmd.command {
-        DocsCommand::Inline(args) => match inline(args) {
-            Ok(()) => Ok(()),
-            // Already printed (codespan report on stderr) — don't repeat it
-            Err(DocsError::AlreadyReported) => Err(()),
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                Err(())
-            }
-        },
+/// Entry point for the docgen command.
+pub(crate) fn docgen(args: DocgenArgs) -> Result<(), ()> {
+    match inline(args) {
+        Ok(()) => Ok(()),
+        // Already printed (codespan report on stderr) — don't repeat it
+        Err(DocgenError::AlreadyReported) => Err(()),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            Err(())
+        }
     }
 }
 
@@ -803,9 +801,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn run_block(sql: &str) -> Result<String, DocsError> {
+    fn run_block(sql: &str) -> Result<String, DocgenError> {
         let rt = Runtime::new(None).unwrap();
-        let args = DocsInlineArgs {
+        let args = DocgenArgs {
             input: PathBuf::from("test.md"),
             extension: None,
             output: None,
@@ -883,16 +881,16 @@ mod tests {
     #[test]
     fn test_expect_error_on_succeeding_statement_fails() {
         let err = run_block("-- @expect-error\nselect 1;").unwrap_err();
-        assert!(matches!(err, DocsError::ExpectedErrorSucceeded(_)));
+        assert!(matches!(err, DocgenError::ExpectedErrorSucceeded(_)));
         // rerun form: a stale `-- error:` marker on a now-succeeding statement
         let err = run_block("select 1;\n-- error: whatever").unwrap_err();
-        assert!(matches!(err, DocsError::ExpectedErrorSucceeded(_)));
+        assert!(matches!(err, DocgenError::ExpectedErrorSucceeded(_)));
     }
 
     #[test]
     fn test_error_without_marker_is_still_fatal() {
         let err = run_block("select * from missing;").unwrap_err();
-        assert!(matches!(err, DocsError::AlreadyReported));
+        assert!(matches!(err, DocgenError::AlreadyReported));
     }
 
     #[test]
@@ -968,7 +966,7 @@ mod tests {
 
     #[test]
     fn test_undocumented_functions_display_lists_each_once() {
-        let err = DocsError::Undocumented {
+        let err = DocgenError::Undocumented {
             functions: vec!["a".into(), "b".into()],
             modules: vec![],
         };
@@ -982,7 +980,7 @@ mod tests {
 
     #[test]
     fn test_undocumented_display_labels_functions_and_modules() {
-        let err = DocsError::Undocumented {
+        let err = DocgenError::Undocumented {
             functions: vec!["my_func".into()],
             modules: vec!["vtab_foo".into()],
         };
@@ -995,7 +993,7 @@ mod tests {
 
     #[test]
     fn test_undocumented_display_modules_only() {
-        let err = DocsError::Undocumented {
+        let err = DocgenError::Undocumented {
             functions: vec![],
             modules: vec!["vtab_foo".into()],
         };

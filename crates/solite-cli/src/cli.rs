@@ -447,20 +447,9 @@ pub struct JupyterUpArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct DocsNamespace {
-    #[command(subcommand)]
-    pub command: DocsCommand,
-}
-#[derive(Subcommand, Debug)]
-pub enum DocsCommand {
-    /// Execute SQL code blocks in a markdown file and inline their results
-    Inline(DocsInlineArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct DocsInlineArgs {
+pub struct DocgenArgs {
     /// Markdown file with ```sql code blocks to execute
-    // NOTE: docs input is markdown (.md), not .sql/.ipynb — the ticket's
+    // NOTE: docgen input is markdown (.md), not .sql/.ipynb — the ticket's
     // mapping listed it under the script completer, which would hide .md
     // files. Left as a plain FilePath hint so all files (incl. .md) complete.
     #[arg(value_hint = clap::ValueHint::FilePath)]
@@ -775,8 +764,8 @@ pub enum Commands {
     /// Manage the Solite Jupyter kernel
     Jupyter(JupyterNamespace),
 
-    /// Tooling for documenting SQLite extensions
-    Docs(DocsNamespace),
+    /// Execute SQL code blocks in a markdown file and inline their results
+    Docgen(DocgenArgs),
 
     /// Run benchmarks on SQL statements
     #[command(after_long_help = BENCH_AFTER_HELP)]
@@ -878,7 +867,7 @@ Tooling:
   test             Run SQL-based inline tests in a single file
   bench            Run benchmarks on SQL statements
   codegen          Generate a JSON IR from annotated SQL queries
-  docs             Tooling for documenting SQLite extensions
+  docgen           Execute SQL code blocks in a markdown file and inline their results
 
 SQL:
   format, fmt      Format SQL files

@@ -41,7 +41,7 @@ pub mod repl;
 pub mod run;
 pub mod query;
 pub mod exec;
-pub mod docs;
+pub mod docgen;
 pub mod bench;
 pub mod jupyter;
 pub mod test;

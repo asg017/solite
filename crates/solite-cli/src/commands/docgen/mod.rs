@@ -51,7 +51,7 @@ use markdown::mdast::{Code, Heading, Node};
 use solite_core::Runtime;
 
 use crate::cli::DocgenArgs;
-use crate::commands::test::snap::copy;
+use crate::commands::test::snap::{copy, print_diff};
 use crate::errors::{report_error, report_error_string};
 
 use sql::{
@@ -82,6 +82,8 @@ pub enum DocgenError {
     },
     /// A statement marked as expected-to-fail succeeded.
     ExpectedErrorSucceeded(String),
+    /// `--check` found the file out of date.
+    CheckFailed(String),
     /// Error already reported to stderr (e.g. a codespan report); the
     /// caller should not print it again.
     AlreadyReported,
@@ -113,6 +115,10 @@ impl std::fmt::Display for DocgenError {
                 }
                 Ok(())
             }
+            DocgenError::CheckFailed(path) => write!(
+                f,
+                "{path} is out of date; run `solite docgen {path} -o {path}` to update"
+            ),
             DocgenError::ExpectedErrorSucceeded(stmt) => write!(
                 f,
                 "Statement is expected to fail (`-- @expect-error` directive \
@@ -201,13 +207,20 @@ fn inline(args: DocgenArgs) -> Result<(), DocgenError> {
         .collect();
 
     // Apply edits back-to-front so earlier offsets stay valid
-    let mut out_md = docs_in;
+    let mut out_md = docs_in.clone();
     for edit in edits.iter().rev() {
         out_md.replace_range(edit.start..edit.end, &edit.replacement);
     }
 
-    // Write output
-    write_output(&args, &out_md)?;
+    if args.check {
+        // Verify instead of writing: CI mode for in-place-inlined docs
+        if out_md != docs_in {
+            print_diff(&docs_in, &out_md);
+            return Err(DocgenError::CheckFailed(args.input.display().to_string()));
+        }
+    } else {
+        write_output(&args, &out_md)?;
+    }
 
     // Report undocumented functions/modules; printing is left to the
     // Display impl so the list shows up exactly once
@@ -807,6 +820,7 @@ mod tests {
             input: PathBuf::from("test.md"),
             extension: None,
             output: None,
+            check: false,
         };
         process_code_block(&rt, sql, &args, sql, 0)
     }

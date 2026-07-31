@@ -521,3 +521,32 @@ def test_docgen_expect_error_directive(solite_cli, tmp_path):
     result = solite_cli(["docgen", str(doc), "--output", str(doc)], cwd=tmp_path)
     assert result.success, result.stderr
     assert doc.read_text() == first
+
+
+def test_docgen_check(solite_cli, tmp_path):
+    """--check verifies without writing: fails with a diff when inlining
+    would change the file, succeeds quietly once it's up to date."""
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Demo\n\n```sql\nSELECT 1 + 1;\n```\n")
+    stale = doc.read_text()
+
+    result = solite_cli(["docgen", str(doc), "--check"], cwd=tmp_path)
+    assert not result.success
+    assert "out of date" in result.stderr
+    assert doc.read_text() == stale  # --check must never write
+
+    result = solite_cli(["docgen", str(doc), "--output", str(doc)], cwd=tmp_path)
+    assert result.success, result.stderr
+
+    result = solite_cli(["docgen", str(doc), "--check"], cwd=tmp_path)
+    assert result.success, result.stderr
+
+
+def test_docgen_check_conflicts_with_output(solite_cli, tmp_path):
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Demo\n")
+    result = solite_cli(
+        ["docgen", str(doc), "--check", "--output", "out.md"], cwd=tmp_path
+    )
+    assert not result.success
+    assert "cannot be used with" in result.stderr

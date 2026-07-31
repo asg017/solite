@@ -463,6 +463,11 @@ pub struct DocgenArgs {
     /// Write the resulting markdown here instead of stdout
     #[arg(long, short = 'o', value_hint = clap::ValueHint::AnyPath)]
     pub output: Option<PathBuf>,
+
+    /// Verify the file is already up to date instead of writing: exit
+    /// nonzero (and print a diff) if inlining would change it
+    #[arg(long, conflicts_with = "output")]
+    pub check: bool,
 }
 
 #[derive(Args, Debug)]

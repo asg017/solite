@@ -591,7 +591,9 @@ fn format_results(
     let mut result_text = String::new();
     match results.len() {
         0 => result_text.push_str("-- No results\n"),
-        1 => {
+        // The bare `-- value` form is only for true single values; a
+        // single row with several columns still needs the full table
+        1 if columns.len() == 1 => {
             let value = display_value(&results[0][0]);
             if value.contains('\n') {
                 // A value containing a newline would break out of the
@@ -905,6 +907,25 @@ mod tests {
     fn test_error_without_marker_is_still_fatal() {
         let err = run_block("select * from missing;").unwrap_err();
         assert!(matches!(err, DocgenError::AlreadyReported));
+    }
+
+    #[test]
+    fn test_single_row_multi_column_renders_full_table() {
+        // regression: this used to inline only the first column (`-- 1`)
+        let out = run_block("select 1 as a, 2 as b;").unwrap();
+        assert_eq!(
+            out,
+            "select 1 as a, 2 as b;\n/*\n\
+             ┌───┬───┐\n│ a │ b │\n├───┼───┤\n│ 1 │ 2 │\n└───┴───┘\n*/"
+        );
+        // single row, single column keeps the bare `-- value` form
+        assert_eq!(run_block("select 1 as a;").unwrap(), "select 1 as a;\n-- 1");
+    }
+
+    #[test]
+    fn test_single_row_multi_column_rerun_is_byte_stable() {
+        let once = run_block("select 1 as a, 2 as b;\nselect 3;").unwrap();
+        assert_eq!(run_block(&once).unwrap(), once);
     }
 
     #[test]

@@ -10,6 +10,12 @@
 //! - Inline query results as comments or tables
 //! - Track extension functions and flag undocumented ones
 //! - Support for GFM (GitHub Flavored Markdown)
+//! - Intentional-error examples: a `-- @expect-error` line before a
+//!   statement marks it as expected to fail. The directive is stripped
+//!   from the output and the actual error message is inlined as an
+//!   `-- error: <message>` comment, which doubles as the marker on
+//!   reruns. A marked statement that *succeeds* is a hard failure, as is
+//!   (unchanged) an error on an unmarked statement.
 //!
 //! # Example
 //!
@@ -74,6 +80,8 @@ pub enum DocsError {
         functions: Vec<String>,
         modules: Vec<String>,
     },
+    /// A statement marked as expected-to-fail succeeded.
+    ExpectedErrorSucceeded(String),
     /// Error already reported to stderr (e.g. a codespan report); the
     /// caller should not print it again.
     AlreadyReported,
@@ -105,6 +113,12 @@ impl std::fmt::Display for DocsError {
                 }
                 Ok(())
             }
+            DocsError::ExpectedErrorSucceeded(stmt) => write!(
+                f,
+                "Statement is expected to fail (`-- @expect-error` directive \
+                 or trailing `-- error:` comment) but succeeded:\n{}",
+                stmt
+            ),
             DocsError::AlreadyReported => write!(f, "SQL error in code block"),
         }
     }
@@ -276,7 +290,17 @@ fn collect_edits(
             if !in_blockquote
                 && matches!(code.lang.as_deref(), Some("sql") | Some("sqlite")) =>
         {
-            let new_value = process_code_block(rt, &code.value, args)?;
+            // Absolute offset of the block's interior (first byte after the
+            // opening fence line), so SQL errors report file-accurate lines
+            let block_offset = code
+                .position
+                .as_ref()
+                .and_then(|pos| {
+                    let block = src.get(pos.start.offset..pos.end.offset)?;
+                    Some(pos.start.offset + block.find('\n')? + 1)
+                })
+                .unwrap_or(0);
+            let new_value = process_code_block(rt, &code.value, args, src, block_offset)?;
             if let Some(edit) = code_block_edit(code, src, &new_value) {
                 edits.push(edit);
             }
@@ -375,12 +399,25 @@ fn heading_anchor_edit(heading: &Heading, src: &str, function: &str) -> Option<E
     })
 }
 
+/// The prologue directive marking a statement as expected to fail. The
+/// directive is stripped from the output; the regenerated `-- error:`
+/// comment below the statement doubles as the marker on reruns, so
+/// inlining in place (`-o` onto the input) stays stable.
+const EXPECT_ERROR_DIRECTIVE: &str = "-- @expect-error";
+
 /// Process a SQL code block, executing queries and returning the new block
 /// contents with results inlined.
+///
+/// `src` is the full markdown source and `block_offset` the absolute byte
+/// offset of the block's interior, so error reports carry file-accurate
+/// positions. (For blocks indented inside list items the mapping drifts,
+/// since `code.value` has the indentation stripped.)
 fn process_code_block(
     rt: &Runtime,
     sql: &str,
     args: &DocsInlineArgs,
+    src: &str,
+    block_offset: usize,
 ) -> Result<String, DocsError> {
     let mut new_value = String::new();
     let mut curr = sql;
@@ -391,100 +428,82 @@ fn process_code_block(
     let mut last_result: Option<String> = None;
 
     loop {
+        let curr_offset = block_offset + (sql.len() - curr.len());
         match rt.prepare_with_parameters(curr) {
             Ok((rest, Some(mut stmt))) => {
                 let stmt_sql = stmt.sql();
-                let mut text = stmt_sql.trim_start();
-                if let Some(prev) = &last_result {
-                    let prev = prev.trim_end();
-                    while let Some(stripped) = text.strip_prefix(prev) {
-                        // Only strip on a line boundary, never mid-line
-                        if stripped.is_empty() || stripped.starts_with(['\n', '\r']) {
-                            text = stripped.trim_start();
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                new_value.push_str(text);
+                let text = strip_stale_result(stmt_sql.trim_start(), &last_result);
+                let (text, directive) = strip_expect_error_directive(text);
+                // An `-- error:` comment right after the statement is the
+                // previous run's regenerated output acting as the marker
+                let stale_error = rest
+                    .and_then(|offset| curr.get(offset..))
+                    .and_then(trailing_error_line);
+                let expect_error = directive || stale_error.is_some();
+
+                new_value.push_str(&text);
                 new_value.push('\n');
 
                 let columns = stmt.column_names().unwrap_or_default();
 
-                if columns.is_empty() {
-                    // No columns - just execute
-                    if let Err(e) = stmt.execute() {
-                        return Err(DocsError::SqlError(format!(
-                            "Execute failed: {}",
-                            e.message
-                        )));
-                    }
-                    last_result = None;
+                // Run the statement: result text on success (None for
+                // column-less statements), or the SQLite error
+                let outcome = if columns.is_empty() {
+                    stmt.execute().map(|_| None)
                 } else {
-                    // Has columns - collect results
                     let mut results: Vec<Vec<crate::commands::test::snap::ValueCopy>> = vec![];
                     loop {
                         match stmt.next() {
-                            Ok(Some(row)) => {
-                                let row = row.iter().map(copy).collect();
-                                results.push(row);
-                            }
-                            Ok(None) => break,
-                            Err(error) => {
-                                report_error(
-                                    args.input.to_string_lossy().as_ref(),
-                                    &stmt.sql(),
-                                    &error,
-                                    None,
-                                );
-                                return Err(DocsError::AlreadyReported);
-                            }
+                            Ok(Some(row)) => results.push(row.iter().map(copy).collect()),
+                            Ok(None) => break Ok(Some(format_results(&columns, &results))),
+                            Err(error) => break Err(error),
                         }
                     }
+                };
 
-                    // Format results; every branch ends with exactly one
-                    // newline so a following statement starts on its own
-                    // line instead of being swallowed into the comment
-                    let mut result_text = String::new();
-                    match results.len() {
-                        0 => result_text.push_str("-- No results\n"),
-                        1 => {
-                            let value = display_value(&results[0][0]);
-                            if value.contains('\n') {
-                                // A value containing a newline would break
-                                // out of the `-- ` comment, leaving raw SQL
-                                // fragments on unprefixed lines; prefix
-                                // every line to keep the block valid SQL
-                                for line in value.lines() {
-                                    result_text.push_str("-- ");
-                                    result_text.push_str(line);
-                                    result_text.push('\n');
-                                }
-                            } else {
-                                result_text.push_str(&format!("-- {}\n", value));
-                            }
+                match outcome {
+                    Ok(result_text) => {
+                        if expect_error {
+                            // A fixed error example must not silently flip
+                            // into a result example. (A genuine result can
+                            // never impersonate the marker: strings render
+                            // quoted, so no result line starts `-- error:`.)
+                            return Err(DocsError::ExpectedErrorSucceeded(
+                                text.trim().to_string(),
+                            ));
                         }
-                        _ => {
-                            let table = render_table(&columns, &results);
-                            if table.contains("*/") {
-                                // A cell containing `*/` would terminate the
-                                // block comment early; fall back to
-                                // line-comment prefixes to keep the block
-                                // valid SQL
-                                for line in table.lines() {
-                                    result_text.push_str("-- ");
-                                    result_text.push_str(line);
-                                    result_text.push('\n');
-                                }
-                            } else {
-                                result_text.push_str("/*\n");
-                                result_text.push_str(&table);
-                                result_text.push_str("*/\n");
+                        match result_text {
+                            Some(result_text) => {
+                                new_value.push_str(&result_text);
+                                last_result = Some(result_text);
                             }
+                            None => last_result = None,
                         }
                     }
-                    new_value.push_str(&result_text);
-                    last_result = Some(result_text);
+                    Err(error) => {
+                        if expect_error {
+                            // Regenerate like a result comment: the actual
+                            // message replaces whatever the marker said, so
+                            // drift shows up as a diff instead of a failure.
+                            // Strip the *stale* line from the next
+                            // statement's trivia (it differs from the fresh
+                            // one exactly when the message drifted)
+                            let line = format!("-- error: {}\n", error.message);
+                            new_value.push_str(&line);
+                            last_result = Some(match stale_error {
+                                Some(stale) => stale.to_string(),
+                                None => line,
+                            });
+                        } else {
+                            report_error(
+                                args.input.to_string_lossy().as_ref(),
+                                src,
+                                &error,
+                                Some(error_caret_offset(&error, curr, curr_offset)),
+                            );
+                            return Err(DocsError::AlreadyReported);
+                        }
+                    }
                 }
 
                 // Move to rest of SQL
@@ -501,11 +520,42 @@ fn process_code_block(
             }
             Ok((_, None)) => break,
             Err(error) => {
+                // The statement never prepared, so recover its span with the
+                // same scan-to-`;` heuristic the test runner uses
+                // (commands/test/parser.rs). A `;` inside a string literal
+                // can fool it, but the statement already failed to prepare,
+                // so a missed marker only means the block fails as it would
+                // have anyway.
+                let trivia_len = leading_trivia_len(curr);
+                let stmt_end = curr[trivia_len..].find(';').map(|idx| trivia_len + idx + 1);
+                let stmt_text = &curr[..stmt_end.unwrap_or(curr.len())];
+                let text = strip_stale_result(stmt_text.trim_start(), &last_result);
+                let (text, directive) = strip_expect_error_directive(text);
+                let stale_error = stmt_end
+                    .and_then(|end| curr.get(end..))
+                    .and_then(trailing_error_line);
+                if directive || stale_error.is_some() {
+                    new_value.push_str(text.trim_end());
+                    new_value.push('\n');
+                    let line = format!("-- error: {}\n", error.message);
+                    new_value.push_str(&line);
+                    last_result = Some(match stale_error {
+                        Some(stale) => stale.to_string(),
+                        None => line,
+                    });
+                    match stmt_end.and_then(|end| curr.get(end..)) {
+                        Some(remaining) => {
+                            curr = remaining;
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
                 let error_msg = report_error_string(
                     args.input.to_string_lossy().as_ref(),
-                    sql,
+                    src,
                     &error,
-                    None,
+                    Some(error_caret_offset(&error, curr, curr_offset)),
                 );
                 eprintln!("{}", error_msg);
                 return Err(DocsError::AlreadyReported);
@@ -516,6 +566,135 @@ fn process_code_block(
     // Drop the trailing newline so the closing fence sits directly under
     // the last line instead of after a blank line
     Ok(new_value.trim_end().to_string())
+}
+
+/// Format collected rows as the comment block inlined under a statement.
+/// Every branch ends with exactly one newline so a following statement
+/// starts on its own line instead of being swallowed into the comment.
+fn format_results(
+    columns: &[String],
+    results: &[Vec<crate::commands::test::snap::ValueCopy>],
+) -> String {
+    let mut result_text = String::new();
+    match results.len() {
+        0 => result_text.push_str("-- No results\n"),
+        1 => {
+            let value = display_value(&results[0][0]);
+            if value.contains('\n') {
+                // A value containing a newline would break out of the
+                // `-- ` comment, leaving raw SQL fragments on unprefixed
+                // lines; prefix every line to keep the block valid SQL
+                for line in value.lines() {
+                    result_text.push_str("-- ");
+                    result_text.push_str(line);
+                    result_text.push('\n');
+                }
+            } else {
+                result_text.push_str(&format!("-- {}\n", value));
+            }
+        }
+        _ => {
+            let table = render_table(columns, results);
+            if table.contains("*/") {
+                // A cell containing `*/` would terminate the block comment
+                // early; fall back to line-comment prefixes to keep the
+                // block valid SQL
+                for line in table.lines() {
+                    result_text.push_str("-- ");
+                    result_text.push_str(line);
+                    result_text.push('\n');
+                }
+            } else {
+                result_text.push_str("/*\n");
+                result_text.push_str(&table);
+                result_text.push_str("*/\n");
+            }
+        }
+    }
+    result_text
+}
+
+/// Strip the previous statement's regenerated result comment from the
+/// leading trivia of `text` (only on line boundaries, never mid-line).
+fn strip_stale_result<'a>(mut text: &'a str, last_result: &Option<String>) -> &'a str {
+    if let Some(prev) = last_result {
+        let prev = prev.trim_end();
+        while let Some(stripped) = text.strip_prefix(prev) {
+            if stripped.is_empty() || stripped.starts_with(['\n', '\r']) {
+                text = stripped.trim_start();
+            } else {
+                break;
+            }
+        }
+    }
+    text
+}
+
+/// Byte length of the leading trivia (whitespace, `--` line comments, and
+/// `/* ... */` block comments) at the start of `s`.
+fn leading_trivia_len(s: &str) -> usize {
+    let mut idx = 0;
+    loop {
+        let rest = &s[idx..];
+        idx += rest.len() - rest.trim_start().len();
+        let rest = &s[idx..];
+        if rest.starts_with("--") {
+            match rest.find('\n') {
+                Some(n) => idx += n + 1,
+                None => return s.len(),
+            }
+        } else if rest.starts_with("/*") {
+            match rest.find("*/") {
+                Some(n) => idx += n + 2,
+                None => return s.len(),
+            }
+        } else {
+            return idx;
+        }
+    }
+}
+
+/// Remove a `-- @expect-error` directive line from the leading trivia of
+/// `text`, returning the stripped text and whether it was present.
+fn strip_expect_error_directive(text: &str) -> (String, bool) {
+    let trivia_len = leading_trivia_len(text);
+    let mut out = String::with_capacity(text.len());
+    let mut found = false;
+    for line in text[..trivia_len].split_inclusive('\n') {
+        if !found && line.trim() == EXPECT_ERROR_DIRECTIVE {
+            found = true;
+        } else {
+            out.push_str(line);
+        }
+    }
+    if !found {
+        return (text.to_string(), false);
+    }
+    out.push_str(&text[trivia_len..]);
+    (out.trim_start().to_string(), true)
+}
+
+/// The first non-blank line after a statement, when it is an `-- error:`
+/// comment left by a previous run (the rerun form of the expected-failure
+/// marker).
+fn trailing_error_line(after: &str) -> Option<&str> {
+    let line = after.trim_start().lines().next()?.trim_end();
+    line.starts_with("-- error:").then_some(line)
+}
+
+/// Absolute caret offset for an error report: sqlite's own error offset is
+/// relative to `curr` and added by the diagnostic range builder, so pass
+/// just `curr`'s base; without one, point at the statement text past its
+/// leading trivia instead of at a comment line.
+fn error_caret_offset(
+    error: &solite_core::sqlite::SQLiteError,
+    curr: &str,
+    curr_offset: usize,
+) -> usize {
+    match error.offset {
+        Some(_) => curr_offset,
+        None => curr_offset + leading_trivia_len(curr),
+    }
 }
 
 /// Remove `{#anchor}` text (possibly several, possibly escaped as
@@ -622,6 +801,170 @@ pub(crate) fn docs(cmd: DocsNamespace) -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn run_block(sql: &str) -> Result<String, DocsError> {
+        let rt = Runtime::new(None).unwrap();
+        let args = DocsInlineArgs {
+            input: PathBuf::from("test.md"),
+            extension: None,
+            output: None,
+        };
+        process_code_block(&rt, sql, &args, sql, 0)
+    }
+
+    #[test]
+    fn test_expect_error_directive_inlines_prepare_error() {
+        let out = run_block("-- @expect-error\nselect * from missing;").unwrap();
+        assert_eq!(out, "select * from missing;\n-- error: no such table: missing");
+    }
+
+    #[test]
+    fn test_expect_error_directive_inlines_runtime_error() {
+        let out = run_block("-- @expect-error\nselect json_extract('x', '$.a');").unwrap();
+        assert_eq!(
+            out,
+            "select json_extract('x', '$.a');\n-- error: malformed JSON"
+        );
+    }
+
+    #[test]
+    fn test_expect_error_rerun_is_byte_stable() {
+        for src in [
+            "-- @expect-error\nselect * from missing;",
+            "-- @expect-error\nselect json_extract('x', '$.a');",
+            "-- @expect-error\nselect * from missing;\nselect 'after';",
+        ] {
+            let once = run_block(src).unwrap();
+            let twice = run_block(&once).unwrap();
+            assert_eq!(once, twice, "rerun not byte-stable for {src:?}");
+        }
+    }
+
+    #[test]
+    fn test_expect_error_execute_error_on_columnless_statement() {
+        let out = run_block(
+            "create table t(a int unique);\ninsert into t values (1);\n\
+             -- @expect-error\ninsert into t values (1);",
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "create table t(a int unique);\ninsert into t values (1);\n\
+             insert into t values (1);\n-- error: UNIQUE constraint failed: t.a"
+        );
+        assert_eq!(run_block(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn test_statements_after_expected_error_still_run() {
+        let out =
+            run_block("-- @expect-error\nselect * from missing;\nselect 'after';").unwrap();
+        assert_eq!(
+            out,
+            "select * from missing;\n-- error: no such table: missing\n\
+             select 'after';\n-- 'after'"
+        );
+    }
+
+    #[test]
+    fn test_stale_error_message_is_replaced_not_duplicated() {
+        let out = run_block(
+            "select * from missing;\n-- error: old message\nselect 'after';",
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "select * from missing;\n-- error: no such table: missing\n\
+             select 'after';\n-- 'after'"
+        );
+    }
+
+    #[test]
+    fn test_expect_error_on_succeeding_statement_fails() {
+        let err = run_block("-- @expect-error\nselect 1;").unwrap_err();
+        assert!(matches!(err, DocsError::ExpectedErrorSucceeded(_)));
+        // rerun form: a stale `-- error:` marker on a now-succeeding statement
+        let err = run_block("select 1;\n-- error: whatever").unwrap_err();
+        assert!(matches!(err, DocsError::ExpectedErrorSucceeded(_)));
+    }
+
+    #[test]
+    fn test_error_without_marker_is_still_fatal() {
+        let err = run_block("select * from missing;").unwrap_err();
+        assert!(matches!(err, DocsError::AlreadyReported));
+    }
+
+    #[test]
+    fn test_stale_result_comment_is_not_an_error_marker() {
+        // A regenerated *result* comment after a succeeding statement must
+        // not read as an expected-failure marker
+        let src = "select 1;\n-- 1\nselect 2;";
+        let out = run_block(src).unwrap();
+        assert_eq!(out, "select 1;\n-- 1\nselect 2;\n-- 2");
+    }
+
+    #[test]
+    fn test_consecutive_expect_error_statements() {
+        let out = run_block(
+            "-- @expect-error\nselect * from a_missing;\n\
+             -- @expect-error\nselect * from b_missing;",
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "select * from a_missing;\n-- error: no such table: a_missing\n\
+             select * from b_missing;\n-- error: no such table: b_missing"
+        );
+        assert_eq!(run_block(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn test_leading_trivia_len() {
+        assert_eq!(leading_trivia_len("select 1;"), 0);
+        assert_eq!(leading_trivia_len("  select 1;"), 2);
+        assert_eq!(leading_trivia_len("-- c\nselect 1;"), 5);
+        assert_eq!(leading_trivia_len("/* c */ select 1;"), 8);
+        assert_eq!(leading_trivia_len("\n-- a\n/* b */\n-- c\nx"), 19);
+        // unterminated trivia swallows the rest
+        assert_eq!(leading_trivia_len("-- only a comment"), 17);
+        assert_eq!(leading_trivia_len("/* unterminated"), 15);
+    }
+
+    #[test]
+    fn test_strip_expect_error_directive() {
+        // directive alone
+        assert_eq!(
+            strip_expect_error_directive("-- @expect-error\nselect 1;"),
+            ("select 1;".to_string(), true)
+        );
+        // directive between other leading comments
+        assert_eq!(
+            strip_expect_error_directive("-- a\n-- @expect-error\n-- b\nselect 1;"),
+            ("-- a\n-- b\nselect 1;".to_string(), true)
+        );
+        // not in leading trivia: untouched
+        assert_eq!(
+            strip_expect_error_directive("select 1;\n-- @expect-error"),
+            ("select 1;\n-- @expect-error".to_string(), false)
+        );
+        // similar comments don't match
+        assert_eq!(
+            strip_expect_error_directive("-- @expect-errors\nselect 1;").1,
+            false
+        );
+    }
+
+    #[test]
+    fn test_trailing_error_line() {
+        assert_eq!(
+            trailing_error_line("\n-- error: boom\nselect 1;"),
+            Some("-- error: boom")
+        );
+        assert_eq!(trailing_error_line("\n-- 1\nselect 1;"), None);
+        assert_eq!(trailing_error_line("\nselect 1;"), None);
+        assert_eq!(trailing_error_line(""), None);
+    }
 
     #[test]
     fn test_undocumented_functions_display_lists_each_once() {

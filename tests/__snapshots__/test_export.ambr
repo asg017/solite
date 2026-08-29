@@ -1,0 +1,87 @@
+# serializer version: 1
+# name: test_query_parquet_output_file[a.parquet rows]
+  list([
+    dict({
+      'atom': 1,
+      'fullkey': '$[0]',
+      'id': 1,
+      'key': 0,
+      'parent': None,
+      'path': '$',
+      'type': 'integer',
+      'value': 1,
+    }),
+    dict({
+      'atom': 2,
+      'fullkey': '$[1]',
+      'id': 3,
+      'key': 1,
+      'parent': None,
+      'path': '$',
+      'type': 'integer',
+      'value': 2,
+    }),
+    dict({
+      'atom': 3,
+      'fullkey': '$[2]',
+      'id': 5,
+      'key': 2,
+      'parent': None,
+      'path': '$',
+      'type': 'integer',
+      'value': 3,
+    }),
+    dict({
+      'atom': 4,
+      'fullkey': '$[3]',
+      'id': 7,
+      'key': 3,
+      'parent': None,
+      'path': '$',
+      'type': 'integer',
+      'value': 4,
+    }),
+  ])
+# ---
+# name: test_query_parquet_output_file[a.parquet schema]
+  '''
+  key: int64
+  value: int64
+  type: string
+  atom: int64
+  id: int64
+  parent: string
+  fullkey: string
+  path: string
+  '''
+# ---
+# name: test_query_parquet_types[types.parquet rows]
+  list([
+    dict({
+      'a': 1,
+      'b': 1.5,
+      'c': 'hello',
+      'd': b'\xde\xad\xbe\xef',
+      'e': True,
+      'j': '{"k":1}',
+    }),
+    dict({
+      'a': None,
+      'b': None,
+      'c': None,
+      'd': None,
+      'e': None,
+      'j': None,
+    }),
+  ])
+# ---
+# name: test_query_parquet_types[types.parquet schema]
+  '''
+  a: int64
+  b: double
+  c: string
+  d: binary
+  e: bool
+  j: string
+  '''
+# ---

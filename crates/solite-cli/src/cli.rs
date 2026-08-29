@@ -128,6 +128,9 @@ pub enum QueryFormat {
     Value,
     /// Copy results to the system clipboard
     Clipboard,
+    /// Apache Parquet (zstd-compressed; schema inferred from declared types and data)
+    #[cfg(feature = "parquet")]
+    Parquet,
 }
 
 impl From<QueryFormat> for ExportFormat {
@@ -139,6 +142,8 @@ impl From<QueryFormat> for ExportFormat {
             QueryFormat::Ndjson => ExportFormat::Ndjson,
             QueryFormat::Value => ExportFormat::Value,
             QueryFormat::Clipboard => ExportFormat::Clipboard,
+            #[cfg(feature = "parquet")]
+            QueryFormat::Parquet => ExportFormat::Parquet,
         }
     }
 }
@@ -148,6 +153,7 @@ Examples:
   solite query \"SELECT count(*) FROM users\" app.db
   solite query app.db report.sql -f json          # SQL from a file; order-agnostic
   solite query \"SELECT * FROM users\" app.db -o users.csv.gz
+  solite query \"SELECT * FROM users\" app.db -o report.parquet
   solite query \"SELECT * FROM 'data.csv' LIMIT 5\" # query a CSV/TSV file directly
   solite query \"SELECT name FROM users WHERE id = $id\" app.db -p id 42
   solite q \"SELECT 1\"                             # 'q' alias, in-memory database
@@ -169,7 +175,8 @@ pub struct QueryArgs {
     pub database: Option<PathBuf>,
 
     /// Write results to a file; format inferred from extension
-    /// (.csv, .tsv, .json, .ndjson; .gz/.zst compression supported)
+    /// (.csv, .tsv, .json, .ndjson, .parquet; .gz/.zst compression for
+    /// text formats)
     #[arg(long, short = 'o', value_hint = clap::ValueHint::AnyPath)]
     pub output: Option<PathBuf>,
 

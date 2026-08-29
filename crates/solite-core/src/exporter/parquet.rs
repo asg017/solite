@@ -14,7 +14,11 @@
 //! that doesn't fit the chosen type once writing is underway is a hard
 //! error ([`ExportError::ParquetTypeMismatch`]) naming the column, the
 //! 1-based row, and *why* the type was chosen, so the caller knows whether
-//! to fix the data or `CAST` in the query.
+//! to fix the data or `CAST` in the query. The one exception: a string
+//! column whose type was *inferred* (not declared `TEXT`) is lenient and
+//! stringifies ints/reals/blobs it meets instead of erroring, since sniffing
+//! is what put it there in the first place (see [`sniff`] and
+//! [`ColumnBuffer::push`]).
 //!
 //! Memory is bounded to one row group: the first group is buffered (needed
 //! for sniffing anyway), subsequent rows are streamed and flushed every
@@ -59,7 +63,15 @@ enum ColumnType {
     Double,
     /// `json` tags the column `LogicalType::Json` (still UTF8 bytes); set
     /// only when every sniffed value carried SQLite's JSON subtype.
-    Utf8 { json: bool },
+    ///
+    /// `lenient` is `true` for a column whose type was *inferred* by
+    /// [`sniff`] (all outcomes except the all-JSON one) rather than
+    /// declared. A lenient column accepts non-text values during
+    /// [`ColumnBuffer::push`], writing them in their text form instead of
+    /// erroring — the mixed/all-NULL fallback would otherwise reject the
+    /// very values that caused it. Declared `TEXT` columns and JSON-tagged
+    /// columns are never lenient.
+    Utf8 { json: bool, lenient: bool },
     Bytes,
     Boolean,
 }
@@ -132,9 +144,13 @@ impl Cell {
 /// Infer a column type from a set of sampled values, ignoring NULLs.
 ///
 /// All-Int -> Int64; Int/Double mix -> Double (widening); all-Text with
-/// every value JSON-subtyped -> `Utf8 { json: true }`; all-Text -> Utf8;
-/// all-Blob -> Bytes; anything else (mixed types, or all-NULL) -> Utf8,
-/// same fallback CSV uses for mixed columns.
+/// every value JSON-subtyped -> `Utf8 { json: true, lenient: false }`;
+/// all-Text -> `Utf8 { json: false, lenient: true }`; all-Blob -> Bytes;
+/// anything else (mixed types, or all-NULL) -> `Utf8 { json: false, lenient: true }`,
+/// same fallback CSV uses for mixed columns. Every `Utf8` outcome sniff()
+/// produces is `lenient` except the all-JSON one: since the type wasn't
+/// declared, a later non-text value is stringified rather than rejected
+/// (see [`ColumnBuffer::push`]).
 fn sniff<'a>(values: impl Iterator<Item = &'a Cell>) -> ColumnType {
     let (mut saw_int, mut saw_double, mut saw_text, mut saw_blob) = (false, false, false, false);
     let mut all_text_json = true;
@@ -153,12 +169,12 @@ fn sniff<'a>(values: impl Iterator<Item = &'a Cell>) -> ColumnType {
     }
 
     match (saw_int, saw_double, saw_text, saw_blob) {
-        (false, false, false, false) => ColumnType::Utf8 { json: false }, // all-NULL or empty
+        (false, false, false, false) => ColumnType::Utf8 { json: false, lenient: true }, // all-NULL or empty
         (true, false, false, false) => ColumnType::Int64,
         (_, true, false, false) => ColumnType::Double, // double, or int+double mix
-        (false, false, true, false) => ColumnType::Utf8 { json: all_text_json },
+        (false, false, true, false) => ColumnType::Utf8 { json: all_text_json, lenient: !all_text_json },
         (false, false, false, true) => ColumnType::Bytes,
-        _ => ColumnType::Utf8 { json: false }, // mixed types: strings, as CSV does
+        _ => ColumnType::Utf8 { json: false, lenient: true }, // mixed types: strings, as CSV does
     }
 }
 
@@ -177,7 +193,7 @@ fn resolve_column_type(
             Affinity::Integer => (ColumnType::Int64, format!("from its declared type '{d}'")),
             Affinity::Real => (ColumnType::Double, format!("from its declared type '{d}'")),
             Affinity::Text => (
-                ColumnType::Utf8 { json: false },
+                ColumnType::Utf8 { json: false, lenient: false },
                 format!("from its declared type '{d}'"),
             ),
             Affinity::Blob => (ColumnType::Bytes, format!("from its declared type '{d}'")),
@@ -230,8 +246,8 @@ fn build_schema(names: &[String], types: &[ColumnType]) -> Result<Arc<Type>, Exp
             ColumnType::Boolean => PhysicalType::BOOLEAN,
         };
         let logical = match ty {
-            ColumnType::Utf8 { json: true } => Some(LogicalType::Json),
-            ColumnType::Utf8 { json: false } => Some(LogicalType::String),
+            ColumnType::Utf8 { json: true, .. } => Some(LogicalType::Json),
+            ColumnType::Utf8 { json: false, .. } => Some(LogicalType::String),
             _ => None,
         };
         let field = Type::primitive_type_builder(name, physical)
@@ -332,6 +348,39 @@ impl ColumnBuffer {
                     return Err(ExportError::InvalidUtf8);
                 }
                 values.push(ByteArray::from(bytes.clone()));
+                def_levels.push(1);
+            }
+            // Lenient Utf8 columns (every sniffed outcome except the
+            // all-JSON one) stringify non-text values instead of erroring,
+            // same as CSV: this is what makes the mixed/all-NULL fallback
+            // usable at all, since it's exactly the values that triggered
+            // the fallback that show up here. Mirrors
+            // `exporter::value_to_string`'s formatting (`i64`/`f64`
+            // `to_string()`, blobs via `blob_to_hex_literal`) rather than
+            // calling it directly, since that helper takes a borrowed
+            // `ValueRefX`, not an owned value.
+            (
+                ColumnType::Utf8 { lenient: true, .. },
+                ColumnBuffer::Bytes { values, def_levels },
+                OwnedValue::Integer(v),
+            ) => {
+                values.push(ByteArray::from(v.to_string().into_bytes()));
+                def_levels.push(1);
+            }
+            (
+                ColumnType::Utf8 { lenient: true, .. },
+                ColumnBuffer::Bytes { values, def_levels },
+                OwnedValue::Double(v),
+            ) => {
+                values.push(ByteArray::from(v.to_string().into_bytes()));
+                def_levels.push(1);
+            }
+            (
+                ColumnType::Utf8 { lenient: true, .. },
+                ColumnBuffer::Bytes { values, def_levels },
+                OwnedValue::Blob(bytes),
+            ) => {
+                values.push(ByteArray::from(super::blob_to_hex_literal(bytes).into_bytes()));
                 def_levels.push(1);
             }
             (ColumnType::Bytes, ColumnBuffer::Bytes { values, def_levels }, OwnedValue::Blob(bytes)) => {
@@ -671,6 +720,99 @@ mod tests {
             schema.column(0).logical_type_ref(),
             Some(&LogicalType::String)
         );
+    }
+
+    #[test]
+    fn test_lenient_sniffed_string_column_json_tree() {
+        // `json_tree`'s `value` column is text (the raw JSON) for the root
+        // row and integer for each leaf element -- a genuinely mixed-type
+        // column that must fall back to a lenient Utf8 column rather than
+        // erroring on the very values that caused the fallback.
+        let bytes = write_bytes("select * from json_tree('[1,2,3,4]')");
+        let reader = reader_for(bytes);
+        let schema = reader.metadata().file_metadata().schema_descr();
+        let value_idx = (0..schema.num_columns())
+            .find(|&i| schema.column(i).name() == "value")
+            .expect("json_tree has a 'value' column");
+        assert_eq!(schema.column(value_idx).physical_type(), PhysicalType::BYTE_ARRAY);
+        assert_eq!(
+            schema.column(value_idx).logical_type_ref(),
+            Some(&LogicalType::String)
+        );
+
+        let mut rows = reader.get_row_iter(None).unwrap();
+        // Root row: SQLite hands json_tree's `value` back as the raw JSON
+        // text of the whole array, not NULL.
+        assert_eq!(
+            rows.next().unwrap().unwrap().get_string(value_idx).unwrap(),
+            "[1,2,3,4]"
+        );
+        for expected in ["1", "2", "3", "4"] {
+            assert_eq!(
+                rows.next().unwrap().unwrap().get_string(value_idx).unwrap(),
+                expected
+            );
+        }
+        assert!(rows.next().is_none());
+    }
+
+    #[test]
+    fn test_lenient_string_column_stringifies_int_after_all_null_group() {
+        // First group is all-NULL (sniffed as lenient Utf8); a later group
+        // has an integer, which must be stringified rather than rejected.
+        let conn = Connection::open_in_memory().unwrap();
+        let mut stmt = stmt_for(&conn, "select null as x union all select 7");
+        let mut buf = Vec::new();
+        write_parquet_with_group_size(&mut stmt, &mut buf, None, 1).unwrap();
+
+        let reader = reader_for(buf);
+        let schema = reader.metadata().file_metadata().schema_descr();
+        assert_eq!(schema.column(0).physical_type(), PhysicalType::BYTE_ARRAY);
+
+        let mut rows = reader.get_row_iter(None).unwrap();
+        assert!(matches!(
+            rows.next().unwrap().unwrap().get_column_iter().next().unwrap().1,
+            Field::Null
+        ));
+        assert_eq!(rows.next().unwrap().unwrap().get_string(0).unwrap(), "7");
+        assert!(rows.next().is_none());
+    }
+
+    #[test]
+    fn test_lenient_string_column_stringifies_blob() {
+        // A mixed group with a blob: sniff() falls back to lenient Utf8,
+        // and the blob is written as its hex-literal text form.
+        let bytes = write_bytes("select 'a' as x union all select x'DEADBEEF'");
+        let reader = reader_for(bytes);
+        let schema = reader.metadata().file_metadata().schema_descr();
+        assert_eq!(schema.column(0).physical_type(), PhysicalType::BYTE_ARRAY);
+
+        let mut rows = reader.get_row_iter(None).unwrap();
+        assert_eq!(rows.next().unwrap().unwrap().get_string(0).unwrap(), "a");
+        assert_eq!(
+            rows.next().unwrap().unwrap().get_string(0).unwrap(),
+            "x'DEADBEEF'"
+        );
+        assert!(rows.next().is_none());
+    }
+
+    #[test]
+    fn test_mismatch_json_tagged_column_stays_strict() {
+        // Unlike a plain sniffed string column, a column whose type was
+        // sniffed as `Utf8 { json: true }` (every value in the first group
+        // carried the JSON subtype) is NOT lenient: a later non-text value
+        // is still a hard mismatch error.
+        let conn = Connection::open_in_memory().unwrap();
+        let mut stmt = stmt_for(
+            &conn,
+            "select json_object('a', 1) as j union all select 7",
+        );
+        let mut buf = Vec::new();
+        let err = write_parquet_with_group_size(&mut stmt, &mut buf, None, 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("'j'"), "{msg}");
+        assert!(msg.contains("row 2"), "{msg}");
+        assert!(msg.contains("UTF8"), "{msg}");
     }
 
     #[test]

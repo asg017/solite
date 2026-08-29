@@ -306,8 +306,9 @@ pub(super) fn check_blob_limit(
 
 /// Encode a BLOB as a SQL-style hex literal, e.g. `x'DEADBEEF'`.
 /// Used by CSV/TSV/clipboard so blobs stay distinguishable from empty
-/// strings and NULLs (and round-trip losslessly).
-fn blob_to_hex_literal(bytes: &[u8]) -> String {
+/// strings and NULLs (and round-trip losslessly); also used by the Parquet
+/// writer to stringify blobs in lenient (sniffed) string columns.
+pub(super) fn blob_to_hex_literal(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2 + 3);
     out.push_str("x'");
     for b in bytes {

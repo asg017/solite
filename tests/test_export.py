@@ -55,12 +55,7 @@ def test_export_t3_alias_csv_roundtrip(solite_cli, s3_gateway, tmp_path):
 
 
 def test_query_parquet_output_file(solite_cli, snapshot, tmp_path):
-    # Unlike `json_tree`, `json_each` on a top-level array doesn't emit a
-    # root row, so every column here has a single consistent SQLite type
-    # across all rows -- important because parquet's schema inference
-    # errors on a genuinely mixed-type column (e.g. `json_tree`'s `value`
-    # column, which is text for the root row and integer for elements).
-    sql = "select * from json_each('[1,2,3,4]')"
+    sql = "select * from json_tree('[1,2,3,4]')"
     result = solite_cli(["q", sql, "-o", "a.parquet"], cwd=tmp_path)
     assert result.success, result.stderr
 

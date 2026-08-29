@@ -298,9 +298,11 @@ convention) when present, otherwise from sniffing the first row group
 (buffered up front; later row groups stream through per-column typed
 buffers). Every column is `OPTIONAL`; a value that doesn't fit the
 resolved type is `ExportError::ParquetTypeMismatch`, naming the column,
-1-based row, expected/found type, and why the type was chosen. See
-`PLAN-parquet.md` at the repo root for the full inference algorithm and
-type-acceptance table.
+1-based row, expected/found type, and why the type was chosen — except a
+string column whose type was *inferred* by sniffing (not a declared
+`TEXT` column), which is lenient and stringifies ints/reals/blobs it
+meets instead of erroring. See `PLAN-parquet.md` at the repo root for the
+full inference algorithm and type-acceptance table.
 
 ## Replacement Scans (replacement_scans.rs)
 

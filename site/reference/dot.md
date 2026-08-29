@@ -122,7 +122,11 @@ so `.export out.parquet` infers a schema:
   type) the type is sniffed from the first 65,536 rows: all-integer
   columns become int64, a mix of integers and reals becomes double, text
   becomes string, blobs become binary, and anything else — including an
-  all-NULL column — falls back to string.
+  all-NULL column — falls back to string. In that inferred string column,
+  later integers, reals, or blobs are written in their text form (`42`,
+  `1.5`, `x'00ff'`) rather than rejected — it's the sniffing that put them
+  in a string column in the first place. A **declared** `TEXT` column has
+  no such leniency: a non-text value there is still a type mismatch.
 - A later value that doesn't fit the chosen type fails the whole export
   with an error naming the column, the row number, and why the column was
   typed that way, e.g. `column 'a' (row 3) is text, but the column was

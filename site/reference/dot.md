@@ -4,6 +4,60 @@ Dot commands work in the REPL, in SQL scripts executed with `solite run`,
 and in the Jupyter kernel. Run `.help` for the full list; sections for
 commands not yet documented here are stubs.
 
+## .describe
+
+Describe a single table or view: kind and flags, a 10-row sample, columns
+with declared types and affinity, foreign keys in both directions, indexes,
+and the `CREATE` statement. Alias: `.d`.
+
+```
+.describe users          -- table in the 'main' schema
+.describe temp.scratch   -- qualified: 'temp' or an attached schema
+.describe "my table"     -- quoted names ("…", `…`, […])
+```
+
+Like `.tables`, unqualified names resolve in the `main` schema only — use
+`temp.x` or `<attached>.x` for anything else. Views are never row-counted
+(the header omits the count; the sample footer reads `N rows shown` instead
+of `N of M rows`); row counts on tables and virtual tables cap at
+`100,000+` rather than scanning the whole table. Hidden virtual-table
+columns and generated columns are shown, flagged `hidden`, `generated
+virtual`, or `generated stored`. Foreign keys are listed both ways —
+declared on the table (`→`) and discovered by scanning the rest of the
+schema for tables that reference it (`←`), the latter limited to the
+resolved schema. `.describe` is not available in `solite test`.
+
+```
+> .describe accounts
+main.accounts — table · 2 rows
+┌─────┬──────────┬───────┐
+│ id  │ owner_id │ label │
+├─────┼──────────┼───────┤
+│   1 │        1 │ a1    │
+│   2 │        2 │ a2    │
+└─────┴──────────┴───────┘
+3 columns × 2 rows
+2 rows shown
+
+Columns
+  id        INTEGER  PK
+  owner_id  INTEGER
+  label     TEXT  default 'default'
+
+Foreign keys
+  →  owner_id → main.users(id)  ON DELETE CASCADE
+  ←  orders(account_id) → id
+
+Indexes
+  idx_accounts_owner  (owner_id)  unique, partial
+
+DDL
+  CREATE TABLE accounts (id INTEGER PRIMARY KEY, owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE, label TEXT DEFAULT 'default');
+```
+
+In Jupyter, `.describe` renders as sectioned HTML instead of this text
+layout — see [Jupyter Kernel](/jupyter#previewing-a-table).
+
 ## .schema
 
 Show CREATE statements for the current database.

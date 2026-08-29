@@ -1,0 +1,20 @@
+---
+source: crates/solite-cli/src/commands/describe_text.rs
+expression: text
+---
+main.v_base — view
+┌─────┬─────┐
+│ id  │ val │
+├─────┼─────┤
+│   1 │ a   │
+│   2 │ b   │
+└─────┴─────┘
+2 columns × 2 rows
+2 rows shown
+
+Columns
+  id   INTEGER
+  val  TEXT
+
+DDL
+  CREATE VIEW v_base AS SELECT * FROM base;

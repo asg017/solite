@@ -35,6 +35,12 @@ const COMMANDS: &[HelpEntry] = &[
         description: "Clear the screen",
     },
     HelpEntry {
+        name: "describe",
+        aliases: &["d"],
+        usage: ".describe [schema.]name",
+        description: "Describe a table or view: columns, keys, indexes, DDL, sample rows",
+    },
+    HelpEntry {
         name: "dotenv",
         aliases: &["loadenv"],
         usage: ".dotenv",

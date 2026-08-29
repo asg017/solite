@@ -37,6 +37,7 @@ pub(crate) fn read_sql_from_stdin() -> Result<String, String> {
     Ok(buffer.trim().to_string())
 }
 
+pub mod describe_text;
 pub mod repl;
 pub mod run;
 pub mod query;

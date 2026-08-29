@@ -13,6 +13,7 @@
 //! - `.tables [schema]` - List tables and views
 //! - `.schema` - Show CREATE statements
 //! - `.graphviz` / `.gv` - Generate ERD in DOT format
+//! - `.describe [schema.]name` / `.d` - Describe a single table or view
 //! - `.open <path>` - Open a different database
 //! - `.load <path>` - Load an extension
 //! - `.param set/unset/list/clear` - Manage query parameters
@@ -35,6 +36,7 @@ mod ask;
 pub mod bench;
 mod call;
 mod clear;
+pub mod describe;
 mod dotenv;
 pub mod env;
 mod export;
@@ -60,6 +62,7 @@ pub use crate::dot::{
     bench::BenchCommand,
     call::CallCommand,
     clear::ClearCommand,
+    describe::DescribeCommand,
     dotenv::{DotenvCommand, DotenvResult},
     env::{EnvAction, EnvCommand},
     export::ExportCommand,
@@ -150,6 +153,8 @@ pub enum DotCommand {
     Schema(SchemaCommand),
     /// Generate Graphviz ERD.
     Graphviz(GraphvizCommand),
+    /// Describe a single table/view.
+    Describe(DescribeCommand),
 
     // Runtime
     /// Open a different database.
@@ -267,6 +272,7 @@ pub fn parse_dot<S: Into<String>>(
         "tui" => Ok(DotCommand::Tui(TuiCommand {})),
         "c" | "clear" => Ok(DotCommand::Clear(ClearCommand {})),
         "graphviz" | "gv" => Ok(DotCommand::Graphviz(GraphvizCommand {})),
+        "describe" | "d" => Ok(DotCommand::Describe(DescribeCommand::parse_args(args.trim())?)),
         "dotenv" | "loadenv" => Ok(DotCommand::Dotenv(DotenvCommand {})),
         "export" => Ok(DotCommand::Export(ExportCommand::new(args, runtime, rest)?)),
         "bench" => Ok(DotCommand::Bench(BenchCommand::new(args, runtime, rest)?)),
@@ -541,7 +547,7 @@ mod tests {
             assert!(with_aliases.contains(&name));
         }
         // Aliases from help.rs are present
-        for alias in ["gv", "vl", "loadenv", "parameter", "c"] {
+        for alias in ["gv", "vl", "loadenv", "parameter", "c", "d"] {
             assert!(with_aliases.contains(&alias), "missing alias {alias}");
         }
     }

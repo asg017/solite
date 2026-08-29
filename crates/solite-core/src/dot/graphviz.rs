@@ -19,6 +19,7 @@
 //! - Distinguishes one-to-one from one-to-many relationships
 //! - Truncates columns for large tables (shows PKs/FKs + ellipsis)
 
+use crate::dot::describe;
 use crate::dot::DotError;
 use crate::sqlite::{escape_string, ValueRefXValue};
 use crate::Runtime;
@@ -153,39 +154,21 @@ impl GraphvizCommand {
         runtime: &Runtime,
         table: &str,
     ) -> Result<Vec<ForeignKey>, DotError> {
-        let query = format!(
-            "SELECT \"from\", \"table\", \"to\" FROM pragma_foreign_key_list({})",
-            escape_string(table)
-        );
-
-        let (_, stmt) = runtime.connection.prepare(&query)?;
-        let mut stmt = stmt.ok_or_else(|| DotError::InvalidData("Failed to prepare query".into()))?;
-
-        let mut fks = Vec::new();
-        while let Ok(Some(row)) = stmt.next() {
-            let from_column = row
-                .first()
-                .map(|v| v.as_str().to_owned())
-                .unwrap_or_default();
-            let to_table = row
-                .get(1)
-                .map(|v| v.as_str().to_owned())
-                .unwrap_or_default();
-            let to_column = row
-                .get(2)
-                .map(|v| v.as_str().to_owned())
-                .unwrap_or_default();
-
-            let is_unique = self.is_unique_fk(runtime, table, &from_column);
-
-            fks.push(ForeignKey {
-                from_table: table.to_owned(),
-                from_column,
-                to_table,
-                to_column,
-                is_unique,
-            });
-        }
+        let fks = describe::foreign_keys_of(runtime, "main", table)?
+            .into_iter()
+            .map(|fk| {
+                let is_unique = self.is_unique_fk(runtime, table, &fk.from_column);
+                ForeignKey {
+                    from_table: fk.from_table,
+                    from_column: fk.from_column,
+                    to_table: fk.to_table,
+                    // graphviz labels edges unconditionally; an implicit-pk
+                    // FK (no explicit `to` column) has no column to show.
+                    to_column: fk.to_column.unwrap_or_default(),
+                    is_unique,
+                }
+            })
+            .collect();
         Ok(fks)
     }
 

@@ -5,6 +5,7 @@ use solite_core::dot::DotCommand;
 use solite_core::Runtime;
 
 use crate::colors;
+use crate::commands::describe_text::render_describe_text;
 
 /// Handle a dot command during script execution.
 ///
@@ -78,6 +79,17 @@ pub fn handle_dot_command(
             }
             Err(e) => {
                 eprintln!("Error generating graphviz: {}", e);
+                false
+            }
+        },
+        DotCommand::Describe(cmd) => match cmd.execute(runtime) {
+            Ok(out) => {
+                let config = solite_table::TableConfig::plain();
+                println!("{}", render_describe_text(out, &config, |s| s.to_string()));
+                true
+            }
+            Err(e) => {
+                eprintln!("Error describing table: {}", e);
                 false
             }
         },

@@ -4,10 +4,13 @@
 //! - `html`: Custom HTML builder for generating HTML strings
 //! - `syntax`: SQL and JSON syntax highlighting
 //! - `table`: SQL result table rendering
+//! - `describe`: `.describe` sectioned HTML + text/plain rendering
 
+pub mod describe;
 pub mod html;
 pub mod syntax;
 pub mod table;
 
+pub use describe::render_describe;
 pub use syntax::render_sql_html;
 pub use table::render_statement;

@@ -370,6 +370,162 @@ def test_schema_dot_commands(solite_kernel):
     assert "digraph" in plain_of(msgs)
 
 
+def test_describe_dot_command(solite_kernel, snapshot):
+    k = solite_kernel
+    k.execute(
+        "create table users(id integer primary key, name text not null);"
+        "create table orders(id integer primary key, user_id references users(id));"
+        "insert into users(name) values ('a'), ('b'), ('c');"
+        "insert into orders(user_id) values (1), (1), (2);"
+    )
+
+    reply, msgs = k.execute(".describe users")
+    assert reply["content"]["status"] == "ok"
+
+    html = html_of(msgs)
+    assert "solite-describe" in html
+    assert '<details open="open">' in html
+    assert "Columns (2)" in html
+    assert "Incoming" in html
+    assert "orders" in html
+    # DDL is syntax-highlighted (one <span> per token), so check tokens
+    # rather than a literal "CREATE TABLE users" substring.
+    assert ">CREATE<" in html and ">TABLE<" in html
+
+    text = plain_of(msgs)
+    assert "Columns" in text
+    assert "orders(user_id)" in text
+
+    assert html == snapshot(name="describe users html")
+    assert text == snapshot(name="describe users text")
+
+
+def test_describe_view(solite_kernel):
+    k = solite_kernel
+    k.execute(
+        "create table base(id integer primary key, val text);"
+        "insert into base(val) values ('a'), ('b');"
+        "create view v_base as select * from base;"
+    )
+
+    reply, msgs = k.execute(".describe v_base")
+    assert reply["content"]["status"] == "ok"
+    html = html_of(msgs)
+    assert "rows shown" in html
+    assert " of " not in html
+
+
+def test_describe_missing(solite_kernel):
+    reply, msgs = solite_kernel.execute(".describe nope")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in msgs if m["msg_type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["content"]["ename"] == "DescribeError"
+    assert "no such table" in errors[0]["content"]["evalue"]
+
+
+def test_describe_alias(solite_kernel):
+    k = solite_kernel
+    k.execute("create table users(id integer primary key, name text);")
+
+    reply, msgs = k.execute(".describe users")
+    assert reply["content"]["status"] == "ok"
+    full_html = html_of(msgs)
+
+    reply, msgs = k.execute(".d users")
+    assert reply["content"]["status"] == "ok"
+    assert html_of(msgs) == full_html
+
+
+def test_bare_identifier_preview(solite_kernel):
+    k = solite_kernel
+    k.execute("create table users(id integer primary key, name text);")
+
+    for cell in ["users", "users;", '"users"']:
+        reply, msgs = k.execute(cell)
+        assert reply["content"]["status"] == "ok", cell
+        assert "solite-describe" in html_of(msgs), cell
+
+
+def test_bare_identifier_fallthrough(solite_kernel):
+    # Not a real table: the cell is enqueued verbatim and SQLite reports its
+    # own syntax error, not one we invented.
+    reply, msgs = solite_kernel.execute("nope")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in msgs if m["msg_type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["content"]["ename"] == "SQLError"
+    evalue = escape_ansi_codes(errors[0]["content"]["evalue"])
+    assert 'near "nope": syntax error' in evalue
+
+    # A non-matching cell still runs as ordinary SQL.
+    reply, msgs = solite_kernel.execute("select 1")
+    assert reply["content"]["status"] == "ok"
+    assert "1" in plain_of(msgs)
+
+
+def test_bare_identifier_temp_not_resolved(solite_kernel):
+    k = solite_kernel
+    k.execute("create temp table t(x);")
+
+    # Unqualified: resolves in main only, same as `.tables` — falls through
+    # and errors as plain SQL.
+    reply, msgs = k.execute("t")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in msgs if m["msg_type"] == "error"]
+    assert errors[0]["content"]["ename"] == "SQLError"
+
+    # Schema-qualified: resolves and previews.
+    reply, msgs = k.execute("temp.t")
+    assert reply["content"]["status"] == "ok"
+    assert "solite-describe" in html_of(msgs)
+
+
+def test_bare_keyword_still_errors(solite_kernel):
+    reply, msgs = solite_kernel.execute("select")
+    assert reply["content"]["status"] == "error"
+    errors = [m for m in msgs if m["msg_type"] == "error"]
+    assert errors[0]["content"]["ename"] == "SQLError"
+
+
+def test_bare_identifier_execute_input_echoes_original(solite_kernel):
+    client = solite_kernel.client
+    solite_kernel.execute("create table users(id integer primary key);")
+
+    code = "users"
+    client.execute(code=code, silent=False, store_history=False, stop_on_error=False)
+    reply = solite_kernel.get_non_kernel_info_reply()
+    assert reply is not None
+
+    saw_execute_input = False
+    while True:
+        msg = ensure_sync(client.iopub_channel.get_msg)(timeout=5)
+        if msg["msg_type"] == "execute_input":
+            # The kernel rewrites the runtime's copy to `.describe users`,
+            # but the broadcast echo (sent before the rewrite) must carry
+            # the original cell text unchanged.
+            assert msg["content"]["code"] == code
+            saw_execute_input = True
+        if msg["msg_type"] == "status" and msg["content"]["execution_state"] == "idle":
+            break
+    assert saw_execute_input
+
+
+def test_bare_identifier_is_complete(solite_kernel):
+    client = solite_kernel.client
+
+    def status_of(code):
+        client.is_complete(code)
+        reply = solite_kernel.get_non_kernel_info_reply()
+        assert reply["header"]["msg_type"] == "is_complete_reply"
+        return reply["content"]["status"]
+
+    assert status_of("users") == "complete"
+    assert status_of("temp.users") == "complete"
+    assert status_of('"my table"') == "complete"
+    assert status_of("select 1 +") == "incomplete"
+
+
 def test_export_dot_command(solite_kernel, tmp_path):
     out = tmp_path / "out.csv"
     reply, msgs = solite_kernel.execute(f".export {out}\nselect 1 as a;")

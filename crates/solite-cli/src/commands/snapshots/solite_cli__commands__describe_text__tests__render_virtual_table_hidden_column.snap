@@ -1,0 +1,21 @@
+---
+source: crates/solite-cli/src/commands/describe_text.rs
+expression: text
+---
+main.notes — virtual table (fts5) · 2 rows
+┌──────────────┐
+│     body     │
+├──────────────┤
+│ hello world  │
+│ another note │
+└──────────────┘
+1 column × 2 rows
+2 rows shown
+
+Columns
+  body    (BLOB)
+  notes   (BLOB)  hidden
+  rank    (BLOB)  hidden
+
+DDL
+  CREATE VIRTUAL TABLE notes USING fts5(body);

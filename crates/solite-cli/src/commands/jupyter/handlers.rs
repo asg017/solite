@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 
 use super::kernel::{handle_code, send_statement_result, ExecutionMessage};
 use super::protocol::JupyterSender;
-use super::render::render_sql_html;
+use super::render::{render_describe, render_sql_html};
 
 /// Handle a dot command and send appropriate output to the frontend.
 pub fn handle_dot_command<'a>(
@@ -251,6 +251,29 @@ async fn handle_dot_command_inner(
             Err(e) => {
                 sender
                     .send_error("SchemaError", &format!("{}", e)).await?;
+            }
+        },
+        DotCommand::Describe(cmd) => match cmd.execute(runtime) {
+            Ok(out) => match render_describe(out) {
+                Ok(ui) => {
+                    sender
+                        .send_display(
+                            DisplayData::new(
+                                vec![MediaType::Plain(ui.text), MediaType::Html(ui.html)].into(),
+                            ),
+                            parent,
+                        )
+                        .await?;
+                }
+                Err(e) => {
+                    sender
+                        .send_error("RenderError", &format!("{:?}", e))
+                        .await?;
+                }
+            },
+            Err(e) => {
+                sender
+                    .send_error("DescribeError", &format!("{}", e)).await?;
             }
         },
         DotCommand::Vegalite(mut cmd) => {

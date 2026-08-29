@@ -331,6 +331,7 @@ fn dot_command_name(cmd: &solite_core::dot::DotCommand) -> &'static str {
         Tables(_) => "tables",
         Schema(_) => "schema",
         Graphviz(_) => "graphviz",
+        Describe(_) => "describe",
         Open(_) => "open",
         Load(_) => "load",
         Tui(_) => "tui",

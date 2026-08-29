@@ -144,6 +144,23 @@ impl SoliteKernel {
                     continue;
                 }
 
+                // Jupyter sugar: a cell that is exactly one (optionally
+                // schema-qualified, optionally quoted) identifier naming an
+                // existing table/view is rewritten to `.describe`. Core
+                // stays ignorant of this; `execute_input` and history above
+                // already captured the original `code`.
+                let code = match bare_identifier(&code) {
+                    Some((schema, name))
+                        if solite_core::dot::describe::table_kind(&rt, schema.as_deref(), &name)
+                            .ok()
+                            .flatten()
+                            .is_some() =>
+                    {
+                        format!(".describe {}", quote_for_dot(schema.as_deref(), &name))
+                    }
+                    _ => code,
+                };
+
                 rt.enqueue(
                     "<anonymous>",
                     code.as_str(),
@@ -430,7 +447,13 @@ impl SoliteKernel {
             }
 
             JupyterMessageContent::IsCompleteRequest(req) => {
-                let status = if solite_core::sqlite::input_complete(&req.code) {
+                // A bare identifier is complete input even without a `;` —
+                // it will either become `.describe` or fail as SQL, neither
+                // of which needs more lines. Grammar-only (no existence
+                // check): this runs on every keystroke in the console.
+                let status = if bare_identifier(&req.code).is_some()
+                    || solite_core::sqlite::input_complete(&req.code)
+                {
                     IsCompleteReplyStatus::Complete
                 } else {
                     IsCompleteReplyStatus::Incomplete
@@ -716,6 +739,172 @@ pub(super) async fn handle_code(
                 }
             },
         }
+    }
+}
+
+/// A cell that is exactly one SQL object name — `users`, `temp.users`,
+/// `"my table"`, `` `x` ``, `[x]`, `main."a.b"` — with optional surrounding
+/// whitespace and at most one trailing `;`. Returns `(schema, name)` with
+/// quotes stripped. Anything else — trailing tokens, a second `.`, an
+/// unterminated quote — returns `None`. Pure function, no runtime: the
+/// caller decides whether the name actually exists.
+pub(super) fn bare_identifier(cell: &str) -> Option<(Option<String>, String)> {
+    let trimmed = cell.trim();
+    let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed).trim();
+    if trimmed.is_empty() || !is_single_qualified_name(trimmed) {
+        return None;
+    }
+    let cmd = solite_core::dot::describe::DescribeCommand::parse_args(trimmed).ok()?;
+    Some((cmd.schema, cmd.name))
+}
+
+/// Whether `s` is exactly `part` or `part.part` and nothing else — no
+/// trailing tokens/comments, no second `.`. Each `part` is an unquoted
+/// identifier (`[A-Za-z_][A-Za-z0-9_]*`) or a quoted identifier (`"…"`,
+/// `` `…` ``, `[…]`).
+fn is_single_qualified_name(s: &str) -> bool {
+    let rest = match consume_name_part(s) {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let rest = match rest.strip_prefix('.') {
+        Some(after_dot) => match consume_name_part(after_dot) {
+            Some(rest) => rest,
+            None => return false,
+        },
+        None => rest,
+    };
+    rest.is_empty()
+}
+
+/// Consume one unquoted or quoted identifier from the start of `s` and
+/// return what follows it, or `None` if `s` doesn't start with a valid part.
+fn consume_name_part(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    match bytes.first()? {
+        b'A'..=b'Z' | b'a'..=b'z' | b'_' => {
+            let end = s
+                .char_indices()
+                .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+                .map(|(i, _)| i)
+                .unwrap_or(s.len());
+            Some(&s[end..])
+        }
+        b'"' => consume_quoted(s, b'"'),
+        b'`' => consume_quoted(s, b'`'),
+        b'[' => consume_quoted(s, b']'),
+        _ => None,
+    }
+}
+
+/// Consume a quoted span starting at `s[0]` (the opening quote) up to and
+/// including `close`. When the opening byte and `close` match (`"…"`,
+/// `` `…` ``), a doubled `close` is an escaped literal, not the terminator;
+/// `[…]` has no escape. Returns the remainder after the closing quote, or
+/// `None` if unterminated.
+fn consume_quoted(s: &str, close: u8) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let open = bytes[0];
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == close {
+            if open == close && bytes.get(i + 1) == Some(&close) {
+                i += 2;
+                continue;
+            }
+            return Some(&s[i + 1..]);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Re-quote `schema`/`name` with `"` (doubling embedded `"`) so they survive
+/// `parse_dot`'s whitespace split as `.describe` arguments, regardless of
+/// what quoting (if any) the original cell used.
+fn quote_for_dot(schema: Option<&str>, name: &str) -> String {
+    let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+    match schema {
+        Some(schema) => format!("{}.{}", quote(schema), quote(name)),
+        None => quote(name),
+    }
+}
+
+#[cfg(test)]
+mod bare_identifier_tests {
+    use super::bare_identifier;
+
+    #[test]
+    fn accepts_plain_and_whitespace_variants() {
+        assert_eq!(
+            bare_identifier("users"),
+            Some((None, "users".to_string()))
+        );
+        assert_eq!(
+            bare_identifier("  users  "),
+            Some((None, "users".to_string()))
+        );
+        assert_eq!(
+            bare_identifier("users;"),
+            Some((None, "users".to_string()))
+        );
+    }
+
+    #[test]
+    fn accepts_schema_qualified() {
+        assert_eq!(
+            bare_identifier("temp.users"),
+            Some((Some("temp".to_string()), "users".to_string()))
+        );
+        assert_eq!(
+            bare_identifier(r#"main."a.b""#),
+            Some((Some("main".to_string()), "a.b".to_string()))
+        );
+    }
+
+    #[test]
+    fn accepts_quoted_forms() {
+        assert_eq!(
+            bare_identifier(r#""my table""#),
+            Some((None, "my table".to_string()))
+        );
+        assert_eq!(bare_identifier("`x`"), Some((None, "x".to_string())));
+        assert_eq!(bare_identifier("[x]"), Some((None, "x".to_string())));
+        assert_eq!(
+            bare_identifier(r#""say ""hi""""#),
+            Some((None, "say \"hi\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn rejects_non_single_identifier_cells() {
+        let rejects = [
+            "",
+            ";",
+            "users where",
+            "users;;",
+            "users -- c",
+            "-- users",
+            "a.b.c",
+            "users(",
+            "select 1",
+            ".tables",
+            "\"unterminated",
+        ];
+        for cell in rejects {
+            assert_eq!(bare_identifier(cell), None, "expected None for {cell:?}");
+        }
+    }
+
+    #[test]
+    fn accepts_bare_keyword_shape() {
+        // Grammar-only: `select` alone has the shape of a single identifier.
+        // Existence-checking (and thus SQL fallthrough) happens at the
+        // rewrite site, not here.
+        assert_eq!(
+            bare_identifier("select"),
+            Some((None, "select".to_string()))
+        );
     }
 }
 

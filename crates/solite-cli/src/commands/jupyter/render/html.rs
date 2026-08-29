@@ -29,12 +29,21 @@ impl HtmlDoc {
     }
 }
 
+#[derive(Debug, Clone)]
+enum Child {
+    Element(Element),
+    /// Pre-rendered HTML inserted verbatim (e.g. another builder's output).
+    /// Callers are responsible for escaping any user data before it lands
+    /// here — see [`Element::raw`].
+    Raw(String),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Element {
     tag: String,
     attrs: Vec<(String, String)>,
     styles: Vec<(String, String)>,
-    children: Vec<Element>,
+    children: Vec<Child>,
     text: Option<String>,
 }
 
@@ -92,9 +101,20 @@ impl Element {
 
     /// Append a new child element with the given tag and return a mutable reference to it
     pub fn child(&mut self, tag: impl Into<String>) -> &mut Element {
-        self.children.push(Element::new(tag));
+        self.children.push(Child::Element(Element::new(tag)));
         let idx = self.children.len() - 1;
-        &mut self.children[idx]
+        match &mut self.children[idx] {
+            Child::Element(el) => el,
+            Child::Raw(_) => unreachable!("just pushed a Child::Element"),
+        }
+    }
+
+    /// Append pre-rendered HTML verbatim (not escaped). For embedding
+    /// another builder's output (e.g. `render_sql_html`) or a
+    /// `solite-table` HTML render — never for hand-concatenated user data.
+    pub fn raw(&mut self, html: impl Into<String>) -> &mut Self {
+        self.children.push(Child::Raw(html.into()));
+        self
     }
 
     /// Convenience: append a <div> child
@@ -159,7 +179,10 @@ impl Element {
             push_escaped(out, text);
         }
         for child in &self.children {
-            child.write_html(out);
+            match child {
+                Child::Element(el) => el.write_html(out),
+                Child::Raw(html) => out.push_str(html),
+            }
         }
 
         out.push_str("</");

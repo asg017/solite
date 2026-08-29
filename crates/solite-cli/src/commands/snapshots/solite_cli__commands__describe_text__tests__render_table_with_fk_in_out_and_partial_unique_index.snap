@@ -1,0 +1,32 @@
+---
+source: crates/solite-cli/src/commands/describe_text.rs
+expression: text
+---
+main.accounts — table · 2 rows
+┌─────┬──────────┬───────┐
+│ id  │ owner_id │ label │
+├─────┼──────────┼───────┤
+│   1 │        1 │ a1    │
+│   2 │        2 │ a2    │
+└─────┴──────────┴───────┘
+3 columns × 2 rows
+2 rows shown
+
+Columns
+  id        INTEGER  PK
+  owner_id  INTEGER
+  label     VARCHAR(20) (TEXT)  default 'default'
+
+Foreign keys
+  →  owner_id → main.users(id)  ON DELETE CASCADE
+  ←  orders(account_id) → id
+
+Indexes
+  idx_accounts_owner  (owner_id)  unique, partial
+
+DDL
+  CREATE TABLE accounts (
+                      id INTEGER PRIMARY KEY,
+                      owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                      label VARCHAR(20) DEFAULT 'default'
+                   );

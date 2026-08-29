@@ -702,6 +702,7 @@ fn handle_dot_command(
         }
         #[cfg(feature = "ritestream")]
         DotCommand::Stream(_) => Err(".stream command not supported in test mode".to_string()),
+        DotCommand::Describe(_) => Err(".describe command not supported in test mode".to_string()),
         other => Err(format!("Unhandled dot command in test: {:?}", other)),
     }
 }

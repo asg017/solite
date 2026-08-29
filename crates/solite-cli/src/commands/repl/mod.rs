@@ -1,6 +1,7 @@
 pub(crate) mod completer;
 mod highlighter;
 use crate::cli::ReplArgs;
+use crate::commands::describe_text::render_describe_text;
 use crate::commands::repl::completer::ReplCompleter;
 use crate::commands::repl::highlighter::{ReplHighlighter, highlight_sql};
 use crate::commands::run::format_duration;
@@ -136,6 +137,10 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             Err(e) => {
                 eprintln!("✗ failed to generate graphviz: {}", e);
             }
+        },
+        DotCommand::Describe(cmd) => match cmd.execute(runtime) {
+            Ok(out) => println!("{}", render_describe_text(out, &TableConfig::terminal(), highlight_sql)),
+            Err(e) => eprintln!("✗ failed to describe: {}", e),
         },
         DotCommand::Print(print_cmd) => print_cmd.execute(),
         DotCommand::Help(help_cmd) => println!("{}", help_cmd.execute()),

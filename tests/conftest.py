@@ -12,7 +12,12 @@ from subprocess import Popen, PIPE
 from tempfile import TemporaryFile
 from pathlib import Path
 import re
+import shutil
+import socket
+import subprocess
+import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 import pytest_asyncio
@@ -168,3 +173,75 @@ def solite_cli():
         return CliResult(stdout, stderr, success=p.returncode == 0)
 
     yield solite_cli
+
+
+@pytest.fixture
+def s3_gateway(tmp_path):
+    """Start a local S3-compatible gateway (versitygw) backed by a temp dir.
+
+    Skips the test cleanly when `versitygw` is not on PATH. Yields a
+    namespace with `root` (the gateway's posix root dir; `root / "bucket"`
+    is the bucket named "bucket") and `env` (AWS_* vars to merge into
+    `solite_cli(..., env=...)`).
+    """
+    exe = shutil.which("versitygw")
+    if exe is None:
+        pytest.skip("versitygw not installed")
+
+    root = tmp_path / "gw"
+    (root / "bucket").mkdir(parents=True)
+
+    # Grab a free port by binding to port 0 and reading it back.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    # Global flags (-a/-s/-p) must precede the `posix` subcommand: versitygw
+    # silently ignores -p and binds :7070 if it comes after `posix DIR`.
+    proc = subprocess.Popen(
+        [
+            exe,
+            "-a",
+            "testkey",
+            "-s",
+            "testsecret",
+            "-p",
+            f"127.0.0.1:{port}",
+            "posix",
+            str(root),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    try:
+        deadline = time.monotonic() + 5
+        connected = False
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    connected = True
+                    break
+            except OSError:
+                time.sleep(0.1)
+        if not connected:
+            proc.terminate()
+            proc.wait(timeout=5)
+            pytest.fail(f"versitygw did not start listening on port {port} in time")
+
+        yield SimpleNamespace(
+            root=root,
+            env={
+                "AWS_ENDPOINT_URL_S3": f"http://127.0.0.1:{port}",
+                "AWS_ACCESS_KEY_ID": "testkey",
+                "AWS_SECRET_ACCESS_KEY": "testsecret",
+                "AWS_REGION": "us-east-1",
+            },
+        )
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)

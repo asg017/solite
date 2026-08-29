@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 static LOOSE_NAME_LINE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^--\s*name\s*:").expect("valid regex"));
 
-use super::types::{Export, Report};
+use super::types::{Export, Extension, Report};
 
 /// The type of base database to use for schema validation.
 #[derive(Debug)]
@@ -283,9 +283,29 @@ fn process_steps(rt: &mut Runtime, report: &mut Report) -> Result<()> {
                         result_class: proc.result_class.clone(),
                     });
                 }
+                // `.load` is the one dot command codegen honors: extension
+                // functions and virtual tables must exist in the validation
+                // connection for annotated queries to prepare. The load is
+                // also recorded in the report so generators can emit the
+                // matching runtime dependency.
+                StepResult::DotCommand(solite_core::dot::DotCommand::Load(load_cmd)) => {
+                    if let Err(e) = load_cmd.execute(&mut rt.connection) {
+                        return Err(anyhow!(
+                            "Failed to load extension `{}` at {}: {}",
+                            load_cmd.path,
+                            step.reference,
+                            e
+                        ));
+                    }
+                    report.extensions.push(Extension {
+                        path: load_cmd.path.clone(),
+                        entrypoint: load_cmd.entrypoint.clone(),
+                        is_uv: load_cmd.is_uv,
+                    });
+                }
                 StepResult::DotCommand(cmd) => {
                     return Err(anyhow!(
-                        "Dot commands are not supported in codegen input (found .{} at {})",
+                        "Dot commands are not supported in codegen input (found .{} at {}); only .load is supported",
                         dot_command_name(cmd),
                         step.reference
                     ));

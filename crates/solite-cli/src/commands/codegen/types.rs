@@ -25,11 +25,30 @@ pub struct Export {
     pub result_class: Option<String>,
 }
 
+/// A SQLite extension loaded via `.load` in the input file.
+///
+/// Fields mirror what the user wrote, not the resolved artifact: for uv
+/// loads, `path` is the package spec (e.g. `sqlite-vec==0.1.0`), not the
+/// site-packages path it resolved to on this machine.
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct Extension {
+    /// Path to the extension library, or the package spec for uv loads.
+    pub path: String,
+    /// Optional entry point function name.
+    pub entrypoint: Option<String>,
+    /// Whether the extension is loaded from a Python package via uv.
+    pub is_uv: bool,
+}
+
 /// The complete codegen report.
 #[derive(serde::Serialize, Debug)]
 pub struct Report {
     /// Setup SQL statements (CREATE TABLE, etc.)
     pub setup: Vec<String>,
+    /// Extensions loaded via `.load`; generated code must load these into
+    /// its connection before running setup or any exported query.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<Extension>,
     /// Exported queries
     pub exports: Vec<Export>,
 }
@@ -39,6 +58,7 @@ impl Report {
     pub fn new() -> Self {
         Self {
             setup: vec![],
+            extensions: vec![],
             exports: vec![],
         }
     }

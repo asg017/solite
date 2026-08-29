@@ -78,6 +78,28 @@
 //!
 //! This allows the codegen to validate queries and extract column types.
 //!
+//! # Extensions
+//!
+//! Queries that depend on a SQLite extension can load it with a `.load`
+//! line before the first query that needs it (paths resolve relative to
+//! the working directory, same as `solite run`):
+//!
+//! ```sql
+//! .load ../sqlite-tg/dist/tg0
+//!
+//! -- name: pointInPolygon :value
+//! select tg_intersects($polygon::text, tg_point($x::float, $y::float));
+//! ```
+//!
+//! The extension is loaded into the validation connection so the query
+//! prepares, and recorded in the report's `extensions` array (path,
+//! entrypoint, is_uv) so generators can emit the matching runtime load.
+//! `.load uv:package` is supported. `.load` is the only dot command
+//! codegen accepts; all others are rejected. Note that a `--schema`
+//! database is replayed before the input file runs, so a schema whose
+//! DDL itself needs an extension (e.g. extension-provided virtual
+//! tables) is not yet supported.
+//!
 //! # Example Usage
 //!
 //! ```bash
@@ -429,6 +451,38 @@ mod tests {
             !err.contains("Parameter("),
             "error must not be an enum debug dump: {err}"
         );
+    }
+
+    #[test]
+    fn test_load_missing_extension_errors() {
+        let err = report_err(
+            ".load ./no-such-extension\n\n-- name: q :value\nselect 1;",
+        );
+        assert!(
+            err.contains("./no-such-extension"),
+            "error names the extension path: {err}"
+        );
+        assert!(err.contains("[test]:1"), "error cites file:line: {err}");
+    }
+
+    #[test]
+    fn test_load_extension_records_and_prepares() {
+        // The happy path needs a real loadable extension, which the repo
+        // doesn't bundle. Runs only when SOLITE_TEST_EXTENSION points at
+        // one (absolute path — the test cwd is the crate dir), e.g.:
+        //   SOLITE_TEST_EXTENSION=$PWD/../sqlite-tg/dist/tg0.dylib cargo test
+        let Ok(ext) = std::env::var("SOLITE_TEST_EXTENSION") else {
+            return;
+        };
+        let r = report(&format!(
+            ".load {ext}\n\n-- name: q :value\nselect 1;"
+        ));
+        assert_eq!(r.extensions.len(), 1);
+        assert_eq!(r.extensions[0].path, ext);
+        assert!(r.extensions[0].entrypoint.is_none());
+        assert!(!r.extensions[0].is_uv);
+        assert!(r.setup.is_empty(), ".load must not appear in setup");
+        assert_eq!(r.exports.len(), 1);
     }
 
     #[test]

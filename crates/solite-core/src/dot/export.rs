@@ -90,12 +90,8 @@ impl ExportCommand {
     /// - `DotError::InvalidData` if the format cannot be determined
     /// - `DotError::Io` if the file cannot be written
     pub fn execute(&mut self) -> Result<(), DotError> {
-        let format = format_from_path(&self.target).ok_or_else(|| {
-            DotError::InvalidData(format!(
-                "Cannot determine format from path: {}",
-                self.target.display()
-            ))
-        })?;
+        let format = format_from_path(&self.target)
+            .map_err(|e| DotError::InvalidData(e.to_string()))?;
 
         #[cfg(feature = "object_store")]
         {

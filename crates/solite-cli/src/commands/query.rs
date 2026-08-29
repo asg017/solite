@@ -160,7 +160,7 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
             .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;
     } else {
         // Determine output format
-        let format = determine_format(&args);
+        let format = determine_format(&args)?;
 
         // The clipboard is its own destination; combining it with `-o`
         // would silently produce an empty file
@@ -173,7 +173,7 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
         }
 
         // Set up output (created only once the format is known to use it)
-        let output: Box<dyn Write> = match &args.output {
+        let output: Box<dyn Write + Send> = match &args.output {
             Some(output) => solite_core::exporter::output_from_path(output)
                 .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?,
             None => Box::new(stdout()),
@@ -339,12 +339,23 @@ fn prepare_statement(
 }
 
 /// Determine the output format from arguments.
-fn determine_format(args: &QueryArgs) -> ExportFormat {
+///
+/// An unrecognized `-o` extension silently falls back to JSON (unchanged
+/// behavior); `x.parquet.gz`/`.zst` is a hard error, since parquet's
+/// built-in compression means there's no sane fallback format to use
+/// instead.
+fn determine_format(args: &QueryArgs) -> Result<ExportFormat, QueryError> {
     match &args.format {
-        Some(format) => (*format).into(),
+        Some(format) => Ok((*format).into()),
         None => match &args.output {
-            Some(p) => solite_core::exporter::format_from_path(p).unwrap_or(ExportFormat::Json),
-            None => ExportFormat::Json,
+            Some(p) => match solite_core::exporter::format_from_path(p) {
+                Ok(format) => Ok(format),
+                Err(solite_core::exporter::FormatFromPathError::Unknown(_)) => Ok(ExportFormat::Json),
+                Err(e @ solite_core::exporter::FormatFromPathError::CompressedParquet(_)) => {
+                    Err(QueryError::ExecutionFailed(e.to_string()))
+                }
+            },
+            None => Ok(ExportFormat::Json),
         },
     }
 }
@@ -378,7 +389,7 @@ mod tests {
             blob_limit: None,
             remote: Default::default(),
         };
-        let format = determine_format(&args);
+        let format = determine_format(&args).unwrap();
         assert!(matches!(format, ExportFormat::Csv));
     }
 
@@ -394,7 +405,7 @@ mod tests {
             blob_limit: None,
             remote: Default::default(),
         };
-        let format = determine_format(&args);
+        let format = determine_format(&args).unwrap();
         assert!(matches!(format, ExportFormat::Csv));
     }
 
@@ -410,8 +421,45 @@ mod tests {
             blob_limit: None,
             remote: Default::default(),
         };
-        let format = determine_format(&args);
+        let format = determine_format(&args).unwrap();
         assert!(matches!(format, ExportFormat::Json));
+    }
+
+    #[test]
+    fn test_determine_format_unknown_extension_falls_back_to_json() {
+        let args = QueryArgs {
+            statement: Some("SELECT 1".to_string()),
+            database: None,
+            format: None,
+            output: Some(PathBuf::from("output.xyz")),
+            load_extension: None,
+            parameters: vec![],
+            blob_limit: None,
+            remote: Default::default(),
+        };
+        let format = determine_format(&args).unwrap();
+        assert!(matches!(format, ExportFormat::Json));
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn test_determine_format_compressed_parquet_is_error() {
+        let args = QueryArgs {
+            statement: Some("SELECT 1".to_string()),
+            database: None,
+            format: None,
+            output: Some(PathBuf::from("output.parquet.gz")),
+            load_extension: None,
+            parameters: vec![],
+            blob_limit: None,
+            remote: Default::default(),
+        };
+        let err = determine_format(&args).unwrap_err();
+        assert!(
+            matches!(err, QueryError::ExecutionFailed(_)),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("built-in compression"), "{err}");
     }
 
     #[test]

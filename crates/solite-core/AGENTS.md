@@ -9,7 +9,9 @@ src/
   lib.rs            # Runtime, Block, Step, StepResult, StepError, next_stepx(), advance_through_ignorable()
   sqlite.rs         # Connection, Statement, OwnedValue, Row, ValueRefX, SQLiteError
   procedure.rs      # Procedure, ProcedureParam, ResultType, parse_name_line()
-  exporter.rs       # ExportFormat, write_output(), format_from_path(), output_from_path()
+  exporter/
+    mod.rs          # ExportFormat, write_output(), format_from_path(), output_from_path()
+    parquet.rs      # Parquet writer (feature-gated: "parquet"), schema inference
   replacement_scans.rs  # Auto-creates virtual tables for .csv/.tsv files on "no such table" errors
   dot/
     mod.rs          # DotCommand enum, parse_dot(), ParseDotError, DotError
@@ -271,21 +273,34 @@ Dispatches on the lowercased command name. Most commands only use `args`. Multi-
 
 Returns `ParseDotError::UnknownCommand` for unrecognized commands.
 
-## Exporter System (exporter.rs)
+## Exporter System (exporter/)
 
 Formats for exporting SQL results:
 
 ```rust
-pub enum ExportFormat { Csv, Tsv, Json, Ndjson, Value, Clipboard }
+pub enum ExportFormat { Csv, Tsv, Json, Ndjson, Value, Clipboard, Parquet /* feature "parquet" */ }
 ```
 
 Key functions:
 
-- `write_output(stmt, output, format)` -- step through a statement and write results in the given format.
-- `format_from_path(path) -> Option<ExportFormat>` -- infer format from file extension. Handles double extensions for compression (`.csv.gz`, `.json.zst`).
-- `output_from_path(path) -> Box<dyn Write>` -- create a writer, automatically adding gzip or zstd compression based on extension.
+- `write_output(stmt, output, format, blob_limit)` -- step through a statement and write results in the given format. `output: Box<dyn Write + Send>` (the `Send` bound is required by the Parquet writer).
+- `format_from_path(path) -> Result<ExportFormat, FormatFromPathError>` -- infer format from file extension. Handles double extensions for compression (`.csv.gz`, `.json.zst`); `.parquet.gz`/`.parquet.zst` are rejected (`FormatFromPathError::CompressedParquet`) since Parquet compresses internally.
+- `output_from_path(path) -> Result<Box<dyn Write + Send>, ExportError>` -- create a writer, automatically adding gzip or zstd compression based on extension.
 
 JSON export respects SQLite's JSON subtype (subtype 74): text values with JSON subtype are emitted as raw JSON rather than quoted strings.
+
+### Parquet (exporter/parquet.rs, feature-gated: `parquet`)
+
+No `arrow` dependency; writes via the low-level `parquet::file::writer` /
+`ColumnWriter` API. Column types come from `sqlite3_column_decltype`
+(mapped through SQLite's storage-class affinity, plus a `BOOL`/`BOOLEAN`
+convention) when present, otherwise from sniffing the first row group
+(buffered up front; later row groups stream through per-column typed
+buffers). Every column is `OPTIONAL`; a value that doesn't fit the
+resolved type is `ExportError::ParquetTypeMismatch`, naming the column,
+1-based row, expected/found type, and why the type was chosen. See
+`PLAN-parquet.md` at the repo root for the full inference algorithm and
+type-acceptance table.
 
 ## Replacement Scans (replacement_scans.rs)
 

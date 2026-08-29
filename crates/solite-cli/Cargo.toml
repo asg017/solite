@@ -61,9 +61,10 @@ dotenvy = "0.15.7"
 clap_complete = { version = "4.6.5", features = ["unstable-dynamic"] }
 
 [features]
-default = ["ritestream", "object_store"]
+default = ["ritestream", "object_store", "parquet"]
 ritestream = ["solite-core/ritestream", "dep:ritestream-api"]
 object_store = ["solite-core/object_store"]
+parquet = ["solite-core/parquet"]
 
 [dependencies.ritestream-api]
 git = "https://github.com/asg017/litestream-rust"

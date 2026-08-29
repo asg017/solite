@@ -4,9 +4,10 @@ name = "solite-core"
 edition = "2021"
 
 [features]
-default = ["ritestream", "object_store"]
+default = ["ritestream", "object_store", "parquet"]
 ritestream = ["dep:ritestream-api"]
 object_store = ["dep:object_store", "dep:tokio"]
+parquet = ["dep:parquet"]
 
 [dependencies]
 ritestream-api = { git = "https://github.com/asg017/litestream-rust", optional = true }
@@ -34,12 +35,14 @@ term_size = "0.3.2"
 rmp-serde = "1"
 object_store = { version = "0.13", features = ["aws"], optional = true }
 tokio = { version = "1", features = ["rt"], optional = true }
+parquet = { version = "59", default-features = false, features = ["zstd"], optional = true }
 
 [dev-dependencies]
 rusqlite.workspace = true
 insta.workspace = true
 tempfile = "3"
 criterion.workspace = true
+bytes = "1"
 
 [[bench]]
 name = "sqlite"

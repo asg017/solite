@@ -8,9 +8,10 @@
          solite <file>.db        Open the REPL on a database (also .sqlite, .sqlite3)
   
   Options:
-        --allow-ssh  Allow connecting to ssh:// database URLs and custom --transport commands
-    -h, --help       Print help
-    -V, --version    Print version
+        --allow-ssh      Allow connecting to ssh:// database URLs and custom --transport commands
+        --color <COLOR>  Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
+    -h, --help           Print help
+    -V, --version        Print version
   
   Scripting and Query Execution:
     run              Run SQL scripts
@@ -67,6 +68,12 @@
         --schema <SCHEMA>
             Schema to validate queries against: a SQLite database file or a .sql file of CREATE statements
   
+        --color <COLOR>
+            Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+            
+            [default: auto]
+            [possible values: auto, always, never]
+  
     -o, --output <OUTPUT>
             Write the JSON report here instead of stdout
   
@@ -114,6 +121,12 @@
     -p, --parameters <NAME> <VALUE>
             Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`. Integer/decimal values bind as numbers; single-quote to force text, e.g. -p id "'42'"
   
+        --color <COLOR>
+            Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+            
+            [default: auto]
+            [possible values: auto, always, never]
+  
     -h, --help
             Print help (see a summary with '-h')
   
@@ -149,8 +162,9 @@
     help       Print this message or the help of the given subcommand(s)
   
   Options:
-        --allow-ssh  Allow connecting to ssh:// database URLs and custom --transport commands
-    -h, --help       Print help
+        --allow-ssh      Allow connecting to ssh:// database URLs and custom --transport commands
+        --color <COLOR>  Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
+    -h, --help           Print help
   
   '''
 # ---
@@ -173,6 +187,12 @@
   
     -o, --output <OUTPUT>
             Write results to a file; format inferred from extension (.csv, .tsv, .json, .ndjson; .gz/.zst compression supported)
+  
+        --color <COLOR>
+            Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+            
+            [default: auto]
+            [possible values: auto, always, never]
   
     -f, --format <FORMAT>
             Output format (default: table on a TTY, json otherwise)
@@ -234,6 +254,12 @@
         --remote-bin <REMOTE_BIN>
             Path to the solite binary on the remote machine (for ssh:// connections)
   
+        --color <COLOR>
+            Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+            
+            [default: auto]
+            [possible values: auto, always, never]
+  
         --transport <TRANSPORT>
             Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
   
@@ -272,6 +298,12 @@
   
     -c, --command <COMMAND>
             Execute SQL/dot commands from the given string (instead of a .sql file)
+  
+        --color <COLOR>
+            Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+            
+            [default: auto]
+            [possible values: auto, always, never]
   
     -p, --parameters <NAME> <VALUE>
             Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file` to bind the file's bytes as a BLOB

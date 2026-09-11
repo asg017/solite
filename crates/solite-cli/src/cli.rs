@@ -917,6 +917,11 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub allow_ssh: bool,
 
+    /// Control colored output. `auto` (default) colors only on a terminal,
+    /// honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+    #[arg(long, global = true, value_enum, default_value_t = clap::ColorChoice::Auto)]
+    pub color: clap::ColorChoice,
+
     #[command(subcommand)]
     pub command: Box<Commands>,
 }

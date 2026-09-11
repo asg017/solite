@@ -29,7 +29,12 @@ pub fn report_mismatch(
         .with_labels(vec![Label::primary(id, start..end)
             .with_message(format!("expected: {}\nactual: {}", expected, actual))]);
 
-    let writer = StandardStream::stderr(ColorChoice::Auto);
+    let color_choice = if crate::colors::use_color_stderr() {
+        ColorChoice::Always
+    } else {
+        ColorChoice::Never
+    };
+    let writer = StandardStream::stderr(color_choice);
     let config = term::Config::default();
     let _ = term::emit(&mut writer.lock(), &config, &files, &diagnostic);
 }

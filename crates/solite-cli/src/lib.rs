@@ -12,7 +12,7 @@ mod themes;
 
 use std::{env, path::PathBuf, process::exit};
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use cli::ReplArgs;
 
 /// Hidden re-exports for the criterion benches in `benches/tui.rs`.
@@ -32,10 +32,31 @@ pub fn run_main() {
 
     let args: Vec<String> = env::args().collect();
 
-    let (allow_ssh, x) = match cli::Cli::try_parse_from(&args) {
-        Ok(cli) => (cli.allow_ssh, cli.command),
+    // Pre-scan argv for `--color` so clap's own help/usage/error styling
+    // honors it too, before the full (authoritative) parse below resolves
+    // `cli.color` and calls `colors::init()`.
+    let pre_scanned_color = colors::scan_color_flag(&args);
+    let command = cli::Cli::command().color(pre_scanned_color);
+
+    // Mirrors what the derived `Cli::try_parse_from` does internally (match
+    // raw args, then build the `Cli` struct from the resulting matches) as a
+    // single combined `Result`, so the fallback-to-REPL error handling below
+    // (which must catch failures from *either* stage: a missing/invalid
+    // subcommand is a "no subcommand matched" `ArgMatches` in some cases and
+    // a `from_arg_matches` construction error in others) stays exactly as it
+    // was before splitting the two stages to apply `.color()` first.
+    let cli_result: Result<cli::Cli, clap::Error> = command
+        .try_get_matches_from(&args)
+        .and_then(|matches| cli::Cli::from_arg_matches(&matches));
+
+    let (allow_ssh, x) = match cli_result {
+        Ok(cli) => {
+            colors::init(cli.color);
+            (cli.allow_ssh, cli.command)
+        }
         Err(err) => match err.kind() {
             clap::error::ErrorKind::MissingSubcommand => {
+                colors::init(pre_scanned_color);
                 (false, Box::new(cli::Commands::Repl(ReplArgs { database: None, remote: Default::default() })))
             }
             clap::error::ErrorKind::InvalidSubcommand => {
@@ -46,6 +67,7 @@ pub fn run_main() {
                     .map(PathBuf::from)
                     .filter(|p: &PathBuf| cli::is_database_path(p))
                 {
+                    colors::init(pre_scanned_color);
                     (false, Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),
                         remote: Default::default(),

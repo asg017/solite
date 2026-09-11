@@ -37,7 +37,7 @@ pub fn handle_dot_command(
             Ok(result) => {
                 println!(
                     "{} loaded {} variables from {}",
-                    colors::green("✓"),
+                    colors::checkmark(),
                     result.loaded.len(),
                     result.path.display()
                 );
@@ -103,7 +103,7 @@ pub fn handle_dot_command(
         }
         DotCommand::Load(load_cmd) => match load_cmd.execute(&mut runtime.connection) {
             Ok(_) => {
-                println!("{} extension loaded", colors::green("✓"));
+                println!("{} extension loaded", colors::checkmark());
                 true
             }
             Err(err) => {
@@ -113,7 +113,7 @@ pub fn handle_dot_command(
         },
         DotCommand::Open(open_cmd) => match open_cmd.execute(runtime) {
             Ok(()) => {
-                println!("{} opened database", colors::green("✓"));
+                println!("{} opened database", colors::checkmark());
                 true
             }
             Err(e) => {
@@ -125,7 +125,7 @@ pub fn handle_dot_command(
             *timer = *enabled;
             println!(
                 "{} timer set {}",
-                colors::green("✓"),
+                colors::checkmark(),
                 if *enabled { "on" } else { "off" }
             );
             true
@@ -135,12 +135,12 @@ pub fn handle_dot_command(
             let action = env_cmd.execute();
             match action {
                 solite_core::dot::EnvAction::Set { name, .. } => {
-                    println!("{} environment variable {} set", colors::green("✓"), name);
+                    println!("{} environment variable {} set", colors::checkmark(), name);
                 }
                 solite_core::dot::EnvAction::Unset { name } => {
                     println!(
                         "{} environment variable {} unset",
-                        colors::green("✓"),
+                        colors::checkmark(),
                         name
                     );
                 }
@@ -151,7 +151,7 @@ pub fn handle_dot_command(
             Ok(()) => {
                 println!(
                     "{} exported results to {}",
-                    colors::green("✓"),
+                    colors::checkmark(),
                     cmd.target.display()
                 );
                 true
@@ -182,7 +182,7 @@ pub fn handle_dot_command(
                 Ok(path) => {
                     println!(
                         "{} wrote Vega-Lite spec to {}",
-                        colors::green("✓"),
+                        colors::checkmark(),
                         path.display()
                     );
                     true
@@ -215,14 +215,14 @@ pub fn handle_dot_command(
             Ok(Some(result)) => {
                 println!(
                     "{} synced (txid={}, {} pages)",
-                    colors::green("✓"),
+                    colors::checkmark(),
                     result.txid,
                     result.page_count
                 );
                 true
             }
             Ok(None) => {
-                println!("{} stream command completed", colors::green("✓"));
+                println!("{} stream command completed", colors::checkmark());
                 true
             }
             Err(e) => {
@@ -302,7 +302,7 @@ fn handle_parameter_command(runtime: &mut Runtime, cmd: &solite_core::dot::Param
             let value = solite_core::infer_parameter_value(value);
             match runtime.define_parameter_value(key.clone(), value) {
                 Ok(_) => {
-                    println!("{} parameter {} set", colors::green("✓"), key);
+                    println!("{} parameter {} set", colors::checkmark(), key);
                     true
                 }
                 Err(e) => {
@@ -313,13 +313,13 @@ fn handle_parameter_command(runtime: &mut Runtime, cmd: &solite_core::dot::Param
         }
         solite_core::dot::ParameterCommand::Unset(key) => {
             runtime.delete_parameter(key);
-            println!("{} parameter {} unset", colors::green("✓"), key);
+            println!("{} parameter {} unset", colors::checkmark(), key);
             true
         }
         solite_core::dot::ParameterCommand::List => {
             match solite_core::dot::param::list_parameters_statement(runtime) {
                 Some(mut stmt) => {
-                    let config = solite_table::TableConfig::terminal();
+                    let config = crate::colors::table_config();
                     if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
                         eprintln!("Error listing parameters: {}", e);
                         return false;
@@ -334,7 +334,7 @@ fn handle_parameter_command(runtime: &mut Runtime, cmd: &solite_core::dot::Param
         }
         solite_core::dot::ParameterCommand::Clear => {
             let cleared = solite_core::dot::param::clear_parameters(runtime);
-            println!("{} cleared {} parameter(s)", colors::green("✓"), cleared);
+            println!("{} cleared {} parameter(s)", colors::checkmark(), cleared);
             true
         }
     }

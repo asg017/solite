@@ -1,17 +1,11 @@
 //! SQL statement execution and progress tracking.
 
-use std::io::stdout;
 use std::time::Duration;
 
-use crossterm::{
-    execute,
-    style::{Color, Print, ResetColor, SetForegroundColor},
-};
 use jiff::fmt::friendly::{FractionalUnit, SpanPrinter};
 use jiff::{Timestamp, ToSpan};
 use solite_core::sqlite::Statement;
 use solite_core::Runtime;
-use solite_table::TableConfig;
 
 use super::format::format_duration;
 use super::status::get_statement_status;
@@ -50,7 +44,7 @@ pub fn handle_sql(
     let execution_start = std::time::Instant::now();
 
     // Display results as table
-    let config = TableConfig::terminal();
+    let config = crate::colors::table_config();
     let success = match solite_table::print_statement(stmt, &config) {
         Ok(_) => true,
         Err(err) => {
@@ -161,26 +155,16 @@ fn print_completion_status(stmt: &Statement, reference: &str, elapsed: Duration)
     let status = get_statement_status(stmt.pointer());
     let msg = status.completion_message();
 
-    let _ = execute!(
-        stdout(),
-        SetForegroundColor(Color::Green),
-        Print("✓ "),
-        SetForegroundColor(Color::Grey),
-        Print(format!("{} ", reference)),
-        SetForegroundColor(Color::White),
-        Print(msg),
-        Print(format!("in {}", format_duration(elapsed))),
-        ResetColor,
-        Print("\n")
+    println!(
+        "{} {}{}in {}",
+        crate::colors::checkmark(),
+        crate::colors::grey(format!("{reference} ")),
+        crate::colors::white(&msg),
+        format_duration(elapsed)
     );
 
     for line in status.trigger_effect_lines() {
-        let _ = execute!(
-            stdout(),
-            SetForegroundColor(Color::DarkGrey),
-            Print(format!("  ↳ {}\n", line)),
-            ResetColor,
-        );
+        println!("{}", crate::colors::dark_gray(format!("  ↳ {line}")));
     }
 }
 

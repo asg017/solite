@@ -38,7 +38,12 @@ pub(crate) fn report_error(
     additional_offset: Option<usize>,
 ) {
     let (files, diagnostic) = error_diagnostic(file_name, sql, error, additional_offset);
-    let writer = StandardStream::stderr(ColorChoice::Auto);
+    let color_choice = if crate::colors::use_color_stderr() {
+        ColorChoice::Always
+    } else {
+        ColorChoice::Never
+    };
+    let writer = StandardStream::stderr(color_choice);
 
     let config = term::Config::default();
     term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();

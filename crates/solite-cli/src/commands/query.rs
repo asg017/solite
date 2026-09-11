@@ -4,7 +4,6 @@
 //! from the command line, with support for various output formats.
 
 use solite_core::{exporter::ExportFormat, Runtime};
-use solite_table::TableConfig;
 use std::{
     fmt,
     io::{stdout, IsTerminal, Write},
@@ -154,7 +153,7 @@ fn query_impl(args: QueryArgs) -> Result<(), QueryError> {
     let use_table = args.format.is_none() && args.output.is_none() && stdout().is_terminal();
 
     if use_table {
-        let config = TableConfig::terminal();
+        let config = crate::colors::table_config();
         let mut stmt = stmt;
         solite_table::print_statement(&mut stmt, &config)
             .map_err(|e| QueryError::ExecutionFailed(e.to_string()))?;

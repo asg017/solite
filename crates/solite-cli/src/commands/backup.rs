@@ -2,7 +2,6 @@ use std::ffi::CString;
 use std::ptr;
 use std::time::Instant;
 
-use console::style;
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
 use libsqlite3_sys::*;
 use solite_core::sqlite::Connection;
@@ -169,7 +168,7 @@ pub fn backup(args: BackupArgs) -> Result<(), ()> {
 
     println!(
         "{} Backed up to {} ({}, {:.2?})",
-        style("\u{2714}").green(),
+        crate::colors::checkmark(),
         dest_display,
         HumanBytes(size),
         elapsed,

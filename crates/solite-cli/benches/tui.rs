@@ -145,7 +145,7 @@ fn bench_row_count(c: &mut Criterion) {
 fn bench_render(c: &mut Criterion) {
     let big = big_runtime();
     let wide = wide_runtime();
-    let theme = tui::CTP_MOCHA_THEME.clone();
+    let theme = tui::Theme::catppuccin_mocha();
     let mut group = c.benchmark_group("render_table_page");
 
     for (width, height) in [(80u16, 24u16), (250u16, 60u16)] {

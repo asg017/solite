@@ -2,15 +2,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 use solite_core::sqlite::OwnedValue;
 use solite_core::Runtime;
+use solite_theme::Theme;
 
 use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, ROW_KEYS};
-use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::utils::render_value_for_display;
 use crate::commands::tui::{value_to_string, HandleKeyResult, NavigateToPage, SharedClipboard};
 
@@ -90,7 +90,7 @@ fn row_to_json(columns: &[String], values: &[OwnedValue]) -> String {
 }
 
 pub struct RowPage {
-    pub theme: TuiTheme,
+    pub theme: Theme,
     pub table_name: String,
     pub row_index: usize,
     pub columns: Vec<String>,
@@ -109,7 +109,7 @@ impl RowPage {
         columns: Vec<String>,
         values: Vec<OwnedValue>,
         primary_keys: Vec<PrimaryKeyInfo>,
-        theme: TuiTheme,
+        theme: Theme,
         clipboard: SharedClipboard,
     ) -> Self {
         let mut state = ListState::default();
@@ -308,34 +308,32 @@ impl RowPage {
 
         // Header showing primary key
         let pk_display = self.primary_key_display();
-        let header_fg: Color = self.theme.header_fg.clone().into();
-        let keycap_color: Color = self.theme.keycap.clone().into();
+        let header_style = Style::from(&self.theme.header).add_modifier(Modifier::BOLD);
+        let keycap_style = Style::from(&self.theme.keycap);
 
         let header_text = Line::from(vec![
-            Span::styled(
-                format!("{} ", self.table_name),
-                Style::default().fg(header_fg).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(pk_display, Style::default().fg(keycap_color)),
+            Span::styled(format!("{} ", self.table_name), header_style),
+            Span::styled(pk_display, keycap_style),
         ]);
 
         let header = Paragraph::new(header_text)
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(Style::from(&self.theme.border)),
             )
             .centered();
         frame.render_widget(header, header_rect);
 
-        // Pre-compute colors
-        let pk_col_color: Color = self.theme.keycap.clone().into();
-        let normal_col_color: Color = self.theme.header_fg.clone().into();
-        let null_color: Color = self.theme.null.clone().into();
-        let int_color: Color = self.theme.integer.clone().into();
-        let double_color: Color = self.theme.double.clone().into();
-        let text_color: Color = self.theme.text.clone().into();
-        let blob_color: Color = self.theme.blob.clone().into();
+        // Pre-compute styles
+        let pk_col_style = Style::from(&self.theme.keycap).add_modifier(Modifier::BOLD);
+        let normal_col_style = Style::from(&self.theme.header).add_modifier(Modifier::BOLD);
+        let null_style = Style::from(&self.theme.null);
+        let int_style = Style::from(&self.theme.integer);
+        let double_style = Style::from(&self.theme.double);
+        let text_style = Style::from(&self.theme.text);
+        let blob_style = Style::from(&self.theme.blob);
+        let pk_marker_style = Style::from(&self.theme.warning);
 
         // Build list items
         let items: Vec<ListItem> = self
@@ -349,22 +347,14 @@ impl RowPage {
                     .iter()
                     .any(|pk| pk.column_index == idx);
 
-                let col_style = if is_pk {
-                    Style::default()
-                        .fg(pk_col_color)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                        .fg(normal_col_color)
-                        .add_modifier(Modifier::BOLD)
-                };
+                let col_style = if is_pk { pk_col_style } else { normal_col_style };
 
                 let val_style = match val {
-                    OwnedValue::Null => Style::default().fg(null_color),
-                    OwnedValue::Integer(_) => Style::default().fg(int_color),
-                    OwnedValue::Double(_) => Style::default().fg(double_color),
-                    OwnedValue::Text(_) => Style::default().fg(text_color),
-                    OwnedValue::Blob(_) => Style::default().fg(blob_color),
+                    OwnedValue::Null => null_style,
+                    OwnedValue::Integer(_) => int_style,
+                    OwnedValue::Double(_) => double_style,
+                    OwnedValue::Text(_) => text_style,
+                    OwnedValue::Blob(_) => blob_style,
                 };
 
                 let val_display = render_value_for_display(val);
@@ -373,17 +363,16 @@ impl RowPage {
 
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{:<20}", col), col_style),
-                    Span::styled(pk_marker, Style::default().fg(Color::Yellow)),
+                    Span::styled(pk_marker, pk_marker_style),
                     Span::raw("  "),
                     Span::styled(val_display, val_style),
                 ]))
             })
             .collect();
 
-        let hl_bg: Color = self.theme.row_hl_bg.clone().into();
         let list = List::new(items)
             .block(Block::default())
-            .highlight_style(Style::default().bg(hl_bg).add_modifier(Modifier::BOLD))
+            .highlight_style(Style::from(&self.theme.selection).add_modifier(Modifier::BOLD))
             .highlight_symbol("› ");
 
         frame.render_stateful_widget(list, list_rect, &mut self.state);
@@ -391,9 +380,9 @@ impl RowPage {
         // Footer message
         if let Some(msg) = &self.footer_message {
             let style = if msg.starts_with("Copied") {
-                Style::default().fg(Color::Green)
+                Style::from(&self.theme.success)
             } else {
-                Style::default().fg(Color::Red)
+                Style::from(&self.theme.error)
             };
             frame.render_widget(
                 Paragraph::new(msg.as_str()).style(style).centered(),
@@ -402,10 +391,10 @@ impl RowPage {
         }
 
         // Help bar
-        help_bar_from(ROW_KEYS).render(frame, help_rect);
+        help_bar_from(ROW_KEYS, self.theme).render(frame, help_rect);
 
         // Help overlay (renders on top)
-        self.help_popup.render(frame, area);
+        self.help_popup.render(frame, area, &self.theme);
     }
 }
 

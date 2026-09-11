@@ -9,13 +9,11 @@ mod help_popup;
 mod listing_page;
 mod row_page;
 mod table_page;
-mod tui_theme;
 mod utils;
 
 #[cfg(test)]
 mod test_tui;
 
-use crate::commands::tui::tui_theme::{CTP_MOCHA_THEME, TuiTheme};
 use crate::commands::tui::{listing_page::ListingPage, row_page::RowPage, table_page::TablePage};
 use color_eyre::Result;
 use crossterm::event::{self, KeyEvent};
@@ -25,6 +23,7 @@ use ratatui::text::{Line, Text};
 use ratatui::Frame;
 use solite_core::sqlite::OwnedValue;
 use solite_core::Runtime;
+use solite_theme::Theme;
 use std::time::Duration;
 
 /// Format a number with thousand separators
@@ -105,8 +104,8 @@ pub mod bench_support {
         data_to_inserts, data_to_tsv, load_table_data, Data, LoadResult, RowCount, TablePage,
         WINDOW_SIZE,
     };
-    pub use super::tui_theme::{CTP_MOCHA_THEME, TuiTheme};
     pub use super::{Clipboard, SharedClipboard};
+    pub use solite_theme::Theme;
 }
 
 enum Page<'a> {
@@ -118,7 +117,7 @@ enum Page<'a> {
 pub(crate) struct App<'a> {
     runtime: &'a Runtime,
     page: Page<'a>,
-    theme: TuiTheme,
+    theme: Theme,
     clipboard: SharedClipboard,
 }
 impl<'a> App<'a> {
@@ -178,7 +177,7 @@ impl<'a> App<'a> {
 
     fn render(&mut self, frame: &mut Frame) {
         frame.render_widget(
-            ratatui::widgets::Block::new().bg::<Color>(self.theme.base.clone().into()),
+            ratatui::widgets::Block::new().style(ratatui::style::Style::from(&self.theme.background)),
             frame.area(),
         );
 
@@ -216,13 +215,13 @@ impl<'a> App<'a> {
         frame.render_widget(
             Text::from("Solite")
                 .bold()
-                .fg::<Color>(self.theme.keycap.clone().into())
+                .fg::<Color>(self.theme.keycap.fg.into())
                 .centered(),
             center,
         );
 
         // Right: quick help (q backs out of table/row pages; only Q hard-quits)
-        let keycap: Color = self.theme.keycap.clone().into();
+        let keycap: Color = self.theme.keycap.fg.into();
         let help = match &self.page {
             Page::Listing(_) => Line::from(vec![
                 "?".bold().fg(keycap),
@@ -253,7 +252,7 @@ impl<'a> App<'a> {
 /// Shared app construction + event loop for both TUI entry points.
 /// Opens directly on `initial_table` when given (skipping the listing query).
 fn run_app(runtime: &Runtime, initial_table: Option<&str>) -> anyhow::Result<()> {
-    let theme = CTP_MOCHA_THEME.clone();
+    let theme = Theme::terminal();
     let clipboard: SharedClipboard = std::rc::Rc::new(std::cell::RefCell::new(SystemClipboard));
     let page = match initial_table {
         Some(table_name) => Page::Table(TablePage::new(

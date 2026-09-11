@@ -4,17 +4,17 @@ use crate::commands::tui::copy_popup::{CopyOption, CopyPopup};
 use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, TABLE_KEYS};
 use crate::commands::tui::row_page::{get_primary_keys, PrimaryKeyInfo};
 use crate::commands::tui::utils::render_value_for_display_capped;
-use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{
     value_to_string, Frame, HandleKeyResult, NavigateToPage, RowPageData, SharedClipboard,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Text;
 use ratatui::widgets::{Cell, Row, Table, TableState};
 use solite_core::sqlite::{escape_string, quote_identifier, OwnedValue};
 use solite_core::Runtime;
+use solite_theme::Theme;
 
 #[derive(Debug)]
 pub struct Data {
@@ -578,7 +578,7 @@ pub fn data_to_inserts(table_name: &str, data: &Data) -> String {
 
 pub struct TablePage<'a> {
     runtime: &'a Runtime,
-    pub(crate) theme: TuiTheme,
+    pub(crate) theme: Theme,
     pub(crate) state: TableState,
     pub(crate) table_name: String,
     pub(crate) data: Data,
@@ -625,7 +625,7 @@ impl<'a> TablePage<'a> {
     pub fn new(
         table_name: &str,
         runtime: &'a Runtime,
-        theme: TuiTheme,
+        theme: Theme,
         clipboard: SharedClipboard,
     ) -> Self {
         let use_rowid = rowid_keyset_usable(runtime, table_name);
@@ -1375,25 +1375,15 @@ impl TablePage<'_> {
         let n_columns_show = self.n_columns_show;
         let header = Row::new(self.data.columns.iter().skip(self.column_idx_offset).take(n_columns_show).enumerate().map(
             |(idx, c)| {
-                Cell::from(Text::from(c.as_str())).style(
-                    Style::new()
-                        .bold()
-                        .fg(self.theme.header_fg.clone().into())
-                        .bg(
-                            if selected_header_idx == idx.saturating_add(self.column_idx_offset) {
-                                self.theme.header_selected_bg.clone().into()
-                            } else {
-                                self.theme.header_bg.clone().into()
-                            },
-                        ),
-                )
+                let role = if selected_header_idx == idx.saturating_add(self.column_idx_offset) {
+                    &self.theme.header_selected
+                } else {
+                    &self.theme.header
+                };
+                Cell::from(Text::from(c.as_str())).style(Style::from(role))
             },
         ))
-        .style(
-            Style::new()
-                .bold()
-                .fg(self.theme.header_style_fg.clone().into()),
-        );
+        .style(Style::from(&self.theme.type_name).add_modifier(Modifier::BOLD));
 
         let rows = self.data.rows.iter().map(|r| {
             Row::new(r.iter().skip(self.column_idx_offset).take(n_columns_show).map(|value| {
@@ -1408,13 +1398,11 @@ impl TablePage<'_> {
                 Cell::default()
                     .content(text)
                     .style(match value {
-                        OwnedValue::Null => Style::new().fg(self.theme.null.clone().into()),
-                        OwnedValue::Integer(_) => {
-                            Style::new().fg(self.theme.integer.clone().into())
-                        }
-                        OwnedValue::Double(_) => Style::new().fg(self.theme.double.clone().into()),
-                        OwnedValue::Text(_) => Style::new().fg(self.theme.text.clone().into()),
-                        OwnedValue::Blob(_) => Style::new().fg(self.theme.blob.clone().into()),
+                        OwnedValue::Null => Style::from(&self.theme.null),
+                        OwnedValue::Integer(_) => Style::from(&self.theme.integer),
+                        OwnedValue::Double(_) => Style::from(&self.theme.double),
+                        OwnedValue::Text(_) => Style::from(&self.theme.text),
+                        OwnedValue::Blob(_) => Style::from(&self.theme.blob),
                     })
             }))
         });
@@ -1422,56 +1410,47 @@ impl TablePage<'_> {
         let table = Table::new(rows, widths)
             .header(header)
             .column_spacing(column_spacing)
-            .style(Style::new().fg(self.theme.table_fg.clone().into()))
-            .row_highlight_style(Style::new().bold().bg(self.theme.row_hl_bg.clone().into()))
-            .cell_highlight_style(
-                Style::new()
-                    .bold()
-                    .fg(self.theme.cell_hl_fg.clone().into())
-                    .bg(self.theme.cell_hl_bg.clone().into()),
-            );
+            .style(Style::from(&self.theme.text))
+            .row_highlight_style(Style::from(&self.theme.selection).add_modifier(Modifier::BOLD))
+            .cell_highlight_style(Style::from(&self.theme.highlight).add_modifier(Modifier::BOLD));
 
         frame.render_stateful_widget(table, table_rect, &mut self.state);
 
         // Footer message (copy confirmation, errors, position indicator)
         if self.pending_sort.is_some() {
-            use ratatui::style::Color;
             frame.render_widget(
                 Text::from("Sorting…")
-                    .style(Style::new().fg(Color::Yellow))
+                    .style(Style::from(&self.theme.warning))
                     .centered(),
                 message_rect,
             );
         } else if let Some(msg) = &self.footer_message {
-            use ratatui::style::Color;
             let style = if msg.starts_with("Copied") || msg.starts_with("✓") {
-                Style::new().fg(Color::Green)
+                Style::from(&self.theme.success)
             } else {
-                Style::new().fg(Color::Red)
+                Style::from(&self.theme.error)
             };
             frame.render_widget(
                 Text::from(msg.as_str()).style(style).centered(),
                 message_rect,
             );
         } else if let Some(ref error) = self.error {
-            use ratatui::style::Color;
             frame.render_widget(
                 Text::from(format!("Error: {}", error))
-                    .style(Style::new().fg(Color::Red))
+                    .style(Style::from(&self.theme.error))
                     .centered(),
                 message_rect,
             );
         } else if self.row_count.known > 0 || !self.row_count.is_complete {
             // Show position indicator with streaming count
             use super::format_number;
-            use ratatui::style::Color;
             let current_row = self.selected_absolute_row().map(|r| r + 1).unwrap_or(0);
             let current_row_display = format_number(current_row);
             let count_display = self.row_count.display();
             let position_text = format!("Row {} of {}", current_row_display, count_display);
             frame.render_widget(
                 Text::from(position_text)
-                    .style(Style::new().fg(Color::DarkGray))
+                    .style(Style::from(&self.theme.footer))
                     .centered(),
                 message_rect,
             );
@@ -1484,11 +1463,11 @@ impl TablePage<'_> {
         }
 
         // Help bar
-        help_bar_from(TABLE_KEYS).render(frame, help_rect);
+        help_bar_from(TABLE_KEYS, self.theme).render(frame, help_rect);
 
         // Popups (render on top)
-        self.copy_popup.render(frame, area);
-        self.help_popup.render(frame, area);
+        self.copy_popup.render(frame, area, &self.theme);
+        self.help_popup.render(frame, area, &self.theme);
 
         // Run a pending sort only after its "Sorting…" frame has been
         // composed: the blocking ORDER BY query executes between frames,

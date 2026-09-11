@@ -30,7 +30,7 @@ mod tests {
     impl<'a> TestApp<'a> {
         fn new(runtime: &'a mut Runtime, width: u16, height: u16) -> Self {
             let terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            let theme = crate::commands::tui::tui_theme::CTP_MOCHA_THEME.clone();
+            let theme = solite_theme::Theme::terminal();
             let clipboard = Rc::new(RefCell::new(FakeClipboard::default()));
             let shared: SharedClipboard = clipboard.clone();
             let page = Page::Listing(ListingPage::new(runtime, &theme));

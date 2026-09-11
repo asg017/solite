@@ -241,9 +241,10 @@ async fn handle_dot_command_inner(
         },
         DotCommand::Schema(cmd) => match cmd.execute(runtime) {
             Ok(creates) => {
+                let theme = solite_theme::Theme::terminal();
                 let html = creates
                     .iter()
-                    .map(|s| render_sql_html(s))
+                    .map(|s| render_sql_html(s, &theme))
                     .collect::<Vec<String>>()
                     .join("\n");
                 sender.send_html(html, parent).await?;

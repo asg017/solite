@@ -1,13 +1,16 @@
 use rustyline::highlight::Highlighter;
-use solite_stdlib::BUILTIN_FUNCTIONS;
 use solite_theme::Theme;
 use std::borrow::Cow::{self, Borrowed, Owned};
 
-use solite_lexer::{lex, Token, TokenKind};
+use solite_lexer::{lex, TokenKind};
 
-/// Tokenize `sql` and paint each token with the matching role from `theme`.
-/// Whitespace and unstyled punctuation are emitted verbatim, so
-/// ANSI-stripped output always equals the input.
+use crate::sql_tokens::classify;
+
+/// Tokenize `sql` and paint each token with the matching role from `theme`,
+/// via the shared [`crate::sql_tokens::classify`] classifier (also used by
+/// the Jupyter HTML SQL renderer, `commands/jupyter/render/syntax.rs`, so
+/// the two surfaces can't drift). Whitespace and unstyled punctuation are
+/// emitted verbatim, so ANSI-stripped output always equals the input.
 ///
 /// Gated on [`crate::colors::use_color`]: this is the pure styling pass with
 /// no gate of its own — see [`highlight_sql`] for the public, gated entry
@@ -16,95 +19,24 @@ use solite_lexer::{lex, Token, TokenKind};
 fn highlight_sql_with(sql: &str, theme: &Theme) -> String {
     let tokens = lex(sql);
     let mut hl = String::new();
-    let mut iter = tokens.iter().peekable();
-    let mut prevs: Vec<&Token> = vec![];
+    let mut prev_kind: Option<TokenKind> = None;
     let mut prev_end = 0usize;
 
-    while let Some(token) = iter.next() {
+    for (i, token) in tokens.iter().enumerate() {
         // Emit any whitespace/characters between tokens as plain text
         if token.span.start > prev_end {
             hl.push_str(&sql[prev_end..token.span.start]);
         }
-        let s = match token.kind {
-            // Comments (line and block)
-            TokenKind::Comment | TokenKind::BlockComment => {
-                theme.comment.paint(&sql[token.span.clone()])
-            }
-            // Bind parameters (all 4 variants)
-            TokenKind::BindParam
-            | TokenKind::BindParamColon
-            | TokenKind::BindParamAt
-            | TokenKind::BindParamDollar => theme.parameter.paint(&sql[token.span.clone()]),
-            // Numbers (integer, float, hex)
-            TokenKind::Integer | TokenKind::Float | TokenKind::HexInteger => {
-                theme.number.paint(&sql[token.span.clone()])
-            }
-            // Operators
-            TokenKind::Plus
-            | TokenKind::Minus
-            | TokenKind::Pipe
-            | TokenKind::Slash
-            | TokenKind::Lt
-            | TokenKind::Gt
-            | TokenKind::Le
-            | TokenKind::Ge
-            | TokenKind::Eq
-            | TokenKind::EqEq
-            | TokenKind::Ne
-            | TokenKind::BangEq
-            | TokenKind::Ampersand
-            | TokenKind::Tilde
-            | TokenKind::LShift
-            | TokenKind::RShift
-            | TokenKind::Concat
-            | TokenKind::Percent => theme.operator.paint(&sql[token.span.clone()]),
-            // String literals
-            TokenKind::String | TokenKind::Blob => theme.string_literal.paint(&sql[token.span.clone()]),
-            // Punctuation (no styling)
-            TokenKind::Star
-            | TokenKind::LBracket
-            | TokenKind::RBracket
-            | TokenKind::Comma
-            | TokenKind::Semicolon
-            | TokenKind::Dot => sql[token.span.clone()].to_string(),
-            // Parentheses
-            TokenKind::LParen | TokenKind::RParen => {
-                theme.punctuation.paint(&sql[token.span.clone()])
-            }
-            // JSON operators
-            TokenKind::Arrow | TokenKind::ArrowArrow => {
-                theme.operator.paint(&sql[token.span.clone()])
-            }
-            // Identifiers (regular and quoted)
-            TokenKind::Ident
-            | TokenKind::QuotedIdent
-            | TokenKind::BracketIdent
-            | TokenKind::BacktickIdent => {
-                // If the next token is a '(' and previous token is NOT 'using' or 'table'
-                if matches!(iter.peek().map(|v| v.kind), Some(TokenKind::LParen))
-                    && !matches!(
-                        prevs.last().map(|t| t.kind),
-                        Some(TokenKind::Using) | Some(TokenKind::Table)
-                    )
-                {
-                    if BUILTIN_FUNCTIONS
-                        .iter()
-                        .any(|r| *r == sql[token.span.clone()].trim())
-                    {
-                        theme.function_builtin.paint(&sql[token.span.clone()])
-                    } else {
-                        theme.function.paint(&sql[token.span.clone()])
-                    }
-                } else {
-                    sql[token.span.clone()].to_string()
-                }
-            }
-            // Everything else is a keyword
-            _ => theme.keyword.paint(&sql[token.span.clone()]),
+        let text = &sql[token.span.clone()];
+        let next_is_lparen =
+            matches!(tokens.get(i + 1).map(|t| t.kind), Some(TokenKind::LParen));
+        let s = match classify(token.kind, text, prev_kind, next_is_lparen) {
+            Some(role) => role.style(theme).paint(text),
+            None => text.to_string(),
         };
         hl.push_str(&s);
         prev_end = token.span.end;
-        prevs.push(token);
+        prev_kind = Some(token.kind);
     }
     // Emit any trailing content after the last token
     if prev_end < sql.len() {

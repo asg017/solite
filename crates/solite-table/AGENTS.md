@@ -20,7 +20,7 @@ Controls all rendering behavior. Constructed via `TableConfig::terminal()`, `::p
 | `head_rows`        | `20`             | Number of rows to keep from the start                    |
 | `tail_rows`        | `20`             | Number of rows to keep from the end                      |
 | `max_cell_width`   | `100`            | Truncate cell content beyond this width                  |
-| `theme`            | `Theme::terminal()` (ANSI-16) | `Option<solite_theme::Theme>` for colors; `None` disables color. `TableConfig::html()` uses `Theme::catppuccin_mocha()` explicitly. |
+| `theme`            | `Theme::terminal()` (ANSI-16) | `Option<solite_theme::Theme>` for colors; `None` disables color. `TableConfig::html()` also defaults to `Theme::terminal()`, so the HTML chrome and cell colors both adapt to the host notebook; pass `with_theme(Some(Theme::catppuccin_mocha()))` for the fixed truecolor look. |
 | `show_footer`      | `true`           | Show row/column count footer                             |
 | `json_interactive` | `false`          | Render JSON as interactive tree viewer (HTML mode only)   |
 
@@ -82,7 +82,7 @@ All renderers take the same arguments: `columns`, `head_rows`, `tail_rows`, `lay
 - **`render_terminal`** (`terminal.rs`) -- Box-drawing borders, ANSI-colored cells, ellipsis rows for truncated results, footer line.
 - **`render_string`** (`string.rs`) -- Delegates to `render_terminal` (identical output).
 - **`render_string_plain`** (`string.rs`) -- Calls `render_terminal` with `theme: None` to suppress ANSI codes.
-- **`render_html`** (`html.rs`) -- Generates `<table class="solite-table">` with inline CSS. Uses `config.theme` (Catppuccin Mocha by default via `TableConfig::html()`) for cell/JSON coloring; the static chrome CSS is still hardcoded Catppuccin (ticket 06 addresses this). Supports interactive JSON tree viewer via embedded JS/CSS.
+- **`render_html`** (`html.rs`) -- Generates `<table class="solite-table">` with inline CSS. The chrome CSS (`TABLE_CSS`) is `currentColor`/`color-mix` based, so it adapts to the host notebook's light/dark theme with no hardcoded palette. Cell values reference `--solite-<role>` CSS custom properties (declared on the `.solite-output` wrapper by `theme_css_vars`, from `config.theme`, `Theme::terminal()` by default) with `currentColor` fallbacks. Supports interactive JSON tree viewer via embedded JS/CSS.
 
 ### 4. Cell Formatting (`format/`)
 

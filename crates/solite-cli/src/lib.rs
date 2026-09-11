@@ -8,7 +8,7 @@ mod cli;
 mod colors;
 mod commands;
 mod errors;
-mod themes;
+mod sql_tokens;
 
 use std::{env, path::PathBuf, process::exit};
 

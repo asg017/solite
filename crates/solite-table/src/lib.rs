@@ -25,6 +25,7 @@ pub mod render;
 pub mod types;
 
 pub use config::{OutputMode, TableConfig};
+pub use format::theme_css_vars;
 pub use solite_theme::{ColorValue, Style, Theme, RESET};
 pub use types::{Alignment, CellValue, ColumnInfo, TableLayout, ValueType};
 

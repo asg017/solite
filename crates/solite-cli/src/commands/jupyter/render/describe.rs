@@ -181,7 +181,7 @@ fn render_html(d: &TableDescription, sample_html: &str, footer: &str) -> String 
     if let Some(ddl) = &d.ddl {
         let details = root.child("details");
         details.child("summary").set_text("DDL");
-        details.raw(render_sql_html(ddl));
+        details.raw(render_sql_html(ddl, &solite_theme::Theme::terminal()));
     }
 
     root.to_html()

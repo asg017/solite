@@ -55,6 +55,11 @@ pub fn format_cell_html(
     }
 }
 
+/// Cell foreground colors reference a `--solite-<role>` CSS custom property
+/// (declared once on the table wrapper by `theme_css_vars`) rather than a
+/// resolved color baked into every cell — see `format/theme_vars.rs`. The
+/// `currentColor` fallback keeps cells legible even when a wrapper omits the
+/// variable (e.g. an older cached render, or `theme: None`).
 fn format_cell_html_with_theme(
     escaped: &str,
     raw: &str,
@@ -65,25 +70,29 @@ fn format_cell_html_with_theme(
         ValueType::Null => String::new(),
         ValueType::Integer => {
             format!(
-                "<span style=\"{}; font-family: monospace;\">{}</span>",
-                theme.integer.to_css(),
+                "<span style=\"color: var(--solite-integer, currentColor); font-family: monospace;\">{}</span>",
                 escaped
             )
         }
         ValueType::Double => {
             format!(
-                "<span style=\"{}; font-family: monospace;\">{}</span>",
-                theme.double.to_css(),
+                "<span style=\"color: var(--solite-double, currentColor); font-family: monospace;\">{}</span>",
                 escaped
             )
         }
         // Colored to match the ANSI path (`format_cell_with_theme` above),
         // which has always colored text values.
         ValueType::Text => {
-            format!("<span style=\"{}\">{}</span>", theme.text.to_css(), escaped)
+            format!(
+                "<span style=\"color: var(--solite-text, currentColor);\">{}</span>",
+                escaped
+            )
         }
         ValueType::Blob => {
-            format!("<span style=\"{}\">{}</span>", theme.blob.to_css(), escaped)
+            format!(
+                "<span style=\"color: var(--solite-blob, currentColor);\">{}</span>",
+                escaped
+            )
         }
         ValueType::Json => crate::format::json::format_json_html(raw, theme),
     }

@@ -24,7 +24,7 @@
       border: 1px solid currentColor;
       opacity: 0.8;
     }
-  </style><div class="solite-describe-header"><code>main.users</code><span class="kind">table</span><span class="count">3 rows</span></div><details open="open"><summary>Data</summary><div style="overflow-x:auto"><div class="solite-output" style="--jt-key: #89b4fa; --jt-str: #a6e3a1; --jt-num: #fab387; --jt-bool: #eba0ac; --jt-null: #bac2de; --jt-footer: #a6adc8; --jt-text: #cdd6f4; --jt-border: #6c7086; --jt-bg: #cdd6f4;">
+  </style><div class="solite-describe-header"><code>main.users</code><span class="kind">table</span><span class="count">3 rows</span></div><details open="open"><summary>Data</summary><div style="overflow-x:auto"><div class="solite-output" style="--solite-null: var(--solite-ansi-bright-black, #7f7f7f); --solite-integer: var(--solite-ansi-yellow, #cdcd00); --solite-double: var(--solite-ansi-yellow, #cdcd00); --solite-text: currentColor; --solite-blob: var(--solite-ansi-cyan, #00cdcd); --solite-keyword: var(--solite-ansi-magenta, #cd00cd); --solite-string-literal: var(--solite-ansi-green, #00cd00); --solite-comment: var(--solite-ansi-bright-black, #7f7f7f); --solite-parameter: var(--solite-ansi-red, #cd0000); --solite-operator: var(--solite-ansi-cyan, #00cdcd); --solite-number: var(--solite-ansi-yellow, #cdcd00); --solite-function: var(--solite-ansi-blue, #0000ee); --solite-function-builtin: var(--solite-ansi-blue, #0000ee); --solite-type-name: var(--solite-ansi-yellow, #cdcd00); --solite-punctuation: currentColor; --solite-dot-command: var(--solite-ansi-blue, #0000ee); --solite-json-key: var(--solite-ansi-blue, #0000ee); --solite-json-string: var(--solite-ansi-green, #00cd00); --solite-json-number: var(--solite-ansi-yellow, #cdcd00); --solite-json-boolean: var(--solite-ansi-red, #cd0000); --solite-background: currentColor; --solite-border: currentColor; --solite-header: currentColor; --solite-header-selected: currentColor; --solite-footer: currentColor; --solite-muted: var(--solite-ansi-bright-black, #7f7f7f); --solite-selection: currentColor; --solite-highlight: var(--solite-ansi-bright-white, #ffffff); --solite-success: var(--solite-ansi-green, #00cd00); --solite-error: var(--solite-ansi-red, #cd0000); --solite-warning: var(--solite-ansi-yellow, #cdcd00); --solite-keycap: var(--solite-ansi-green, #00cd00); --jt-key: var(--solite-ansi-blue, #0000ee); --jt-str: var(--solite-ansi-green, #00cd00); --jt-num: var(--solite-ansi-yellow, #cdcd00); --jt-bool: var(--solite-ansi-red, #cd0000); --jt-null: var(--solite-ansi-bright-black, #7f7f7f); --jt-footer: currentColor; --jt-text: currentColor; --jt-border: currentColor; --jt-bg: currentColor;">
   <style>
   .solite-table {
       border-collapse: collapse;
@@ -32,34 +32,33 @@
       font-size: 14px;
   }
   .solite-table th, .solite-table td {
-      border: 1px solid #6c7086;
+      border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
       padding: 4px 8px;
       text-align: left;
   }
   .solite-table th {
-      background-color: #313244;
-      color: #cdd6f4;
+      background-color: color-mix(in srgb, currentColor 12%, transparent);
       font-weight: bold;
   }
   .solite-table tr:nth-child(even) {
-      background-color: #1e1e2e;
+      background-color: color-mix(in srgb, currentColor 6%, transparent);
   }
   .solite-table tr:nth-child(odd) {
-      background-color: #181825;
+      background-color: color-mix(in srgb, currentColor 3%, transparent);
   }
   .solite-table .ellipsis-row {
-      background-color: #45475a;
+      background-color: color-mix(in srgb, currentColor 12%, transparent);
       text-align: center;
-      color: #a6adc8;
+      opacity: 0.7;
       font-style: italic;
   }
   .solite-table .ellipsis-col {
-      background-color: #45475a;
+      background-color: color-mix(in srgb, currentColor 12%, transparent);
       text-align: center;
-      color: #a6adc8;
+      opacity: 0.7;
   }
   .solite-footer {
-      color: #a6adc8;
+      opacity: 0.7;
       font-size: 12px;
       margin-top: 4px;
   }
@@ -156,9 +155,9 @@
   <table class="solite-table">
   <thead><tr><th>id</th><th>name</th></tr></thead>
   <tbody>
-  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">1</span></td><td style="text-align: left;"><span style="color: #cdd6f4">a</span></td></tr>
-  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">2</span></td><td style="text-align: left;"><span style="color: #cdd6f4">b</span></td></tr>
-  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">3</span></td><td style="text-align: left;"><span style="color: #cdd6f4">c</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: var(--solite-integer, currentColor); font-family: monospace;">1</span></td><td style="text-align: left;"><span style="color: var(--solite-text, currentColor);">a</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: var(--solite-integer, currentColor); font-family: monospace;">2</span></td><td style="text-align: left;"><span style="color: var(--solite-text, currentColor);">b</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: var(--solite-integer, currentColor); font-family: monospace;">3</span></td><td style="text-align: left;"><span style="color: var(--solite-text, currentColor);">c</span></td></tr>
   </tbody>
   </table>
   <script>(function() {
@@ -394,13 +393,14 @@
     .solite-json-overflow::before {
       content: "...";
       font-size: 1rem;
-      color: #666;
+      color: currentColor;
+      opacity: 0.6;
     }
     .solite-json-overflow::before::selection {
       color: transparent;
       background: transparent;
     }
-  </style><pre style="font-family:monospace"><span style="color:#CBA6F7">CREATE</span><span> </span><span style="color:#CBA6F7">TABLE</span><span> </span><span style="color:#89B4FA">users</span><span style="color:#89DCEB">(</span><span style="color:#89B4FA">id</span><span> </span><span style="color:#89B4FA">integer</span><span> </span><span style="color:#CBA6F7">primary</span><span> </span><span style="color:#CBA6F7">key</span><span style="color:#89DCEB">,</span><span> </span><span style="color:#89B4FA">name</span><span> </span><span style="color:#89B4FA">text</span><span> </span><span style="color:#CBA6F7">not</span><span> </span><span style="color:#CBA6F7">null</span><span style="color:#89DCEB">)</span><span style="color:#89DCEB">;</span></pre></div></details></div>
+  </style><pre style="font-family:monospace"><span style="color:var(--solite-ansi-magenta, #cd00cd)">CREATE</span><span> </span><span style="color:var(--solite-ansi-magenta, #cd00cd)">TABLE</span><span> </span><span>users</span><span style="color:currentColor">(</span><span>id</span><span> </span><span>integer</span><span> </span><span style="color:var(--solite-ansi-magenta, #cd00cd)">primary</span><span> </span><span style="color:var(--solite-ansi-magenta, #cd00cd)">key</span><span>,</span><span> </span><span>name</span><span> </span><span>text</span><span> </span><span style="color:var(--solite-ansi-magenta, #cd00cd)">not</span><span> </span><span style="color:var(--solite-ansi-magenta, #cd00cd)">null</span><span style="color:currentColor">)</span><span>;</span></pre></div></details></div>
   '''
 # ---
 # name: test_describe_dot_command[describe users text]
@@ -440,7 +440,7 @@
 # ---
 # name: test_hello.1
   '''
-  <div class="solite-output" style="--jt-key: #89b4fa; --jt-str: #a6e3a1; --jt-num: #fab387; --jt-bool: #eba0ac; --jt-null: #bac2de; --jt-footer: #a6adc8; --jt-text: #cdd6f4; --jt-border: #6c7086; --jt-bg: #cdd6f4;">
+  <div class="solite-output" style="--solite-null: var(--solite-ansi-bright-black, #7f7f7f); --solite-integer: var(--solite-ansi-yellow, #cdcd00); --solite-double: var(--solite-ansi-yellow, #cdcd00); --solite-text: currentColor; --solite-blob: var(--solite-ansi-cyan, #00cdcd); --solite-keyword: var(--solite-ansi-magenta, #cd00cd); --solite-string-literal: var(--solite-ansi-green, #00cd00); --solite-comment: var(--solite-ansi-bright-black, #7f7f7f); --solite-parameter: var(--solite-ansi-red, #cd0000); --solite-operator: var(--solite-ansi-cyan, #00cdcd); --solite-number: var(--solite-ansi-yellow, #cdcd00); --solite-function: var(--solite-ansi-blue, #0000ee); --solite-function-builtin: var(--solite-ansi-blue, #0000ee); --solite-type-name: var(--solite-ansi-yellow, #cdcd00); --solite-punctuation: currentColor; --solite-dot-command: var(--solite-ansi-blue, #0000ee); --solite-json-key: var(--solite-ansi-blue, #0000ee); --solite-json-string: var(--solite-ansi-green, #00cd00); --solite-json-number: var(--solite-ansi-yellow, #cdcd00); --solite-json-boolean: var(--solite-ansi-red, #cd0000); --solite-background: currentColor; --solite-border: currentColor; --solite-header: currentColor; --solite-header-selected: currentColor; --solite-footer: currentColor; --solite-muted: var(--solite-ansi-bright-black, #7f7f7f); --solite-selection: currentColor; --solite-highlight: var(--solite-ansi-bright-white, #ffffff); --solite-success: var(--solite-ansi-green, #00cd00); --solite-error: var(--solite-ansi-red, #cd0000); --solite-warning: var(--solite-ansi-yellow, #cdcd00); --solite-keycap: var(--solite-ansi-green, #00cd00); --jt-key: var(--solite-ansi-blue, #0000ee); --jt-str: var(--solite-ansi-green, #00cd00); --jt-num: var(--solite-ansi-yellow, #cdcd00); --jt-bool: var(--solite-ansi-red, #cd0000); --jt-null: var(--solite-ansi-bright-black, #7f7f7f); --jt-footer: currentColor; --jt-text: currentColor; --jt-border: currentColor; --jt-bg: currentColor;">
   <style>
   .solite-table {
       border-collapse: collapse;
@@ -448,34 +448,33 @@
       font-size: 14px;
   }
   .solite-table th, .solite-table td {
-      border: 1px solid #6c7086;
+      border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
       padding: 4px 8px;
       text-align: left;
   }
   .solite-table th {
-      background-color: #313244;
-      color: #cdd6f4;
+      background-color: color-mix(in srgb, currentColor 12%, transparent);
       font-weight: bold;
   }
   .solite-table tr:nth-child(even) {
-      background-color: #1e1e2e;
+      background-color: color-mix(in srgb, currentColor 6%, transparent);
   }
   .solite-table tr:nth-child(odd) {
-      background-color: #181825;
+      background-color: color-mix(in srgb, currentColor 3%, transparent);
   }
   .solite-table .ellipsis-row {
-      background-color: #45475a;
+      background-color: color-mix(in srgb, currentColor 12%, transparent);
       text-align: center;
-      color: #a6adc8;
+      opacity: 0.7;
       font-style: italic;
   }
   .solite-table .ellipsis-col {
-      background-color: #45475a;
+      background-color: color-mix(in srgb, currentColor 12%, transparent);
       text-align: center;
-      color: #a6adc8;
+      opacity: 0.7;
   }
   .solite-footer {
-      color: #a6adc8;
+      opacity: 0.7;
       font-size: 12px;
       margin-top: 4px;
   }
@@ -572,7 +571,7 @@
   <table class="solite-table">
   <thead><tr><th>1 + 1</th></tr></thead>
   <tbody>
-  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">2</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: var(--solite-integer, currentColor); font-family: monospace;">2</span></td></tr>
   </tbody>
   </table>
   <div class="solite-footer">1 column × 1 row</div>

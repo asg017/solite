@@ -80,6 +80,15 @@ impl TableConfig {
 
     /// Create a config for HTML output (Jupyter).
     /// Shows all rows and full cell contents without truncation.
+    ///
+    /// Defaults to [`Theme::terminal`], not [`Theme::catppuccin_mocha`]: with
+    /// the chrome (`TABLE_CSS`) now `currentColor`/`color-mix`-based, a
+    /// terminal-role theme keeps cell colors adaptive too — `text` renders as
+    /// `currentColor` (inherits the notebook's own foreground) and numeric
+    /// roles render as `var(--solite-ansi-*, <fallback-hex>)`, so a page can
+    /// re-point the ANSI palette without a re-render. Catppuccin remains
+    /// available via `with_theme(Some(Theme::catppuccin_mocha()))` for
+    /// callers that want the fixed truecolor look regardless of host theme.
     pub fn html() -> Self {
         Self {
             output_mode: OutputMode::Html,
@@ -89,7 +98,7 @@ impl TableConfig {
             tail_rows: 0,
             // Show full cell contents without truncation
             max_cell_width: 100_000,
-            theme: Some(Theme::catppuccin_mocha()),
+            theme: Some(Theme::terminal()),
             show_footer: true,
             json_interactive: true,
         }

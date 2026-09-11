@@ -6,6 +6,15 @@ use crate::format::value::format_cell_html;
 use crate::types::{CellValue, ColumnInfo, TableLayout};
 
 /// CSS for table styling.
+///
+/// No literal colors: every rule is `currentColor` or a `color-mix(in srgb,
+/// currentColor N%, transparent)` tint of it, the same adaptive pattern
+/// `jupyter/render/describe.rs` (`DESCRIBE_CSS`) uses. Since `currentColor`
+/// resolves to the host notebook's own text color, the chrome (borders,
+/// header background, row stripes, footer) is legible in light and dark
+/// notebooks alike with no theme configuration at all. Cell *value* colors
+/// are separate — see `theme_css_vars` — and come from the `Theme` on
+/// `TableConfig`.
 const TABLE_CSS: &str = r#"
 .solite-table {
     border-collapse: collapse;
@@ -13,34 +22,33 @@ const TABLE_CSS: &str = r#"
     font-size: 14px;
 }
 .solite-table th, .solite-table td {
-    border: 1px solid #6c7086;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
     padding: 4px 8px;
     text-align: left;
 }
 .solite-table th {
-    background-color: #313244;
-    color: #cdd6f4;
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
     font-weight: bold;
 }
 .solite-table tr:nth-child(even) {
-    background-color: #1e1e2e;
+    background-color: color-mix(in srgb, currentColor 6%, transparent);
 }
 .solite-table tr:nth-child(odd) {
-    background-color: #181825;
+    background-color: color-mix(in srgb, currentColor 3%, transparent);
 }
 .solite-table .ellipsis-row {
-    background-color: #45475a;
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
     text-align: center;
-    color: #a6adc8;
+    opacity: 0.7;
     font-style: italic;
 }
 .solite-table .ellipsis-col {
-    background-color: #45475a;
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
     text-align: center;
-    color: #a6adc8;
+    opacity: 0.7;
 }
 .solite-footer {
-    color: #a6adc8;
+    opacity: 0.7;
     font-size: 12px;
     margin-top: 4px;
 }
@@ -57,18 +65,21 @@ pub fn render_html(
 ) -> String {
     let mut html = String::new();
 
-    // Wrap in container div for scoped JS queries
-    if config.json_interactive {
-        if let Some(ref theme) = config.theme {
+    // Wrap in container div for scoped JS queries. Cell colors reference
+    // `--solite-<role>` vars (see `theme_css_vars`) declared here, so they
+    // stay adaptive: change the theme without touching a single cell.
+    match &config.theme {
+        Some(theme) => {
+            let mut style = crate::format::theme_css_vars(theme);
+            if config.json_interactive {
+                style.push_str(&crate::format::json::json_viewer_theme_vars(theme));
+            }
             html.push_str(&format!(
                 "<div class=\"solite-output\" style=\"{}\">\n",
-                crate::format::json::json_viewer_theme_vars(theme)
+                style
             ));
-        } else {
-            html.push_str("<div class=\"solite-output\">\n");
         }
-    } else {
-        html.push_str("<div class=\"solite-output\">\n");
+        None => html.push_str("<div class=\"solite-output\">\n"),
     }
 
     // Style tag
@@ -201,22 +212,46 @@ mod tests {
     #[test]
     fn test_render_simple_html() {
         let columns = vec![
+            ColumnInfo::new("id".to_string()),
             ColumnInfo::new("name".to_string()),
         ];
 
         let rows = vec![
-            vec![CellValue::new("Alice".to_string(), ValueType::Text, Alignment::Left)],
+            vec![
+                CellValue::new("1".to_string(), ValueType::Integer, Alignment::Right),
+                CellValue::new("Alice".to_string(), ValueType::Text, Alignment::Left),
+            ],
+            vec![
+                CellValue::new("2".to_string(), ValueType::Integer, Alignment::Right),
+                CellValue::new("Bob".to_string(), ValueType::Text, Alignment::Left),
+            ],
         ];
 
-        let layout = TableLayout::all_visible(vec![5]);
+        let layout = TableLayout::all_visible(vec![2, 5]);
         let config = TableConfig::html();
 
-        let html = render_html(&columns, &rows, &[], &layout, &config, 1);
+        let html = render_html(&columns, &rows, &[], &layout, &config, 2);
 
         assert!(html.contains("<table"));
         assert!(html.contains("name"));
         assert!(html.contains("Alice"));
         assert!(html.contains("</table>"));
+
+        // Chrome CSS is currentColor/color-mix based, not a baked palette.
+        assert!(html.contains("color-mix(in srgb, currentColor"));
+        // Cell values reference CSS custom properties, not resolved colors.
+        assert!(html.contains("var(--solite-integer, currentColor)"));
+        assert!(html.contains("var(--solite-text, currentColor)"));
+        assert!(html.contains("--solite-integer:"));
+    }
+
+    #[test]
+    fn html_default_theme_is_terminal_not_catppuccin() {
+        // TableConfig::html() defaults to Theme::terminal() so the default
+        // notebook table is host-theme-adaptive (see config.rs doc comment
+        // for the readability tradeoff analysis).
+        let config = TableConfig::html();
+        assert_eq!(config.theme, Some(crate::Theme::terminal()));
     }
 
     #[test]

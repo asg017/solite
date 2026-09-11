@@ -1,4 +1,3 @@
-use super::highlighter::CTP_MOCHA_THEME;
 use rustyline::completion::{Completer, Pair};
 use rustyline::Result;
 use solite_completion::{
@@ -185,13 +184,27 @@ impl SchemaSource for LiveSchemaSource<'_> {
     }
 }
 
+/// Paint `s` with `style` (from the REPL's default theme) when
+/// [`crate::colors::use_color`] is enabled; otherwise return it unstyled.
+/// Small, local decoration for the completion popup — not part of the
+/// theme-threading the highlighter does, since the popup has no REPL-session
+/// state to draw one from (ticket 07's `--theme` flag will revisit this).
+fn styled_or_plain(style: solite_theme::Style, s: &str) -> String {
+    if crate::colors::use_color() {
+        style.paint(s)
+    } else {
+        s.to_string()
+    }
+}
+
 /// Convert a CompletionItem to a rustyline Pair for display.
 fn to_pair(item: CompletionItem) -> Pair {
+    let theme = solite_theme::Theme::terminal();
     let display = match item.kind {
         CompletionKind::Column => format!("ᶜ {}", item.label),
         CompletionKind::Table => format!("ᵗ {}", item.label),
         CompletionKind::Cte => format!("ᵗ {}", item.label),
-        CompletionKind::Keyword => CTP_MOCHA_THEME.style_keyword(&item.label),
+        CompletionKind::Keyword => styled_or_plain(theme.keyword, &item.label),
         CompletionKind::Index => format!("ⁱ {}", item.label),
         CompletionKind::View => format!("ᵛ {}", item.label),
         CompletionKind::Function => format!("ᶠ {}", item.label),
@@ -462,7 +475,7 @@ impl ReplCompleter {
                 .iter()
                 .filter(|v| v.starts_with(prefix))
                 .map(|v| Pair {
-                    display: CTP_MOCHA_THEME.style_dot(v),
+                    display: styled_or_plain(solite_theme::Theme::terminal().dot_command, v),
                     replacement: format!("{v} "),
                 })
                 .collect();

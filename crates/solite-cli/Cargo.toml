@@ -21,6 +21,7 @@ solite-lsp = {path="../solite-lsp"}
 solite-schema = {path="../solite-schema"}
 solite-completion = {path="../solite-completion"}
 solite-table = {path="../solite-table"}
+solite-theme = {path="../solite-theme"}
 rustyline = {version="12.0.0", features = ["derive"]}
 ctrlc = "3.4"
 futures = "0.3"

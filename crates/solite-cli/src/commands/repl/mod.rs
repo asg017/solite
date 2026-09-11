@@ -15,7 +15,7 @@ use rustyline::{Completer, CompletionType, Config, EditMode, Editor, Helper, Hin
 
 use solite_core::dot::{DotCommand, LoadCommandSource};
 use solite_core::{BlockSource, Runtime, StepError, StepResult};
-use solite_table::TableConfig;
+use solite_theme::{Style, Theme};
 use std::borrow::Cow::{self, Borrowed, Owned};
 
 use std::cell::RefCell;
@@ -80,7 +80,7 @@ impl Highlighter for ReplHelper {
     }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
+        Owned(highlight_hint_text(hint))
     }
 
     fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
@@ -92,7 +92,18 @@ impl Highlighter for ReplHelper {
     }
 }
 
-fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) {
+/// Bold-highlight a rustyline history hint (the "press → to accept"-style
+/// completion preview), gated on [`crate::colors::use_color`]. Replaces the
+/// former raw `"\x1b[1m" + hint + "\x1b[m"` literal.
+fn highlight_hint_text(hint: &str) -> String {
+    if crate::colors::use_color() {
+        Style::DEFAULT.bold().paint(hint)
+    } else {
+        hint.to_string()
+    }
+}
+
+fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool, theme: &Theme) {
     match cmd {
         DotCommand::Tui(_) => {
             if let Err(e) = launch_tui(runtime) {
@@ -123,7 +134,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
         DotCommand::Schema(cmd) => match cmd.execute(runtime) {
             Ok(creates) => {
                 for create in creates {
-                    println!("{}", highlight_sql(&create));
+                    println!("{}", highlight_sql(&create, theme));
                 }
             }
             Err(e) => {
@@ -139,7 +150,12 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             }
         },
         DotCommand::Describe(cmd) => match cmd.execute(runtime) {
-            Ok(out) => println!("{}", render_describe_text(out, &TableConfig::terminal(), highlight_sql)),
+            Ok(out) => println!(
+                "{}",
+                render_describe_text(out, &crate::colors::table_config(), |s| highlight_sql(
+                    s, theme
+                ))
+            ),
             Err(e) => eprintln!("✗ failed to describe: {}", e),
         },
         DotCommand::Print(print_cmd) => print_cmd.execute(),
@@ -182,7 +198,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
             solite_core::dot::ParameterCommand::List => {
                 match solite_core::dot::param::list_parameters_statement(runtime) {
                     Some(mut stmt) => {
-                        let config = TableConfig::terminal();
+                        let config = crate::colors::table_config();
                         if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
                             eprintln!("✗ failed to list parameters: {}", e);
                         }
@@ -297,7 +313,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                 };
                 match runtime.prepare_with_parameters(&proc.sql) {
                     Ok((_, Some(mut stmt))) => {
-                        let config = solite_table::TableConfig::terminal();
+                        let config = crate::colors::table_config();
                         if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
                             eprintln!("✗ failed to execute procedure: {}", e);
                         }
@@ -318,7 +334,7 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
                         return;
                     }
                 };
-                step_loop(runtime, timer);
+                step_loop(runtime, timer, theme);
                 runtime.run_file_end(saved);
             }
         }
@@ -328,18 +344,18 @@ fn handle_dot_command(runtime: &mut Runtime, cmd: DotCommand, timer: &mut bool) 
 /// Drain the runtime's execution stack, printing results and errors. The
 /// single step loop shared by `execute()` and the `.run` file branch of
 /// `handle_dot_command`.
-fn step_loop(runtime: &mut Runtime, timer: &mut bool) {
+fn step_loop(runtime: &mut Runtime, timer: &mut bool, theme: &Theme) {
     loop {
         match runtime.next_stepx() {
             None => break,
             Some(Ok(step)) => match step.result {
-                StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer),
+                StepResult::DotCommand(cmd) => handle_dot_command(runtime, cmd, timer, theme),
                 StepResult::ProcedureDefinition(ref proc) => {
                     println!("Registered procedure: {}", proc.name);
                 }
                 StepResult::SqlStatement { mut stmt, .. } => {
                     let start = std::time::Instant::now();
-                    let config = TableConfig::terminal();
+                    let config = crate::colors::table_config();
                     if let Err(e) = solite_table::print_statement(&mut stmt, &config) {
                         eprintln!("✗ failed to print table: {}", e);
                     }
@@ -394,7 +410,13 @@ fn repl_editor_command(initial: &str) -> anyhow::Result<String> {
 /// Execute one submitted line. Returns the code that actually ran (the
 /// editor buffer's contents for `\e`) so the caller can record it in
 /// history, or `None` if nothing was executed.
-fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str, last_input: &str) -> Option<String> {
+fn execute(
+    runtime: &mut Runtime,
+    timer: &mut bool,
+    code: &str,
+    last_input: &str,
+    theme: &Theme,
+) -> Option<String> {
     // repl specific commands
     let mut code = code.to_owned();
     if REPL_SPECIAL_COMMANDS.contains(&code.trim()) {
@@ -410,7 +432,7 @@ fn execute(runtime: &mut Runtime, timer: &mut bool, code: &str, last_input: &str
         }
     }
     runtime.enqueue("[repl]", &code, BlockSource::Repl);
-    step_loop(runtime, timer);
+    step_loop(runtime, timer, theme);
     Some(code)
 }
 
@@ -446,6 +468,12 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     ).map_err(|e| ReadlineError::Io(std::io::Error::other(e.to_string())))?;
     let rc_runtime = Rc::new(RefCell::new(runtime));
 
+    // The REPL holds one theme instance for the session, used by the SQL
+    // highlighter, `.schema`, and `.describe`. Table rendering goes through
+    // `colors::table_config()` instead (also `Theme::terminal()` on the
+    // color-on path; ticket 07 will let both be swapped together).
+    let theme = Theme::terminal();
+
     let mut timer = true;
     let config = Config::builder()
         .completion_type(CompletionType::List)
@@ -458,7 +486,7 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     let mut rl = Editor::with_config(config)?;
     let helper = ReplHelper {
         completer: ReplCompleter::new(Rc::clone(&rc_runtime)),
-        highlighter: ReplHighlighter::new(),
+        highlighter: ReplHighlighter::new(theme),
         hinter: HistoryHinter {},
         colored_prompt: String::new(),
         validator: ReplValidator::new(),
@@ -537,7 +565,7 @@ Enter \".help\" for usage hints.
                     let flag = Arc::clone(&interrupted);
                     rt.connection
                         .set_progress_handler(1000, move || flag.load(Ordering::SeqCst));
-                    execute(&mut rt, &mut timer, line, &last_input)
+                    execute(&mut rt, &mut timer, line, &last_input, &theme)
                 };
                 // Record what actually ran (for `\e`, the editor buffer's
                 // SQL rather than the literal `\e`) so up-arrow recalls it.

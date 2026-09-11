@@ -4604,6 +4604,7 @@ dependencies = [
  "solite-schema",
  "solite-stdlib",
  "solite-table",
+ "solite-theme",
  "statistical",
  "tempfile",
  "term_size",

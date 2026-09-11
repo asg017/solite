@@ -469,10 +469,10 @@ pub fn launch_repl(args: ReplArgs) -> Result<()> {
     let rc_runtime = Rc::new(RefCell::new(runtime));
 
     // The REPL holds one theme instance for the session, used by the SQL
-    // highlighter, `.schema`, and `.describe`. Table rendering goes through
-    // `colors::table_config()` instead (also `Theme::terminal()` on the
-    // color-on path; ticket 07 will let both be swapped together).
-    let theme = Theme::terminal();
+    // highlighter, `.schema`, and `.describe`. It's the same resolved theme
+    // (`--theme` / $SOLITE_THEME) that `colors::table_config()` hands the
+    // table renderer.
+    let theme = *crate::colors::theme();
 
     let mut timer = true;
     let config = Config::builder()

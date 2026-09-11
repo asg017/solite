@@ -264,6 +264,73 @@ impl Theme {
         })
     }
 
+    /// Set a role by its field name. Returns `false` (leaving the theme
+    /// untouched) when `name` is not a role — the caller decides whether an
+    /// unknown key is an error.
+    pub fn set_role(&mut self, name: &str, style: Style) -> bool {
+        let slot: &mut Style = match name {
+            "null" => &mut self.null,
+            "integer" => &mut self.integer,
+            "double" => &mut self.double,
+            "text" => &mut self.text,
+            "blob" => &mut self.blob,
+            "keyword" => &mut self.keyword,
+            "string_literal" => &mut self.string_literal,
+            "comment" => &mut self.comment,
+            "parameter" => &mut self.parameter,
+            "operator" => &mut self.operator,
+            "number" => &mut self.number,
+            "function" => &mut self.function,
+            "function_builtin" => &mut self.function_builtin,
+            "type_name" => &mut self.type_name,
+            "punctuation" => &mut self.punctuation,
+            "dot_command" => &mut self.dot_command,
+            "json_key" => &mut self.json_key,
+            "json_string" => &mut self.json_string,
+            "json_number" => &mut self.json_number,
+            "json_boolean" => &mut self.json_boolean,
+            "background" => &mut self.background,
+            "border" => &mut self.border,
+            "header" => &mut self.header,
+            "header_selected" => &mut self.header_selected,
+            "footer" => &mut self.footer,
+            "muted" => &mut self.muted,
+            "selection" => &mut self.selection,
+            "highlight" => &mut self.highlight,
+            "success" => &mut self.success,
+            "error" => &mut self.error,
+            "warning" => &mut self.warning,
+            "keycap" => &mut self.keycap,
+            _ => return false,
+        };
+        *slot = style;
+        true
+    }
+
+    /// Look up a built-in theme by name.
+    ///
+    /// Names are normalized first (lowercased, `_` treated as `-`), so
+    /// `catppuccin_mocha`, `Catppuccin-Mocha` and `catppuccin-mocha` are the
+    /// same theme. `default` is an alias for `terminal` and `mocha` for
+    /// `catppuccin-mocha`.
+    pub fn builtin(name: &str) -> Option<Theme> {
+        let normalized: String = name
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c == '_' { '-' } else { c })
+            .collect();
+        Some(match normalized.as_str() {
+            "terminal" | "default" | "ansi" => Theme::terminal(),
+            "catppuccin-mocha" | "mocha" => Theme::catppuccin_mocha(),
+            _ => return None,
+        })
+    }
+
+    /// The canonical names of the built-in themes, for `--help` text and
+    /// "no such theme" errors. Aliases are not listed.
+    pub const BUILTIN_NAMES: &'static [&'static str] = &["terminal", "catppuccin-mocha"];
+
     /// Every role name, in declaration order.
     pub const ROLE_NAMES: &'static [&'static str] = &[
         "null",

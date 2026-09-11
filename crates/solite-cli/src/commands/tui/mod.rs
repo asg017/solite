@@ -252,7 +252,7 @@ impl<'a> App<'a> {
 /// Shared app construction + event loop for both TUI entry points.
 /// Opens directly on `initial_table` when given (skipping the listing query).
 fn run_app(runtime: &Runtime, initial_table: Option<&str>) -> anyhow::Result<()> {
-    let theme = Theme::terminal();
+    let theme = *crate::colors::theme();
     let clipboard: SharedClipboard = std::rc::Rc::new(std::cell::RefCell::new(SystemClipboard));
     let page = match initial_table {
         Some(table_name) => Page::Table(TablePage::new(

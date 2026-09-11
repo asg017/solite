@@ -51,12 +51,12 @@ pub fn run_main() {
 
     let (allow_ssh, x) = match cli_result {
         Ok(cli) => {
-            colors::init(cli.color);
+            colors::init(cli.color, cli.theme.as_deref());
             (cli.allow_ssh, cli.command)
         }
         Err(err) => match err.kind() {
             clap::error::ErrorKind::MissingSubcommand => {
-                colors::init(pre_scanned_color);
+                colors::init(pre_scanned_color, colors::scan_theme_flag(&args).as_deref());
                 (false, Box::new(cli::Commands::Repl(ReplArgs { database: None, remote: Default::default() })))
             }
             clap::error::ErrorKind::InvalidSubcommand => {
@@ -67,7 +67,7 @@ pub fn run_main() {
                     .map(PathBuf::from)
                     .filter(|p: &PathBuf| cli::is_database_path(p))
                 {
-                    colors::init(pre_scanned_color);
+                    colors::init(pre_scanned_color, colors::scan_theme_flag(&args).as_deref());
                     (false, Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),
                         remote: Default::default(),

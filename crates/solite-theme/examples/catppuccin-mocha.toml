@@ -1,0 +1,90 @@
+# Catppuccin Mocha, written in Solite's theme-file format.
+#
+# This file reproduces the built-in `catppuccin-mocha` theme exactly (there is
+# a unit test asserting that), so it doubles as the reference for what a user
+# theme can express. Copy it to
+# `~/.config/solite/themes/<name>.toml` and edit, or inherit from it:
+#
+#     inherits = "catppuccin-mocha"
+#
+#     [roles]
+#     keyword = { fg = "#ff0000", bold = true }
+#
+# Roles you don't mention are inherited untouched; a role you do mention is
+# defined completely by its entry (an omitted `bold` means not bold, not
+# "whatever the base had").
+
+inherits = "terminal"
+
+# Named colors. Palette names take precedence over the built-in ANSI names,
+# so `red` below means Mocha's red, not the terminal's ANSI red.
+[palette]
+rosewater = "#f5e0dc"
+flamingo = "#f2cdcd"
+pink = "#f5c2e7"
+mauve = "#cba6f7"
+red = "#f38ba8"
+maroon = "#eba0ac"
+peach = "#fab387"
+yellow = "#f9e2af"
+green = "#a6e3a1"
+teal = "#94e2d5"
+sky = "#89dceb"
+sapphire = "#74c7ec"
+blue = "#89b4fa"
+lavender = "#b4befe"
+text = "#cdd6f4"
+subtext1 = "#bac2de"
+subtext0 = "#a6adc8"
+overlay2 = "#9399b2"
+overlay1 = "#7f849c"
+overlay0 = "#6c7086"
+surface2 = "#585b70"
+surface1 = "#45475a"
+surface0 = "#313244"
+base = "#1e1e2e"
+mantle = "#181825"
+crust = "#11111b"
+
+[roles]
+# SQLite value types
+null = "subtext1"
+integer = "peach"
+double = "peach"
+text = "text"
+blob = "teal"
+
+# SQL tokens
+keyword = { fg = "mauve", bold = true }
+string_literal = "green"
+comment = "overlay2"
+parameter = "maroon"
+operator = "sky"
+number = "peach"
+function = "blue"
+function_builtin = { fg = "blue", bold = true }
+type_name = "yellow"
+punctuation = "overlay2"
+dot_command = "blue"
+
+# JSON tokens
+json_key = "blue"
+json_string = "green"
+json_number = "peach"
+json_boolean = "maroon"
+
+# Chrome
+background = { fg = "text", bg = "base" }
+border = "overlay0"
+header = { fg = "text", bold = true }
+header_selected = { fg = "text", bg = "overlay0" }
+footer = "subtext0"
+muted = "overlay2"
+
+# UI state
+selection = { fg = "default", bg = "surface0" }
+highlight = { fg = "text", bg = "crust" }
+success = "green"
+error = "red"
+warning = "yellow"
+keycap = "green"

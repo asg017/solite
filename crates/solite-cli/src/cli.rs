@@ -922,6 +922,13 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = clap::ColorChoice::Auto)]
     pub color: clap::ColorChoice,
 
+    /// Color theme: a built-in (`terminal`, `catppuccin-mocha`), a
+    /// `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or
+    /// ~/.config/solite/themes, or a path to a theme file. Overrides
+    /// $SOLITE_THEME
+    #[arg(long, global = true, value_name = "NAME")]
+    pub theme: Option<String>,
+
     #[command(subcommand)]
     pub command: Box<Commands>,
 }

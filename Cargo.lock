@@ -4809,6 +4809,7 @@ version = "0.0.1-alpha.1"
 dependencies = [
  "ratatui",
  "termcolor",
+ "toml 0.8.23",
 ]
 
 [[package]]

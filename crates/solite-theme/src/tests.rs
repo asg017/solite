@@ -323,3 +323,292 @@ mod termcolor_tests {
         assert!(spec.bold());
     }
 }
+
+// ---- color depth / truecolor downgrade --------------------------------
+
+#[test]
+fn nearest_256_matches_cube_entries_exactly() {
+    // Pure red/green/blue/white are corners of the 6x6x6 cube.
+    assert_eq!(nearest_xterm256(0xff, 0x00, 0x00), 196);
+    assert_eq!(nearest_xterm256(0x00, 0xff, 0x00), 46);
+    assert_eq!(nearest_xterm256(0x00, 0x00, 0xff), 21);
+    assert_eq!(nearest_xterm256(0xff, 0xff, 0xff), 231);
+    // Index 16 is the cube's black corner; 0-15 are never chosen because they
+    // have no fixed RGB.
+    assert_eq!(nearest_xterm256(0x00, 0x00, 0x00), 16);
+}
+
+#[test]
+fn nearest_256_is_close_for_arbitrary_colors() {
+    // Catppuccin peach: the nearest cube/gray entry should be within a few
+    // steps on every channel.
+    let index = nearest_xterm256(0xfa, 0xb3, 0x87);
+    let (r, g, b) = xterm256_rgb(index);
+    for (got, want) in [(r, 0xfa), (g, 0xb3), (b, 0x87)] {
+        assert!(
+            (got as i32 - want as i32).abs() <= 24,
+            "index {index} channel {got:#x} too far from {want:#x}"
+        );
+    }
+}
+
+#[test]
+fn downgrade_only_touches_truecolor() {
+    let d = ColorDepth::Ansi256;
+    assert_eq!(ColorValue::Default.downgrade(d), ColorValue::Default);
+    assert_eq!(
+        ColorValue::Ansi(AnsiColor::Red).downgrade(d),
+        ColorValue::Ansi(AnsiColor::Red)
+    );
+    assert_eq!(ColorValue::Indexed(42).downgrade(d), ColorValue::Indexed(42));
+    assert_eq!(
+        ColorValue::Rgb(0xff, 0, 0).downgrade(d),
+        ColorValue::Indexed(196)
+    );
+    // Truecolor depth is a no-op for every form.
+    for c in [
+        ColorValue::Default,
+        ColorValue::Ansi(AnsiColor::Red),
+        ColorValue::Indexed(42),
+        ColorValue::Rgb(1, 2, 3),
+    ] {
+        assert_eq!(c.downgrade(ColorDepth::TrueColor), c);
+    }
+}
+
+#[test]
+fn default_depth_is_truecolor() {
+    // The process-wide default must stay TrueColor so anything that never
+    // calls `set_color_depth` (tests, libraries) emits `38;2;…` as before.
+    assert_eq!(ColorDepth::default(), ColorDepth::TrueColor);
+    assert_eq!(Style::hex(0xfab387).ansi_prefix(), "\x1b[38;2;250;179;135m");
+}
+
+// ---- TOML theme files --------------------------------------------------
+
+// Run with `cargo test -p solite-theme --features config`; a workspace-wide
+// `cargo test` enables the feature by unification (solite-cli asks for it).
+#[cfg(feature = "config")]
+mod config_files {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn parse(src: &str) -> Theme {
+        parse_theme(src, "<test>").expect("theme should parse")
+    }
+
+    fn err(src: &str) -> String {
+        parse_theme(src, "<test>")
+            .expect_err("theme should fail to parse")
+            .to_string()
+    }
+
+    fn color(src: &str) -> ColorValue {
+        parse(&format!("[roles]\nkeyword = {src}\n")).keyword.fg
+    }
+
+    #[test]
+    fn empty_file_is_the_terminal_theme() {
+        assert_eq!(parse(""), Theme::terminal());
+    }
+
+    #[test]
+    fn color_grammar_every_form() {
+        assert_eq!(color("\"default\""), ColorValue::Default);
+        assert_eq!(color("\"reset\""), ColorValue::Default);
+        assert_eq!(color("\"none\""), ColorValue::Default);
+        assert_eq!(color("\"red\""), ColorValue::Ansi(AnsiColor::Red));
+        assert_eq!(color("\"RED\""), ColorValue::Ansi(AnsiColor::Red));
+        assert_eq!(
+            color("\"bright-magenta\""),
+            ColorValue::Ansi(AnsiColor::BrightMagenta)
+        );
+        assert_eq!(
+            color("\"brightmagenta\""),
+            ColorValue::Ansi(AnsiColor::BrightMagenta)
+        );
+        assert_eq!(
+            color("\"bright_magenta\""),
+            ColorValue::Ansi(AnsiColor::BrightMagenta)
+        );
+        assert_eq!(color("\"grey\""), ColorValue::Ansi(AnsiColor::BrightBlack));
+        // 0-15 collapse onto the ANSI names; 16+ stay indexes.
+        assert_eq!(color("\"9\""), ColorValue::Ansi(AnsiColor::BrightRed));
+        assert_eq!(color("\"200\""), ColorValue::Indexed(200));
+        assert_eq!(color("200"), ColorValue::Indexed(200));
+        assert_eq!(color("\"#fab387\""), ColorValue::from_hex(0xfab387));
+        assert_eq!(color("\"#FAB387\""), ColorValue::from_hex(0xfab387));
+        assert_eq!(color("\"#f8b\""), ColorValue::from_hex(0xff88bb));
+    }
+
+    #[test]
+    fn bare_string_is_a_foreground_shorthand() {
+        let theme = parse("[roles]\ninteger = \"green\"\n");
+        assert_eq!(theme.integer, Style::ansi(AnsiColor::Green));
+    }
+
+    #[test]
+    fn inline_table_sets_bg_and_modifiers() {
+        let theme = parse(
+            "[roles]\nkeyword = { fg = \"#cba6f7\", bg = \"black\", bold = true, dim = false, italic = true, underline = true }\n",
+        );
+        assert_eq!(
+            theme.keyword,
+            Style::hex(0xcba6f7)
+                .with_bg(ColorValue::Ansi(AnsiColor::Black))
+                .bold()
+                .italic()
+                .underline()
+        );
+    }
+
+    #[test]
+    fn a_role_entry_replaces_the_inherited_style() {
+        // `terminal`'s keyword is magenta+bold; naming just a color drops the
+        // bold — a role entry defines the role completely.
+        let theme = parse("[roles]\nkeyword = \"blue\"\n");
+        assert_eq!(theme.keyword, Style::ansi(AnsiColor::Blue));
+        assert!(!theme.keyword.bold);
+    }
+
+    #[test]
+    fn unmentioned_roles_are_inherited() {
+        let theme = parse("inherits = \"catppuccin-mocha\"\n[roles]\ninteger = \"red\"\n");
+        let mocha = Theme::catppuccin_mocha();
+        assert_eq!(theme.integer, Style::ansi(AnsiColor::Red));
+        assert_eq!(theme.double, mocha.double);
+        assert_eq!(theme.keyword, mocha.keyword);
+        assert_eq!(theme.selection, mocha.selection);
+    }
+
+    #[test]
+    fn builtin_aliases_resolve() {
+        assert_eq!(Theme::builtin("terminal"), Some(Theme::terminal()));
+        assert_eq!(Theme::builtin("default"), Some(Theme::terminal()));
+        assert_eq!(
+            Theme::builtin("catppuccin_mocha"),
+            Some(Theme::catppuccin_mocha())
+        );
+        assert_eq!(Theme::builtin("Catppuccin-Mocha"), Some(Theme::catppuccin_mocha()));
+        assert_eq!(Theme::builtin("mocha"), Some(Theme::catppuccin_mocha()));
+        assert_eq!(Theme::builtin("nope"), None);
+    }
+
+    #[test]
+    fn palette_entries_resolve_and_shadow_ansi_names() {
+        let theme = parse(
+            "[palette]\npeach = \"#fab387\"\nred = \"#f38ba8\"\n[roles]\ninteger = \"peach\"\nerror = { fg = \"red\", bold = true }\n",
+        );
+        assert_eq!(theme.integer, Style::hex(0xfab387));
+        assert_eq!(theme.error, Style::hex(0xf38ba8).bold());
+    }
+
+    #[test]
+    fn set_role_round_trips_every_name() {
+        let mut theme = Theme::terminal();
+        for name in Theme::ROLE_NAMES {
+            assert!(theme.set_role(name, Style::hex(0x010203)), "{name}");
+            assert_eq!(theme.role(name), Some(Style::hex(0x010203)), "{name}");
+        }
+        assert!(!theme.set_role("not_a_role", Style::DEFAULT));
+    }
+
+    #[test]
+    fn errors_name_the_offending_key_or_value() {
+        assert!(err("[roles]\nkeyword = \"chartreuse\"\n").contains("unknown color `chartreuse`"));
+        assert!(err("[roles]\nkeyword = \"chartreuse\"\n").contains("role `keyword`"));
+        assert!(err("[roles]\nkeyboard = \"red\"\n").contains("unknown role `keyboard`"));
+        assert!(err("[roles]\nkeyword = { fg = \"red\", blink = true }\n")
+            .contains("unknown key `blink`"));
+        assert!(err("[roles]\nkeyword = { fg = \"red\", bold = \"yes\" }\n")
+            .contains("`bold` must be true or false"));
+        assert!(err("[roles]\nkeyword = \"#zzz\"\n").contains("not a valid hex color"));
+        assert!(err("[roles]\nkeyword = \"300\"\n").contains("out of range"));
+        assert!(err("[roles]\nkeyword = true\n").contains("expected a color string"));
+        assert!(err("[palette]\npeach = 12.5\n").contains("palette entry `peach`"));
+        assert!(err("roles = \"red\"\n").contains("`roles` must be a table"));
+        assert!(err("palette = 3\n").contains("`palette` must be a table"));
+        assert!(err("colours = {}\n").contains("unknown top-level key `colours`"));
+        assert!(err("inherits = 7\n").contains("`inherits` must be a theme name"));
+        assert!(err("inherits = \"nope\"\n").contains("matches no built-in theme"));
+        assert!(err("[roles]\nkeyword = ").contains("invalid TOML"));
+    }
+
+    #[test]
+    fn parse_color_reports_empty_values() {
+        let empty: HashMap<String, ColorValue> = HashMap::new();
+        assert!(parse_color("  ", &empty).unwrap_err().contains("empty"));
+    }
+
+    // ---- files: inherits chain + cycles --------------------------------
+
+    fn tempdir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "solite-theme-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn inherits_chain_across_files() {
+        let dir = tempdir();
+        std::fs::write(
+            dir.join("base.toml"),
+            "inherits = \"catppuccin-mocha\"\n[roles]\ninteger = \"#010203\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("child.toml"),
+            "inherits = \"base\"\n[roles]\nkeyword = \"green\"\n",
+        )
+        .unwrap();
+        let theme = load_theme_file(&dir.join("child.toml")).unwrap();
+        // From the grandparent built-in:
+        assert_eq!(theme.double, Theme::catppuccin_mocha().double);
+        // From the parent file:
+        assert_eq!(theme.integer, Style::hex(0x010203));
+        // From the child:
+        assert_eq!(theme.keyword, Style::ansi(AnsiColor::Green));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn inherits_cycle_is_an_error_not_a_hang() {
+        let dir = tempdir();
+        std::fs::write(dir.join("a.toml"), "inherits = \"b\"\n").unwrap();
+        std::fs::write(dir.join("b.toml"), "inherits = \"a\"\n").unwrap();
+        let e = load_theme_file(&dir.join("a.toml")).unwrap_err().to_string();
+        assert!(e.contains("cycle"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_inherited_file_names_the_path() {
+        let dir = tempdir();
+        std::fs::write(dir.join("a.toml"), "inherits = \"ghost\"\n").unwrap();
+        let e = load_theme_file(&dir.join("a.toml")).unwrap_err().to_string();
+        assert!(e.contains("ghost.toml"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_file_is_a_clean_error() {
+        let e = load_theme_file(std::path::Path::new("/nope/nope.toml"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("could not read theme file"), "{e}");
+    }
+
+    /// The shipped reference file must stay byte-for-byte equivalent to the
+    /// built-in, so it can be copied as a starting point without surprises.
+    #[test]
+    fn reference_file_reproduces_the_builtin_mocha() {
+        let src = include_str!("../examples/catppuccin-mocha.toml");
+        let theme = parse_theme(src, "examples/catppuccin-mocha.toml").unwrap();
+        assert_eq!(theme, Theme::catppuccin_mocha());
+    }
+}

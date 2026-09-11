@@ -207,8 +207,11 @@ impl ColorValue {
     /// SGR parameters for using this color as a foreground.
     ///
     /// Empty for [`ColorValue::Default`] — the whole point of the sentinel.
+    /// Truecolor values are downgraded to the nearest 256-color index when
+    /// the process-wide [`ColorDepth`](crate::ColorDepth) says the terminal
+    /// cannot render them.
     pub fn fg_sgr_params(&self) -> Vec<String> {
-        match *self {
+        match self.emitted() {
             ColorValue::Default => vec![],
             ColorValue::Ansi(c) => vec![c.fg_sgr().to_string()],
             ColorValue::Indexed(i) => vec!["38".into(), "5".into(), i.to_string()],
@@ -225,7 +228,7 @@ impl ColorValue {
     /// SGR parameters for using this color as a background. Empty for
     /// [`ColorValue::Default`].
     pub fn bg_sgr_params(&self) -> Vec<String> {
-        match *self {
+        match self.emitted() {
             ColorValue::Default => vec![],
             ColorValue::Ansi(c) => vec![c.bg_sgr().to_string()],
             ColorValue::Indexed(i) => vec!["48".into(), "5".into(), i.to_string()],

@@ -241,7 +241,7 @@ async fn handle_dot_command_inner(
         },
         DotCommand::Schema(cmd) => match cmd.execute(runtime) {
             Ok(creates) => {
-                let theme = solite_theme::Theme::terminal();
+                let theme = *crate::colors::theme();
                 let html = creates
                     .iter()
                     .map(|s| render_sql_html(s, &theme))

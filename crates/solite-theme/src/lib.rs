@@ -27,16 +27,25 @@
 //!
 //! - `ratatui` — `impl From<&Style> for ratatui::style::Style`
 //! - `termcolor` — `impl From<&Style> for termcolor::ColorSpec`
+//! - `config` — TOML theme files (`inherits`, `[palette]`, `[roles]`) via
+//!   [`parse_theme`] / [`load_theme_file`]; `examples/catppuccin-mocha.toml`
+//!   reproduces [`Theme::catppuccin_mocha`] in that format
 //!
-//! Both are off by default so dependency-light crates (solite-table) can use
-//! the core types without pulling a TUI framework in.
+//! All three are off by default so dependency-light crates (solite-table) can
+//! use the core types without pulling a TUI framework or a TOML parser in.
 
 mod color;
+#[cfg(feature = "config")]
+mod config;
 mod convert;
+mod depth;
 mod style;
 mod theme;
 
 pub use color::{xterm256_rgb, AnsiColor, ColorValue};
+#[cfg(feature = "config")]
+pub use config::{load_theme_file, parse_color, parse_theme, parse_theme_in_dir, ThemeError};
+pub use depth::{color_depth, detect_color_depth, nearest_xterm256, set_color_depth, ColorDepth};
 pub use style::{Style, RESET};
 pub use theme::{catppuccin_mocha_palette, Theme};
 

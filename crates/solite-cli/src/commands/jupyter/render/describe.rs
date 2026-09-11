@@ -56,7 +56,7 @@ pub fn render_describe(mut out: DescribeOutput) -> Result<UiResponse> {
     // render it into both HTML and plain text — same pattern as
     // `render/table.rs`. The describe-specific footer replaces
     // solite-table's own footer, so both configs suppress it.
-    let html_config = TableConfig::html().with_footer(false);
+    let html_config = crate::colors::html_table_config().with_footer(false);
     let buffered = solite_table::buffer_statement(
         &mut out.sample,
         html_config.head_rows,
@@ -181,7 +181,7 @@ fn render_html(d: &TableDescription, sample_html: &str, footer: &str) -> String 
     if let Some(ddl) = &d.ddl {
         let details = root.child("details");
         details.child("summary").set_text("DDL");
-        details.raw(render_sql_html(ddl, &solite_theme::Theme::terminal()));
+        details.raw(render_sql_html(ddl, crate::colors::theme()));
     }
 
     root.to_html()

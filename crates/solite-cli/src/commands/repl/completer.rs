@@ -184,11 +184,11 @@ impl SchemaSource for LiveSchemaSource<'_> {
     }
 }
 
-/// Paint `s` with `style` (from the REPL's default theme) when
+/// Paint `s` with `style` (from the process-wide resolved theme) when
 /// [`crate::colors::use_color`] is enabled; otherwise return it unstyled.
-/// Small, local decoration for the completion popup — not part of the
-/// theme-threading the highlighter does, since the popup has no REPL-session
-/// state to draw one from (ticket 07's `--theme` flag will revisit this).
+/// Small, local decoration for the completion popup: it reads
+/// [`crate::colors::theme`] directly rather than threading a theme through
+/// rustyline's `Completer`, since the popup has no REPL-session state.
 fn styled_or_plain(style: solite_theme::Style, s: &str) -> String {
     if crate::colors::use_color() {
         style.paint(s)
@@ -199,7 +199,7 @@ fn styled_or_plain(style: solite_theme::Style, s: &str) -> String {
 
 /// Convert a CompletionItem to a rustyline Pair for display.
 fn to_pair(item: CompletionItem) -> Pair {
-    let theme = solite_theme::Theme::terminal();
+    let theme = crate::colors::theme();
     let display = match item.kind {
         CompletionKind::Column => format!("ᶜ {}", item.label),
         CompletionKind::Table => format!("ᵗ {}", item.label),
@@ -475,7 +475,7 @@ impl ReplCompleter {
                 .iter()
                 .filter(|v| v.starts_with(prefix))
                 .map(|v| Pair {
-                    display: styled_or_plain(solite_theme::Theme::terminal().dot_command, v),
+                    display: styled_or_plain(crate::colors::theme().dot_command, v),
                     replacement: format!("{v} "),
                 })
                 .collect();

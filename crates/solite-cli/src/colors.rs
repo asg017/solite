@@ -3,7 +3,9 @@
 // Borrowed from https://github.com/denoland/deno/blob/main/runtime/colors.rs
 use std::fmt;
 use std::io::{IsTerminal, Write};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use solite_theme::Theme;
 use termcolor::Ansi;
 use termcolor::Color::Ansi256;
 use termcolor::Color::Black;
@@ -37,6 +39,7 @@ enum Resolution {
 }
 
 static RESOLUTION: OnceLock<Resolution> = OnceLock::new();
+static THEME: OnceLock<Theme> = OnceLock::new();
 
 fn env_non_empty(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| !v.is_empty())
@@ -77,13 +80,96 @@ fn resolve(choice: clap::ColorChoice) -> Resolution {
 /// choice is forced on or off, so `console::style(..)` (test dots, snapshot
 /// diffs) follows the same decision; `console`'s own NO_COLOR/tty detection
 /// is left in place for `auto`.
-pub fn init(choice: clap::ColorChoice) {
+pub fn init(choice: clap::ColorChoice, theme_name: Option<&str>) {
     let resolution = resolve(choice);
     let _ = RESOLUTION.set(resolution);
     if let Resolution::Forced(enabled) = resolution {
         console::set_colors_enabled(enabled);
         console::set_colors_enabled_stderr(enabled);
     }
+
+    // Truecolor is not universally supported; when the terminal doesn't
+    // advertise it, `solite-theme` downgrades Rgb values to the nearest
+    // 256-color index at emission time.
+    solite_theme::set_color_depth(solite_theme::detect_color_depth());
+
+    // `--theme` wins over `$SOLITE_THEME`; neither means the built-in
+    // terminal theme.
+    let name = theme_name
+        .map(str::to_string)
+        .or_else(|| std::env::var("SOLITE_THEME").ok().filter(|v| !v.is_empty()));
+    let theme = match name {
+        None => Theme::terminal(),
+        Some(name) => match resolve_theme(&name) {
+            Ok(theme) => theme,
+            Err(message) => {
+                eprintln!("error: {message}");
+                std::process::exit(1);
+            }
+        },
+    };
+    let _ = THEME.set(theme);
+}
+
+/// The directories searched for `<name>.toml` user themes, most specific
+/// first: `$XDG_CONFIG_HOME/solite/themes`, then `~/.config/solite/themes`
+/// (the bat/lazygit convention — `~/.config` on macOS too, not
+/// `~/Library/Application Support`).
+pub fn theme_search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
+        dirs.push(PathBuf::from(xdg).join("solite").join("themes"));
+    }
+    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
+        let dir = PathBuf::from(home)
+            .join(".config")
+            .join("solite")
+            .join("themes");
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+/// Resolve a `--theme` value: a built-in name, a `<name>.toml` in one of the
+/// [`theme_search_dirs`], or — when the value contains a path separator or
+/// ends in `.toml` — a file path.
+pub fn resolve_theme(name: &str) -> Result<Theme, String> {
+    let is_path = name.ends_with(".toml")
+        || name.contains('/')
+        || name.contains(std::path::MAIN_SEPARATOR);
+    if is_path {
+        return solite_theme::load_theme_file(Path::new(name)).map_err(|e| e.to_string());
+    }
+    if let Some(theme) = Theme::builtin(name) {
+        return Ok(theme);
+    }
+    let dirs = theme_search_dirs();
+    for dir in &dirs {
+        let candidate = dir.join(format!("{name}.toml"));
+        if candidate.is_file() {
+            return solite_theme::load_theme_file(&candidate).map_err(|e| e.to_string());
+        }
+    }
+    let searched = if dirs.is_empty() {
+        "  (no config directory: neither $XDG_CONFIG_HOME nor $HOME is set)".to_string()
+    } else {
+        dirs.iter()
+            .map(|d| format!("  searched: {}", d.join(format!("{name}.toml")).display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Err(format!(
+        "no theme named `{name}`\n  built-in themes: {}\n{searched}\n  (a value containing `/` or ending in `.toml` is loaded as a file path)",
+        Theme::BUILTIN_NAMES.join(", ")
+    ))
+}
+
+/// The theme resolved for this process. Defaults to [`Theme::terminal`] when
+/// [`init`] hasn't run (tests, benches).
+pub fn theme() -> &'static Theme {
+    THEME.get_or_init(Theme::terminal)
 }
 
 fn resolution() -> Resolution {
@@ -113,6 +199,21 @@ pub fn scan_color_flag(args: &[String]) -> clap::ColorChoice {
     clap::ColorChoice::Auto
 }
 
+/// Best-effort scan of raw argv for `--theme <value>` / `--theme=<value>`,
+/// used on the fallback paths in `run_main` where clap never produced a `Cli`
+/// (bare `solite`, `solite foo.db`).
+pub fn scan_theme_flag(args: &[String]) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if let Some(value) = arg.strip_prefix("--theme=") {
+            return Some(value.to_string());
+        } else if arg == "--theme" {
+            return iter.next().cloned();
+        }
+    }
+    None
+}
+
 /// Whether stdout is a terminal.
 pub fn is_tty() -> bool {
     std::io::stdout().is_terminal()
@@ -139,10 +240,17 @@ pub fn use_color_stderr() -> bool {
 pub fn table_config() -> solite_table::TableConfig {
     let config = solite_table::TableConfig::terminal();
     if use_color() {
-        config
+        config.with_theme(Some(*theme()))
     } else {
         config.with_theme(None)
     }
+}
+
+/// The `TableConfig` for HTML output (Jupyter), carrying the resolved theme.
+/// Color gating doesn't apply: HTML is never a terminal stream, and the
+/// theme's `Default` roles render as `currentColor`.
+pub fn html_table_config() -> solite_table::TableConfig {
+    solite_table::TableConfig::html().with_theme(Some(*theme()))
 }
 
 #[cfg(windows)]

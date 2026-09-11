@@ -10,6 +10,7 @@
   Options:
         --allow-ssh      Allow connecting to ssh:// database URLs and custom --transport commands
         --color <COLOR>  Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
+        --theme <NAME>   Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
     -h, --help           Print help
     -V, --version        Print version
   
@@ -77,6 +78,9 @@
     -o, --output <OUTPUT>
             Write the JSON report here instead of stdout
   
+        --theme <NAME>
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+  
     -h, --help
             Print help (see a summary with '-h')
   
@@ -127,6 +131,9 @@
             [default: auto]
             [possible values: auto, always, never]
   
+        --theme <NAME>
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+  
     -h, --help
             Print help (see a summary with '-h')
   
@@ -164,6 +171,7 @@
   Options:
         --allow-ssh      Allow connecting to ssh:// database URLs and custom --transport commands
         --color <COLOR>  Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
+        --theme <NAME>   Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
     -h, --help           Print help
   
   '''
@@ -207,6 +215,9 @@
   
     -p, --parameters <NAME> <VALUE>
             Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`. Integer/decimal values bind as numbers; single-quote to force text, e.g. -p id "'42'"
+  
+        --theme <NAME>
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
   
         --load-extension <PATH>
             Load SQLite extension(s) before running the query
@@ -263,6 +274,9 @@
         --transport <TRANSPORT>
             Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
   
+        --theme <NAME>
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+  
     -h, --help
             Print help (see a summary with '-h')
   
@@ -307,6 +321,9 @@
   
     -p, --parameters <NAME> <VALUE>
             Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file` to bind the file's bytes as a BLOB
+  
+        --theme <NAME>
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
   
         --trace <TRACE_DB>
             Record an execution trace (statements + per-opcode bytecode stats) to a SQLite database at this path

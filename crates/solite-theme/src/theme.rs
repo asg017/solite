@@ -211,7 +211,7 @@ impl Theme {
 
             background: Style::hex(p::TEXT).with_bg_hex(p::BASE),
             border: Style::hex(p::OVERLAY0),
-            header: Style::hex(p::TEXT),
+            header: Style::hex(p::TEXT).bold(),
             header_selected: Style::hex(p::TEXT).with_bg_hex(p::OVERLAY0),
             footer: Style::hex(p::SUBTEXT0),
             muted: Style::hex(p::OVERLAY2),

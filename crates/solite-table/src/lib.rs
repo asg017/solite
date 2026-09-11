@@ -22,11 +22,10 @@ pub mod config;
 pub mod format;
 pub mod layout;
 pub mod render;
-pub mod theme;
 pub mod types;
 
 pub use config::{OutputMode, TableConfig};
-pub use theme::Theme;
+pub use solite_theme::{ColorValue, Style, Theme, RESET};
 pub use types::{Alignment, CellValue, ColumnInfo, TableLayout, ValueType};
 
 use buffer::RowBuffer;

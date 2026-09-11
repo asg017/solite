@@ -2,8 +2,8 @@
 
 use crate::format::html_escape;
 use crate::format::json::format_json;
-use crate::theme::{Theme, RESET};
 use crate::types::{CellValue, ValueType};
+use solite_theme::Theme;
 
 /// Format a cell value with ANSI colors.
 pub fn format_cell(cell: &CellValue, theme: Option<&Theme>, max_width: usize) -> String {
@@ -19,21 +19,15 @@ pub fn format_cell(cell: &CellValue, theme: Option<&Theme>, max_width: usize) ->
 fn format_cell_with_theme(display: &str, value_type: ValueType, theme: &Theme) -> String {
     match value_type {
         ValueType::Null => {
-            // Show nothing for nulls (display is already empty)
+            // Show nothing for nulls (display is already empty). `theme.null`
+            // is intentionally unused here — it only drives the JSON/HTML
+            // paths, where a `null` literal inside a JSON value needs a color.
             String::new()
         }
-        ValueType::Integer => {
-            format!("{}{}{}", theme.integer.to_ansi_fg(), display, RESET)
-        }
-        ValueType::Double => {
-            format!("{}{}{}", theme.double.to_ansi_fg(), display, RESET)
-        }
-        ValueType::Text => {
-            format!("{}{}{}", theme.text.to_ansi_fg(), display, RESET)
-        }
-        ValueType::Blob => {
-            format!("{}{}{}", theme.blob.to_ansi_fg(), display, RESET)
-        }
+        ValueType::Integer => theme.integer.paint(display),
+        ValueType::Double => theme.double.paint(display),
+        ValueType::Text => theme.text.paint(display),
+        ValueType::Blob => theme.blob.paint(display),
         ValueType::Json => format_json(display, theme),
     }
 }
@@ -71,25 +65,25 @@ fn format_cell_html_with_theme(
         ValueType::Null => String::new(),
         ValueType::Integer => {
             format!(
-                "<span style=\"color: {}; font-family: monospace;\">{}</span>",
-                theme.integer.to_hex_string(),
+                "<span style=\"{}; font-family: monospace;\">{}</span>",
+                theme.integer.to_css(),
                 escaped
             )
         }
         ValueType::Double => {
             format!(
-                "<span style=\"color: {}; font-family: monospace;\">{}</span>",
-                theme.double.to_hex_string(),
+                "<span style=\"{}; font-family: monospace;\">{}</span>",
+                theme.double.to_css(),
                 escaped
             )
         }
-        ValueType::Text => escaped.to_string(),
+        // Colored to match the ANSI path (`format_cell_with_theme` above),
+        // which has always colored text values.
+        ValueType::Text => {
+            format!("<span style=\"{}\">{}</span>", theme.text.to_css(), escaped)
+        }
         ValueType::Blob => {
-            format!(
-                "<span style=\"color: {};\">{}</span>",
-                theme.blob.to_hex_string(),
-                escaped
-            )
+            format!("<span style=\"{}\">{}</span>", theme.blob.to_css(), escaped)
         }
         ValueType::Json => crate::format::json::format_json_html(raw, theme),
     }
@@ -166,5 +160,35 @@ mod tests {
 
         assert!(formatted.contains("42"));
         assert!(formatted.contains("\x1b[")); // Contains ANSI codes
+    }
+
+    #[test]
+    fn test_format_cell_catppuccin_truecolor_escape() {
+        // Byte-identical to the old private theme's `Color::to_ansi_fg()` output.
+        let theme = Theme::catppuccin_mocha();
+        let cell = CellValue::new("42".to_string(), ValueType::Integer, Alignment::Right);
+        let formatted = format_cell(&cell, Some(&theme), 100);
+
+        assert_eq!(formatted, "\x1b[38;2;250;179;135m42\x1b[0m");
+    }
+
+    #[test]
+    fn test_format_cell_terminal_theme_named_ansi() {
+        let theme = Theme::terminal();
+        let cell = CellValue::new("42".to_string(), ValueType::Integer, Alignment::Right);
+        let formatted = format_cell(&cell, Some(&theme), 100);
+
+        // Integer is ANSI yellow (SGR 33) in the terminal theme, not truecolor.
+        assert_eq!(formatted, "\x1b[33m42\x1b[0m");
+    }
+
+    #[test]
+    fn test_format_cell_terminal_theme_default_color_is_inert() {
+        // Text is `ColorValue::Default` in the terminal theme: no escapes at all.
+        let theme = Theme::terminal();
+        let cell = CellValue::new("hello".to_string(), ValueType::Text, Alignment::Left);
+        let formatted = format_cell(&cell, Some(&theme), 100);
+
+        assert_eq!(formatted, "hello");
     }
 }

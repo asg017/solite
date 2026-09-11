@@ -4797,6 +4797,7 @@ dependencies = [
  "insta",
  "solite-core",
  "solite-lexer",
+ "solite-theme",
  "term_size",
  "unicode-width 0.2.0",
 ]

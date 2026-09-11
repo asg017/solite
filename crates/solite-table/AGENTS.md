@@ -20,7 +20,7 @@ Controls all rendering behavior. Constructed via `TableConfig::terminal()`, `::p
 | `head_rows`        | `20`             | Number of rows to keep from the start                    |
 | `tail_rows`        | `20`             | Number of rows to keep from the end                      |
 | `max_cell_width`   | `100`            | Truncate cell content beyond this width                  |
-| `theme`            | Catppuccin Mocha | `Option<Theme>` for colors; `None` disables color        |
+| `theme`            | `Theme::terminal()` (ANSI-16) | `Option<solite_theme::Theme>` for colors; `None` disables color. `TableConfig::html()` uses `Theme::catppuccin_mocha()` explicitly. |
 | `show_footer`      | `true`           | Show row/column count footer                             |
 | `json_interactive` | `false`          | Render JSON as interactive tree viewer (HTML mode only)   |
 
@@ -82,7 +82,7 @@ All renderers take the same arguments: `columns`, `head_rows`, `tail_rows`, `lay
 - **`render_terminal`** (`terminal.rs`) -- Box-drawing borders, ANSI-colored cells, ellipsis rows for truncated results, footer line.
 - **`render_string`** (`string.rs`) -- Delegates to `render_terminal` (identical output).
 - **`render_string_plain`** (`string.rs`) -- Calls `render_terminal` with `theme: None` to suppress ANSI codes.
-- **`render_html`** (`html.rs`) -- Generates `<table class="solite-table">` with inline CSS (Catppuccin Mocha colors). Supports interactive JSON tree viewer via embedded JS/CSS.
+- **`render_html`** (`html.rs`) -- Generates `<table class="solite-table">` with inline CSS. Uses `config.theme` (Catppuccin Mocha by default via `TableConfig::html()`) for cell/JSON coloring; the static chrome CSS is still hardcoded Catppuccin (ticket 06 addresses this). Supports interactive JSON tree viewer via embedded JS/CSS.
 
 ### 4. Cell Formatting (`format/`)
 
@@ -100,7 +100,6 @@ src/
   types.rs          -- CellValue, ColumnInfo, TableLayout, ValueType, Alignment, display_width()
   layout.rs         -- compute_layout() with column collapsing logic
   buffer.rs         -- RowBuffer, RingBuffer for streaming head/tail retention
-  theme.rs          -- Theme (Catppuccin Mocha), Color, ANSI constants
   format/
     mod.rs          -- html_escape()
     value.rs        -- format_cell(), format_cell_html(), truncation
@@ -119,5 +118,6 @@ src/
 
 - `solite-core` -- `Statement`, `SQLiteError`, `ValueRefX` types
 - `solite-lexer` -- JSON tokenizer for syntax highlighting
+- `solite-theme` -- `Theme`, `Style`, `ColorValue` (re-exported from `lib.rs`); this crate no longer has its own theme type. All ANSI emission goes through `Style::ansi_prefix()`/`Style::paint()`, HTML through `Style::to_css()`/`ColorValue::to_css()`.
 - `term_size` -- Terminal width detection
 - `unicode-width` -- Correct display width for Unicode/CJK characters

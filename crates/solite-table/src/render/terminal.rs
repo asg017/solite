@@ -2,8 +2,17 @@
 
 use crate::config::TableConfig;
 use crate::format::value::format_cell;
-use crate::theme::{BOLD, RESET};
 use crate::types::{Alignment, CellValue, ColumnInfo, TableLayout, display_width};
+use solite_theme::{Style, Theme};
+
+/// Paint `s` with the given role's style, or leave it untouched when no
+/// theme is configured (`None` means colors are off).
+fn paint(theme: Option<&Theme>, role: impl Fn(&Theme) -> Style, s: &str) -> String {
+    match theme {
+        Some(theme) => role(theme).paint(s),
+        None => s.to_string(),
+    }
+}
 
 /// Border characters.
 mod border {
@@ -36,7 +45,7 @@ pub fn render_terminal(
     }
 
     // Render top border
-    output.push_str(&render_border_top(layout, columns));
+    output.push_str(&render_border_top(layout, columns, config));
     output.push('\n');
 
     // Render header row
@@ -44,7 +53,7 @@ pub fn render_terminal(
     output.push('\n');
 
     // Render header separator
-    output.push_str(&render_header_separator(layout, columns));
+    output.push_str(&render_header_separator(layout, columns, config));
     output.push('\n');
 
     // Render head rows
@@ -56,7 +65,7 @@ pub fn render_terminal(
     // Render ellipsis row if there's truncation
     let skipped = total_rows.saturating_sub(head_rows.len() + tail_rows.len());
     if skipped > 0 {
-        output.push_str(&render_ellipsis_row(layout, columns, skipped));
+        output.push_str(&render_ellipsis_row(layout, columns, skipped, config));
         output.push('\n');
     }
 
@@ -67,7 +76,7 @@ pub fn render_terminal(
     }
 
     // Render bottom border
-    output.push_str(&render_border_bottom(layout, columns));
+    output.push_str(&render_border_bottom(layout, columns, config));
     output.push('\n');
 
     // Render footer
@@ -85,7 +94,7 @@ fn get_column_width(layout: &TableLayout, col_idx: usize, columns: &[ColumnInfo]
     layout.column_widths.get(col_idx).copied().unwrap_or(base_width)
 }
 
-fn render_border_top(layout: &TableLayout, columns: &[ColumnInfo]) -> String {
+fn render_border_top(layout: &TableLayout, columns: &[ColumnInfo], config: &TableConfig) -> String {
     let mut line = String::new();
     line.push(border::TOP_LEFT);
 
@@ -113,10 +122,14 @@ fn render_border_top(layout: &TableLayout, columns: &[ColumnInfo]) -> String {
     }
 
     line.push(border::TOP_RIGHT);
-    line
+    paint(config.theme.as_ref(), |t| t.border, &line)
 }
 
-fn render_border_bottom(layout: &TableLayout, columns: &[ColumnInfo]) -> String {
+fn render_border_bottom(
+    layout: &TableLayout,
+    columns: &[ColumnInfo],
+    config: &TableConfig,
+) -> String {
     let mut line = String::new();
     line.push(border::BOTTOM_LEFT);
 
@@ -142,10 +155,14 @@ fn render_border_bottom(layout: &TableLayout, columns: &[ColumnInfo]) -> String 
     }
 
     line.push(border::BOTTOM_RIGHT);
-    line
+    paint(config.theme.as_ref(), |t| t.border, &line)
 }
 
-fn render_header_separator(layout: &TableLayout, columns: &[ColumnInfo]) -> String {
+fn render_header_separator(
+    layout: &TableLayout,
+    columns: &[ColumnInfo],
+    config: &TableConfig,
+) -> String {
     let mut line = String::new();
     line.push(border::LEFT_TEE);
 
@@ -171,12 +188,15 @@ fn render_header_separator(layout: &TableLayout, columns: &[ColumnInfo]) -> Stri
     }
 
     line.push(border::RIGHT_TEE);
-    line
+    paint(config.theme.as_ref(), |t| t.border, &line)
 }
 
 fn render_header_row(layout: &TableLayout, columns: &[ColumnInfo], config: &TableConfig) -> String {
+    let theme = config.theme.as_ref();
+    let pipe = paint(theme, |t| t.border, &border::VERTICAL.to_string());
+
     let mut line = String::new();
-    line.push(border::VERTICAL);
+    line.push_str(&pipe);
 
     let num_visible = layout.visible_columns.len();
     for (i, &col_idx) in layout.visible_columns.iter().enumerate() {
@@ -184,31 +204,27 @@ fn render_header_row(layout: &TableLayout, columns: &[ColumnInfo], config: &Tabl
 
         if layout.ellipsis_position == Some(i) {
             line.push_str(" … ");
-            line.push(border::VERTICAL);
+            line.push_str(&pipe);
         }
 
         let name = &columns[col_idx].name;
-        let formatted = if config.theme.is_some() {
-            format!("{}{}{}", BOLD, name, RESET)
-        } else {
-            name.clone()
-        };
+        let formatted = paint(theme, |t| t.header, name);
         let padded = pad_cell(&formatted, name, width, Alignment::Center);
         line.push(' ');
         line.push_str(&padded);
         line.push(' ');
 
         if i < num_visible - 1 {
-            line.push(border::VERTICAL);
+            line.push_str(&pipe);
         }
     }
 
     if layout.ellipsis_position == Some(num_visible) {
-        line.push(border::VERTICAL);
+        line.push_str(&pipe);
         line.push_str(" … ");
     }
 
-    line.push(border::VERTICAL);
+    line.push_str(&pipe);
     line
 }
 
@@ -218,8 +234,11 @@ fn render_data_row(
     columns: &[ColumnInfo],
     config: &TableConfig,
 ) -> String {
+    let theme = config.theme.as_ref();
+    let pipe = paint(theme, |t| t.border, &border::VERTICAL.to_string());
+
     let mut line = String::new();
-    line.push(border::VERTICAL);
+    line.push_str(&pipe);
 
     let num_visible = layout.visible_columns.len();
     for (i, &col_idx) in layout.visible_columns.iter().enumerate() {
@@ -227,7 +246,7 @@ fn render_data_row(
 
         if layout.ellipsis_position == Some(i) {
             line.push_str(" · ");
-            line.push(border::VERTICAL);
+            line.push_str(&pipe);
         }
 
         let cell = row.get(col_idx).cloned().unwrap_or_else(|| {
@@ -235,7 +254,7 @@ fn render_data_row(
         });
 
         // Truncate cell content to fit column width
-        let formatted = format_cell(&cell, config.theme.as_ref(), width);
+        let formatted = format_cell(&cell, theme, width);
         let display_for_pad = truncate_display(&cell.display, width);
         let padded = pad_cell(&formatted, &display_for_pad, width, cell.alignment);
 
@@ -244,22 +263,30 @@ fn render_data_row(
         line.push(' ');
 
         if i < num_visible - 1 {
-            line.push(border::VERTICAL);
+            line.push_str(&pipe);
         }
     }
 
     if layout.ellipsis_position == Some(num_visible) {
-        line.push(border::VERTICAL);
+        line.push_str(&pipe);
         line.push_str(" · ");
     }
 
-    line.push(border::VERTICAL);
+    line.push_str(&pipe);
     line
 }
 
-fn render_ellipsis_row(layout: &TableLayout, columns: &[ColumnInfo], _skipped: usize) -> String {
+fn render_ellipsis_row(
+    layout: &TableLayout,
+    columns: &[ColumnInfo],
+    _skipped: usize,
+    config: &TableConfig,
+) -> String {
+    let theme = config.theme.as_ref();
+    let pipe = paint(theme, |t| t.border, &border::VERTICAL.to_string());
+
     let mut line = String::new();
-    line.push(border::VERTICAL);
+    line.push_str(&pipe);
 
     let num_visible = layout.visible_columns.len();
     for (i, _) in layout.visible_columns.iter().enumerate() {
@@ -267,7 +294,7 @@ fn render_ellipsis_row(layout: &TableLayout, columns: &[ColumnInfo], _skipped: u
 
         if layout.ellipsis_position == Some(i) {
             line.push_str(" · ");
-            line.push(border::VERTICAL);
+            line.push_str(&pipe);
         }
 
         // Just show "·" centered - the footer has the count
@@ -278,16 +305,16 @@ fn render_ellipsis_row(layout: &TableLayout, columns: &[ColumnInfo], _skipped: u
         line.push(' ');
 
         if i < num_visible - 1 {
-            line.push(border::VERTICAL);
+            line.push_str(&pipe);
         }
     }
 
     if layout.ellipsis_position == Some(num_visible) {
-        line.push(border::VERTICAL);
+        line.push_str(&pipe);
         line.push_str(" · ");
     }
 
-    line.push(border::VERTICAL);
+    line.push_str(&pipe);
     line
 }
 
@@ -307,7 +334,8 @@ fn render_footer(layout: &TableLayout, total_rows: usize, config: &TableConfig) 
         format!("{} rows ({} shown)", total_rows, shown_rows)
     };
 
-    format!("{} × {}", col_text, row_text)
+    let text = format!("{} × {}", col_text, row_text);
+    paint(config.theme.as_ref(), |t| t.footer, &text)
 }
 
 /// Truncate a display string to fit within max_width, adding ellipsis if needed.

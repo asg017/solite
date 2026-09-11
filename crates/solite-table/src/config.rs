@@ -1,6 +1,6 @@
 //! Configuration for table rendering.
 
-use crate::theme::Theme;
+use solite_theme::Theme;
 
 /// Output mode for table rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +50,7 @@ impl Default for TableConfig {
             head_rows: 20,
             tail_rows: 20,
             max_cell_width: 100,
-            theme: Some(Theme::catppuccin_mocha()),
+            theme: Some(Theme::terminal()),
             show_footer: true,
             json_interactive: false,
         }

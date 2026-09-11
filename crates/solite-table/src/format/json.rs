@@ -1,8 +1,8 @@
 //! JSON syntax highlighting and interactive viewer.
 
 use crate::format::html_escape;
-use crate::theme::{Theme, RESET};
 use solite_lexer::json::{tokenize, Kind, StringContext};
+use solite_theme::Theme;
 
 /// Format JSON with ANSI color codes.
 pub fn format_json(contents: &str, theme: &Theme) -> String {
@@ -12,29 +12,21 @@ pub fn format_json(contents: &str, theme: &Theme) -> String {
     for token in tokens {
         match token.kind {
             Kind::String => {
-                let color = if token.string_context == Some(StringContext::Key) {
+                let style = if token.string_context == Some(StringContext::Key) {
                     &theme.json_key
                 } else {
                     &theme.json_string
                 };
-                output.push_str(&color.to_ansi_fg());
-                output.push_str(token.text);
-                output.push_str(RESET);
+                output.push_str(&style.paint(token.text));
             }
             Kind::Number => {
-                output.push_str(&theme.json_number.to_ansi_fg());
-                output.push_str(token.text);
-                output.push_str(RESET);
+                output.push_str(&theme.json_number.paint(token.text));
             }
             Kind::Null => {
-                output.push_str(&theme.null.to_ansi_fg());
-                output.push_str(token.text);
-                output.push_str(RESET);
+                output.push_str(&theme.null.paint(token.text));
             }
             Kind::True | Kind::False => {
-                output.push_str(&theme.json_boolean.to_ansi_fg());
-                output.push_str(token.text);
-                output.push_str(RESET);
+                output.push_str(&theme.json_boolean.paint(token.text));
             }
             Kind::LBrace => output.push('{'),
             Kind::RBrace => output.push('}'),
@@ -59,35 +51,35 @@ pub fn format_json_html(contents: &str, theme: &Theme) -> String {
     for token in tokens {
         match token.kind {
             Kind::String => {
-                let color = if token.string_context == Some(StringContext::Key) {
+                let style = if token.string_context == Some(StringContext::Key) {
                     &theme.json_key
                 } else {
                     &theme.json_string
                 };
                 output.push_str(&format!(
-                    "<span style=\"color: {};\">{}</span>",
-                    color.to_hex_string(),
+                    "<span style=\"{}\">{}</span>",
+                    style.to_css(),
                     html_escape(token.text)
                 ));
             }
             Kind::Number => {
                 output.push_str(&format!(
-                    "<span style=\"color: {};\">{}</span>",
-                    theme.json_number.to_hex_string(),
+                    "<span style=\"{}\">{}</span>",
+                    theme.json_number.to_css(),
                     html_escape(token.text)
                 ));
             }
             Kind::Null => {
                 output.push_str(&format!(
-                    "<span style=\"color: {};\">{}</span>",
-                    theme.null.to_hex_string(),
+                    "<span style=\"{}\">{}</span>",
+                    theme.null.to_css(),
                     html_escape(token.text)
                 ));
             }
             Kind::True | Kind::False => {
                 output.push_str(&format!(
-                    "<span style=\"color: {};\">{}</span>",
-                    theme.json_boolean.to_hex_string(),
+                    "<span style=\"{}\">{}</span>",
+                    theme.json_boolean.to_css(),
                     html_escape(token.text)
                 ));
             }
@@ -129,21 +121,23 @@ pub fn json_viewer_js() -> &'static str {
 }
 
 /// Generate inline CSS custom property declarations for the JSON viewer theme.
-/// Intended to be used as a `style` attribute on the container element.
+/// Intended to be used as a `style` attribute on the container element, so
+/// each value must be a bare CSS color (e.g. `#fab387`), not a full `color:
+/// ...` declaration.
 pub fn json_viewer_theme_vars(theme: &Theme) -> String {
     format!(
         "--jt-key: {}; --jt-str: {}; --jt-num: {}; --jt-bool: {}; \
          --jt-null: {}; --jt-footer: {}; --jt-text: {}; \
          --jt-border: {}; --jt-bg: {};",
-        theme.json_key.to_hex_string(),
-        theme.json_string.to_hex_string(),
-        theme.json_number.to_hex_string(),
-        theme.json_boolean.to_hex_string(),
-        theme.null.to_hex_string(),
-        theme.footer.to_hex_string(),
-        theme.text.to_hex_string(),
-        theme.border.to_hex_string(),
-        theme.header.to_hex_string(),
+        theme.json_key.fg.to_css(),
+        theme.json_string.fg.to_css(),
+        theme.json_number.fg.to_css(),
+        theme.json_boolean.fg.to_css(),
+        theme.null.fg.to_css(),
+        theme.footer.fg.to_css(),
+        theme.text.fg.to_css(),
+        theme.border.fg.to_css(),
+        theme.header.fg.to_css(),
     )
 }
 
@@ -205,7 +199,17 @@ mod tests {
         assert!(vars.contains("--jt-num:"));
         assert!(vars.contains("--jt-bool:"));
         assert!(vars.contains("--jt-null:"));
-        assert!(vars.contains("#89B4FA")); // json_key blue
+        assert!(vars.contains("#89b4fa")); // json_key blue
+    }
+
+    #[test]
+    fn test_format_json_terminal_theme_named_ansi() {
+        let theme = Theme::terminal();
+        let json = r#"{"num": 42}"#;
+        let formatted = format_json(json, &theme);
+
+        // json_number is ANSI yellow (SGR 33) in the terminal theme.
+        assert!(formatted.contains("\x1b[33m42\x1b[0m"));
     }
 
     #[test]

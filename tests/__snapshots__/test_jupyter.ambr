@@ -24,7 +24,7 @@
       border: 1px solid currentColor;
       opacity: 0.8;
     }
-  </style><div class="solite-describe-header"><code>main.users</code><span class="kind">table</span><span class="count">3 rows</span></div><details open="open"><summary>Data</summary><div style="overflow-x:auto"><div class="solite-output" style="--jt-key: #89B4FA; --jt-str: #A6E3A1; --jt-num: #FAB387; --jt-bool: #EBA0AC; --jt-null: #BAC2DE; --jt-footer: #A6ADC8; --jt-text: #CDD6F4; --jt-border: #6C7086; --jt-bg: #CDD6F4;">
+  </style><div class="solite-describe-header"><code>main.users</code><span class="kind">table</span><span class="count">3 rows</span></div><details open="open"><summary>Data</summary><div style="overflow-x:auto"><div class="solite-output" style="--jt-key: #89b4fa; --jt-str: #a6e3a1; --jt-num: #fab387; --jt-bool: #eba0ac; --jt-null: #bac2de; --jt-footer: #a6adc8; --jt-text: #cdd6f4; --jt-border: #6c7086; --jt-bg: #cdd6f4;">
   <style>
   .solite-table {
       border-collapse: collapse;
@@ -156,9 +156,9 @@
   <table class="solite-table">
   <thead><tr><th>id</th><th>name</th></tr></thead>
   <tbody>
-  <tr><td style="text-align: right;"><span style="color: #FAB387; font-family: monospace;">1</span></td><td style="text-align: left;">a</td></tr>
-  <tr><td style="text-align: right;"><span style="color: #FAB387; font-family: monospace;">2</span></td><td style="text-align: left;">b</td></tr>
-  <tr><td style="text-align: right;"><span style="color: #FAB387; font-family: monospace;">3</span></td><td style="text-align: left;">c</td></tr>
+  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">1</span></td><td style="text-align: left;"><span style="color: #cdd6f4">a</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">2</span></td><td style="text-align: left;"><span style="color: #cdd6f4">b</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">3</span></td><td style="text-align: left;"><span style="color: #cdd6f4">c</span></td></tr>
   </tbody>
   </table>
   <script>(function() {
@@ -440,7 +440,7 @@
 # ---
 # name: test_hello.1
   '''
-  <div class="solite-output" style="--jt-key: #89B4FA; --jt-str: #A6E3A1; --jt-num: #FAB387; --jt-bool: #EBA0AC; --jt-null: #BAC2DE; --jt-footer: #A6ADC8; --jt-text: #CDD6F4; --jt-border: #6C7086; --jt-bg: #CDD6F4;">
+  <div class="solite-output" style="--jt-key: #89b4fa; --jt-str: #a6e3a1; --jt-num: #fab387; --jt-bool: #eba0ac; --jt-null: #bac2de; --jt-footer: #a6adc8; --jt-text: #cdd6f4; --jt-border: #6c7086; --jt-bg: #cdd6f4;">
   <style>
   .solite-table {
       border-collapse: collapse;
@@ -572,7 +572,7 @@
   <table class="solite-table">
   <thead><tr><th>1 + 1</th></tr></thead>
   <tbody>
-  <tr><td style="text-align: right;"><span style="color: #FAB387; font-family: monospace;">2</span></td></tr>
+  <tr><td style="text-align: right;"><span style="color: #fab387; font-family: monospace;">2</span></td></tr>
   </tbody>
   </table>
   <div class="solite-footer">1 column × 1 row</div>

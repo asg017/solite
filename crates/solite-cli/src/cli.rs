@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf};
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use solite_core::exporter::{BlobLimit, ExportFormat};
+use solite_core::exporter::{BlobLimit, ExportFormat, GeoJsonOptions};
 
 use crate::commands::completions::files::{database_completer, sql_script_completer};
 use crate::commands::completions::procedures::run_args_completer;
@@ -128,6 +128,12 @@ pub enum QueryFormat {
     Value,
     /// Copy results to the system clipboard
     Clipboard,
+    /// GeoJSON FeatureCollection; the column named "geometry" is the geometry, other columns are properties
+    Geojson,
+    /// Newline-delimited GeoJSON, one Feature per line
+    Geojsonl,
+    /// RFC 8142 GeoJSON text sequence (record-separator delimited)
+    Geojsons,
     /// Apache Parquet (zstd-compressed; schema inferred from declared types and data)
     #[cfg(feature = "parquet")]
     Parquet,
@@ -142,6 +148,9 @@ impl From<QueryFormat> for ExportFormat {
             QueryFormat::Ndjson => ExportFormat::Ndjson,
             QueryFormat::Value => ExportFormat::Value,
             QueryFormat::Clipboard => ExportFormat::Clipboard,
+            QueryFormat::Geojson => ExportFormat::GeoJson(GeoJsonOptions::default()),
+            QueryFormat::Geojsonl => ExportFormat::GeoJsonl(GeoJsonOptions::default()),
+            QueryFormat::Geojsons => ExportFormat::GeoJsonSeq(GeoJsonOptions::default()),
             #[cfg(feature = "parquet")]
             QueryFormat::Parquet => ExportFormat::Parquet,
         }
@@ -154,6 +163,7 @@ Examples:
   solite query app.db report.sql -f json          # SQL from a file; order-agnostic
   solite query \"SELECT * FROM users\" app.db -o users.csv.gz
   solite query \"SELECT * FROM users\" app.db -o report.parquet
+  solite query \"select name, geometry from places\" -o places.geojson
   solite query \"SELECT * FROM 'data.csv' LIMIT 5\" # query a CSV/TSV file directly
   solite query \"SELECT name FROM users WHERE id = $id\" app.db -p id 42
   solite q \"SELECT 1\"                             # 'q' alias, in-memory database
@@ -175,8 +185,8 @@ pub struct QueryArgs {
     pub database: Option<PathBuf>,
 
     /// Write results to a file; format inferred from extension
-    /// (.csv, .tsv, .json, .ndjson, .parquet; .gz/.zst compression for
-    /// text formats)
+    /// (.csv, .tsv, .json, .ndjson, .geojson, .geojsonl, .geojsons,
+    /// .parquet; .gz/.zst compression for text formats)
     #[arg(long, short = 'o', value_hint = clap::ValueHint::AnyPath)]
     pub output: Option<PathBuf>,
 

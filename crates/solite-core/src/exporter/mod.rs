@@ -90,6 +90,27 @@ pub enum ExportError {
         /// Why the cell isn't a GeoJSON geometry.
         reason: String,
     },
+    /// `--id`/[`GeoJsonOptions::id_column`] named a column the result set
+    /// doesn't have.
+    IdColumnMissing {
+        /// The id column name that was looked for.
+        wanted: String,
+        /// The columns the result set actually has.
+        columns: Vec<String>,
+    },
+    /// A lifted `id` cell wasn't a string or integer (RFC 7946 §3.2 allows
+    /// only those two for a Feature's top-level `id`).
+    IdNotStringOrNumber {
+        /// Name of the id column.
+        column: String,
+        /// 1-based row number within the result set.
+        row: usize,
+        /// Description of the value actually found (e.g. "real", "blob").
+        found: &'static str,
+    },
+    /// `GeoJsonOptions` combination that can't be satisfied (e.g. `--id`
+    /// and `--geometry` naming the same column).
+    GeoJsonOptionsInvalid(String),
     /// Error from the underlying `parquet` crate (writer setup, encoding, I/O).
     #[cfg(feature = "parquet")]
     Parquet(::parquet::errors::ParquetError),
@@ -153,6 +174,21 @@ impl fmt::Display for ExportError {
                 row,
                 reason,
             } => write!(f, "column '{}' (row {}): {}", column, row, reason),
+            ExportError::IdColumnMissing { wanted, columns } => write!(
+                f,
+                "no id column '{}' in result (columns: {}); \
+                 name the id column '{}' or select it with an alias",
+                wanted,
+                columns.join(", "),
+                wanted,
+            ),
+            ExportError::IdNotStringOrNumber { column, row, found } => write!(
+                f,
+                "column '{}' (row {}): {} is not a valid GeoJSON id \
+                 (RFC 7946 \u{a7}3.2 allows only a string or a number)",
+                column, row, found,
+            ),
+            ExportError::GeoJsonOptionsInvalid(msg) => write!(f, "{}", msg),
             #[cfg(feature = "parquet")]
             ExportError::Parquet(e) => write!(f, "Parquet error: {}", e),
             ExportError::ParquetTypeMismatch {
@@ -241,11 +277,14 @@ pub enum ExportFormat {
 }
 
 /// Options shared by the GeoJSON family of formats.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub struct GeoJsonOptions {
     /// Column holding the GeoJSON geometry. `None` = the column named
     /// `geometry` (case-insensitive).
     pub geometry_column: Option<String>,
+    /// Column lifted to the Feature's top-level `id` member (and removed
+    /// from `properties`). `None` = no `id` member is written.
+    pub id_column: Option<String>,
 }
 
 /// Default BLOB size limit for clipboard exports (1 MiB).

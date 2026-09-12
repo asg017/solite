@@ -194,6 +194,15 @@ pub struct QueryArgs {
     #[arg(long, short = 'f', value_enum)]
     pub format: Option<QueryFormat>,
 
+    /// GeoJSON only: column holding the geometry (default: "geometry")
+    #[arg(long, value_name = "COLUMN")]
+    pub geometry: Option<String>,
+
+    /// GeoJSON only: column written as each Feature's top-level "id"
+    /// (default: none; stays in properties)
+    #[arg(long, value_name = "COLUMN")]
+    pub id: Option<String>,
+
     /// Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`.
     /// Integer/decimal values bind as numbers; single-quote to force
     /// text, e.g. -p id "'42'"

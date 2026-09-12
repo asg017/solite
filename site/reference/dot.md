@@ -159,12 +159,13 @@ so `.export out.parquet` infers a schema:
   the same value rules as `.json` — JSON-typed text (e.g. from `json()`)
   nests as an object/array, BLOBs are base64-encoded.
 - The `geometry` column is required and must already hold GeoJSON text: a
-  `json()`/`json_object()`/`->` result, a column typed `jsonx0` or
-  similar, or the output of sqlite-tg's `tg_to_geojson()`. sqlite-tg isn't
-  bundled with Solite yet, so load it explicitly with `.load` if you're
-  converting from WKB/WKT geometry columns. A plain WKT string or a BLOB
-  (WKB) in the geometry column is rejected with an error pointing at
-  `tg_to_geojson()` — neither is decoded in v1.
+  `json()`/`json_object()`/`->` result, the `geometry` column of a
+  jsonx0 GeoJSON virtual table, or the output of sqlite-tg's
+  `tg_to_geojson()`. sqlite-tg isn't bundled with Solite yet, so load it
+  explicitly with `.load` if you're converting from WKB/WKT geometry
+  columns. A plain WKT string or a BLOB (WKB) in the geometry column is
+  rejected with an error pointing at `tg_to_geojson()` — neither is
+  decoded in v1.
 - A `NULL` geometry produces a `Feature` with `"geometry":null` (an
   unlocated feature) rather than an error.
 - An empty result set exports `{"type":"FeatureCollection","features":[]}`
@@ -185,6 +186,24 @@ select id, name, population, geometry from places;
 .export s3://bucket/parcels.geojsonl.gz
 select apn, tg_to_geojson(geom) as geometry from parcels;
 ```
+
+By default the geometry column must be named `geometry` and every other
+column (including `id`) stays in `properties`. `--geometry <col>` and
+`--id <col>` (space or `--flag=value` form) override that:
+
+```
+.export out.geojson --geometry geom --id apn
+select apn, name, geom from parcels;
+```
+
+`--id` lifts that column to the Feature's top-level `id` member and
+removes it from `properties`; the value must be a string or a number
+(RFC 7946 §3.2) — `NULL` omits the `id` member entirely, and a real or
+BLOB value is an error. The flags work the same way with `solite query -f
+geojson*`/`-o x.geojson*` (see below). The `.export` line is only
+tokenized for flags when it contains ` --` or starts with `--`, so a bare
+target path with spaces still works untouched; a path that itself
+contains ` --` must be quoted, e.g. `.export "a --b.csv"`.
 
 ## .schema
 

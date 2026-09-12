@@ -55,7 +55,7 @@ const COMMANDS: &[HelpEntry] = &[
     HelpEntry {
         name: "export",
         aliases: &[],
-        usage: ".export <path>\n<query>",
+        usage: ".export <path> [--geometry <col>] [--id <col>]\n<query>",
         description: "Export query results to a file (csv, tsv, json, ndjson, geojson, geojsonl, parquet by extension; .gz/.zst for text formats; s3:// and t3:// targets)",
     },
     HelpEntry {

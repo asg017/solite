@@ -266,3 +266,40 @@ def test_export_geojson_s3(solite_cli, s3_gateway, tmp_path):
     data = json.loads(uploaded.read_text())
     assert data["type"] == "FeatureCollection"
     assert len(data["features"]) == 1
+
+
+def test_export_geometry_and_id_flags(solite_cli, tmp_path):
+    script = tmp_path / "geo.sql"
+    script.write_text(
+        """
+        create table parcels(apn text, name text, geom text);
+        insert into parcels values ('A-1', 'north', json('{"type":"Point","coordinates":[1,2]}'));
+        insert into parcels values ('A-2', 'south', json('{"type":"Point","coordinates":[3,4]}'));
+        .export out.geojson --geometry geom --id apn
+        select * from parcels;
+        """
+    )
+
+    result = solite_cli(["run", str(script)], cwd=tmp_path)
+    assert result.success, result.stderr
+
+    data = json.loads((tmp_path / "out.geojson").read_text())
+    features = {f["id"]: f for f in data["features"]}
+    assert set(features) == {"A-1", "A-2"}
+    assert features["A-1"]["properties"] == {"name": "north"}
+    assert features["A-1"]["geometry"]["type"] == "Point"
+    assert "apn" not in features["A-1"]["properties"]
+
+
+def test_query_geojsonl_id_flag_stdout(solite_cli):
+    sql = (
+        "select 1 as id, 'a' as name, "
+        "json('{\"type\":\"Point\",\"coordinates\":[1,2]}') as geometry"
+    )
+    result = solite_cli(["q", sql, "-f", "geojsonl", "--id", "id"])
+    assert result.success, result.stderr
+
+    feature = json.loads(result.stdout)
+    assert feature["id"] == 1
+    assert "id" not in feature["properties"]
+    assert feature["properties"] == {"name": "a"}

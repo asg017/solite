@@ -107,6 +107,25 @@ pub(super) fn write_geojson<W: Write>(
             columns: columns.clone(),
         })?;
 
+    let id_idx = match opts.id_column.as_deref() {
+        Some(wanted_id) => {
+            let idx = columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(wanted_id))
+                .ok_or_else(|| ExportError::IdColumnMissing {
+                    wanted: wanted_id.to_owned(),
+                    columns: columns.clone(),
+                })?;
+            if idx == geometry_idx {
+                return Err(ExportError::GeoJsonOptionsInvalid(
+                    "--id and --geometry name the same column".to_owned(),
+                ));
+            }
+            Some(idx)
+        }
+        None => None,
+    };
+
     if layout == GeoJsonLayout::Collection {
         out.write_all(b"{\"type\":\"FeatureCollection\",\"features\":[")?;
     }
@@ -122,7 +141,7 @@ pub(super) fn write_geojson<W: Write>(
                     GeoJsonLayout::Seq => out.write_all(&[RECORD_SEPARATOR])?,
                     _ => {}
                 }
-                write_feature(&mut out, &columns, &row, geometry_idx, row_number)?;
+                write_feature(&mut out, &columns, &row, geometry_idx, id_idx, row_number)?;
                 if matches!(layout, GeoJsonLayout::Lines | GeoJsonLayout::Seq) {
                     out.write_all(b"\n")?;
                 }
@@ -147,6 +166,7 @@ fn write_feature<W: Write>(
     columns: &[String],
     row: &[ValueRefX],
     geometry_idx: usize,
+    id_idx: Option<usize>,
     row_number: usize,
 ) -> Result<(), ExportError> {
     out.write_all(b"{\"type\":\"Feature\",\"geometry\":")?;
@@ -158,12 +178,20 @@ fn write_feature<W: Write>(
         })?;
     write_geometry(out, geometry, &columns[geometry_idx], row_number)?;
 
+    if let Some(id_idx) = id_idx {
+        let id_value = row.get(id_idx).ok_or(ExportError::ColumnIndexOutOfBounds {
+            index: id_idx,
+            count: row.len(),
+        })?;
+        write_id(out, id_value, &columns[id_idx], row_number)?;
+    }
+
     out.write_all(b",\"properties\":")?;
     // Duplicate column names collapse, last one wins, exactly as
     // `super::write_json_row` does for `.json`/`.ndjson`.
     let mut props = serde_json::Map::new();
     for (idx, value) in row.iter().enumerate() {
-        if idx == geometry_idx {
+        if idx == geometry_idx || Some(idx) == id_idx {
             continue;
         }
         let key = columns
@@ -226,6 +254,43 @@ fn write_geometry<W: Write>(
             out.write_all(text.as_bytes())?;
             Ok(())
         }
+    }
+}
+
+/// Write a Feature's top-level `id` member (`,"id":<value>`), or nothing at
+/// all for a NULL cell — a NULL `id` column just means this row has no id,
+/// not that it's an id of `null`.
+///
+/// RFC 7946 §3.2 allows only a string or a number for `id`; Real and Blob
+/// are [`ExportError::IdNotStringOrNumber`].
+fn write_id<W: Write>(
+    out: &mut W,
+    value: &ValueRefX,
+    column: &str,
+    row: usize,
+) -> Result<(), ExportError> {
+    match &value.value {
+        ValueRefXValue::Null => Ok(()),
+        ValueRefXValue::Int(v) => {
+            out.write_all(b",\"id\":")?;
+            write!(out, "{v}").map_err(ExportError::Io)
+        }
+        ValueRefXValue::Text(bytes) => {
+            let text = std::str::from_utf8(bytes).map_err(|_| ExportError::InvalidUtf8)?;
+            out.write_all(b",\"id\":")?;
+            serde_json::to_writer(&mut *out, text)?;
+            Ok(())
+        }
+        ValueRefXValue::Double(_) => Err(ExportError::IdNotStringOrNumber {
+            column: column.to_owned(),
+            row,
+            found: "real",
+        }),
+        ValueRefXValue::Blob(_) => Err(ExportError::IdNotStringOrNumber {
+            column: column.to_owned(),
+            row,
+            found: "blob",
+        }),
     }
 }
 
@@ -417,6 +482,7 @@ mod tests {
     fn test_geometry_column_override() {
         let opts = GeoJsonOptions {
             geometry_column: Some("geom".into()),
+            ..Default::default()
         };
         let bytes = write_bytes(
             r#"select 1 as geometry, json('{"type":"Point","coordinates":[1,2]}') as geom"#,
@@ -465,6 +531,7 @@ mod tests {
         // the override name is the one reported
         let opts = GeoJsonOptions {
             geometry_column: Some("shape".into()),
+            ..Default::default()
         };
         let err = write_bytes("select 1 as geometry", &opts, GeoJsonLayout::Lines).unwrap_err();
         assert!(err.to_string().contains("'shape'"), "{err}");
@@ -646,5 +713,142 @@ mod tests {
             ExportError::BlobTooLarge { column, .. } => assert_eq!(column, "payload"),
             other => panic!("expected BlobTooLarge, got {other:?}"),
         }
+    }
+
+    fn id_opts(id_column: &str) -> GeoJsonOptions {
+        GeoJsonOptions {
+            id_column: Some(id_column.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_id_column_int() {
+        let bytes = write_bytes(
+            r#"select 1 as code, 'a' as name,
+                      json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("code"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap();
+        let feature: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(feature["id"], 1);
+        assert_eq!(feature["properties"], serde_json::json!({"name": "a"}));
+    }
+
+    #[test]
+    fn test_id_column_text() {
+        let bytes = write_bytes(
+            r#"select 'APN-1' as code, 'a' as name,
+                      json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("code"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap();
+        let feature: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(feature["id"], "APN-1");
+        assert_eq!(feature["properties"], serde_json::json!({"name": "a"}));
+    }
+
+    #[test]
+    fn test_id_column_null_is_omitted() {
+        let bytes = write_bytes(
+            r#"select null as code, 'a' as name,
+                      json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("code"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap();
+        let out = String::from_utf8(bytes).unwrap();
+        assert!(!out.contains("\"id\""), "{out}");
+        let feature: Value = serde_json::from_str(&out).unwrap();
+        // still removed from properties, even though nothing was lifted
+        assert_eq!(feature["properties"], serde_json::json!({"name": "a"}));
+    }
+
+    #[test]
+    fn test_id_column_real_is_an_error() {
+        let err = write_bytes(
+            r#"select 1.5 as code, json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("code"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap_err();
+        match &err {
+            ExportError::IdNotStringOrNumber { column, row, found } => {
+                assert_eq!(column, "code");
+                assert_eq!(*row, 1);
+                assert_eq!(*found, "real");
+            }
+            other => panic!("expected IdNotStringOrNumber, got {other:?}"),
+        }
+        let msg = err.to_string();
+        assert!(msg.contains("column 'code' (row 1)"), "{msg}");
+        assert!(msg.contains("not a valid GeoJSON id"), "{msg}");
+    }
+
+    #[test]
+    fn test_id_column_blob_is_an_error() {
+        let err = write_bytes(
+            r#"select x'0101' as code, json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("code"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap_err();
+        match &err {
+            ExportError::IdNotStringOrNumber { found, .. } => assert_eq!(*found, "blob"),
+            other => panic!("expected IdNotStringOrNumber, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_id_column_missing() {
+        let err = write_bytes(
+            r#"select 1 as id, 'x' as name,
+                      json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("apn"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap_err();
+        match &err {
+            ExportError::IdColumnMissing { wanted, columns } => {
+                assert_eq!(wanted, "apn");
+                assert_eq!(
+                    columns,
+                    &["id".to_string(), "name".into(), "geometry".into()]
+                );
+            }
+            other => panic!("expected IdColumnMissing, got {other:?}"),
+        }
+        let msg = err.to_string();
+        assert!(msg.contains("no id column 'apn'"), "{msg}");
+    }
+
+    #[test]
+    fn test_id_column_same_as_geometry_column_is_an_error() {
+        let err = write_bytes(
+            r#"select json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("geometry"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap_err();
+        match &err {
+            ExportError::GeoJsonOptionsInvalid(msg) => {
+                assert!(msg.contains("same column"), "{msg}");
+            }
+            other => panic!("expected GeoJsonOptionsInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_id_column_is_case_insensitive() {
+        let bytes = write_bytes(
+            r#"select 1 as CODE, json('{"type":"Point","coordinates":[1,2]}') as geometry"#,
+            &id_opts("code"),
+            GeoJsonLayout::Lines,
+        )
+        .unwrap();
+        let feature: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(feature["id"], 1);
     }
 }

@@ -10,6 +10,7 @@ object_store = ["dep:object_store", "dep:tokio"]
 
 [dependencies]
 ritestream-api = { git = "https://github.com/asg017/litestream-rust", optional = true }
+knap = { path = "../../../knap-rs/crates/knap" }
 ropey = "1.6.0"
 libsqlite3-sys.workspace = true
 indicatif.workspace = true

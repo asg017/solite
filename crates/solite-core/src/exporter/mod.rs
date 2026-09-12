@@ -31,6 +31,9 @@ use std::{
 
 use crate::sqlite::{OwnedValue, Statement, ValueRefX, ValueRefXValue};
 
+#[cfg(feature = "parquet")]
+mod parquet;
+
 /// Errors that can occur during export operations.
 #[derive(Debug)]
 pub enum ExportError {
@@ -64,6 +67,22 @@ pub enum ExportError {
         size: u64,
         /// The active limit in bytes.
         limit: u64,
+    },
+    /// Error from the underlying `parquet` crate (writer setup, encoding, I/O).
+    #[cfg(feature = "parquet")]
+    Parquet(::parquet::errors::ParquetError),
+    /// A value didn't fit the column's inferred/declared Parquet type.
+    ParquetTypeMismatch {
+        /// Name of the mismatched column.
+        column: String,
+        /// 1-based row number within the result set.
+        row: usize,
+        /// The Parquet physical type the column was typed as.
+        expected: &'static str,
+        /// A description of the value actually found.
+        found: &'static str,
+        /// Why the column was typed `expected` (declared type vs. sniffed).
+        reason: String,
     },
 }
 
@@ -99,6 +118,19 @@ impl fmt::Display for ExportError {
                 limit,
                 size.div_ceil(1024 * 1024),
             ),
+            #[cfg(feature = "parquet")]
+            ExportError::Parquet(e) => write!(f, "Parquet error: {}", e),
+            ExportError::ParquetTypeMismatch {
+                column,
+                row,
+                expected,
+                found,
+                reason,
+            } => write!(
+                f,
+                "column '{}' (row {}) is {}, but the column was typed {} {}",
+                column, row, found, expected, reason,
+            ),
         }
     }
 }
@@ -109,6 +141,8 @@ impl std::error::Error for ExportError {
             ExportError::Io(e) => Some(e),
             ExportError::Csv(e) => Some(e),
             ExportError::Json(e) => Some(e),
+            #[cfg(feature = "parquet")]
+            ExportError::Parquet(e) => Some(e),
             _ => None,
         }
     }
@@ -132,6 +166,13 @@ impl From<serde_json::Error> for ExportError {
     }
 }
 
+#[cfg(feature = "parquet")]
+impl From<::parquet::errors::ParquetError> for ExportError {
+    fn from(e: ::parquet::errors::ParquetError) -> Self {
+        ExportError::Parquet(e)
+    }
+}
+
 /// Output format for exported data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportFormat {
@@ -147,6 +188,10 @@ pub enum ExportFormat {
     Value,
     /// HTML table to clipboard.
     Clipboard,
+    /// Apache Parquet, with a schema inferred from declared column types
+    /// (or sniffed from the first row group) and internal ZSTD compression.
+    #[cfg(feature = "parquet")]
+    Parquet,
 }
 
 /// Default BLOB size limit for clipboard exports (1 MiB).
@@ -234,7 +279,7 @@ pub fn parse_blob_limit(s: &str) -> Result<BlobLimit, String> {
 /// Error if any BLOB cell in the row exceeds `limit` (`None` = unlimited).
 ///
 /// Checked on the raw blob size, before any hex/base64 encoding.
-fn check_blob_limit(
+pub(super) fn check_blob_limit(
     row: &[ValueRefX],
     columns: &[String],
     limit: Option<u64>,
@@ -261,8 +306,9 @@ fn check_blob_limit(
 
 /// Encode a BLOB as a SQL-style hex literal, e.g. `x'DEADBEEF'`.
 /// Used by CSV/TSV/clipboard so blobs stay distinguishable from empty
-/// strings and NULLs (and round-trip losslessly).
-fn blob_to_hex_literal(bytes: &[u8]) -> String {
+/// strings and NULLs (and round-trip losslessly); also used by the Parquet
+/// writer to stringify blobs in lenient (sniffed) string columns.
+pub(super) fn blob_to_hex_literal(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2 + 3);
     out.push_str("x'");
     for b in bytes {
@@ -566,7 +612,11 @@ fn html_escape(s: &str) -> String {
 /// Automatically handles compression based on file extension:
 /// - `.gz`: gzip compression
 /// - `.zst`: zstd compression
-pub fn output_from_path(path: &Path) -> Result<Box<dyn Write>, ExportError> {
+///
+/// The returned writer is `Send` (as are `File`, `GzEncoder<File>`, and
+/// `zstd::Encoder<'static, File>`) so it can be handed to the Parquet
+/// writer, which requires `W: Write + Send`.
+pub fn output_from_path(path: &Path) -> Result<Box<dyn Write + Send>, ExportError> {
     let file = File::create(path)?;
 
     let extension = path.extension().and_then(|e| e.to_str());
@@ -592,9 +642,12 @@ pub fn output_from_path(path: &Path) -> Result<Box<dyn Write>, ExportError> {
 ///
 /// Returns `Some(row_count)` for clipboard exports (which ignore `output`
 /// and need a caller-printed confirmation), `None` for stream formats.
+///
+/// `output` must be `Send`: the Parquet writer requires it (its internal
+/// `SerializedFileWriter<W>` is generic over `W: Write + Send`).
 pub fn write_output(
     stmt: &mut Statement,
-    output: Box<dyn Write>,
+    output: Box<dyn Write + Send>,
     format: ExportFormat,
     blob_limit: BlobLimit,
 ) -> Result<Option<usize>, ExportError> {
@@ -606,6 +659,8 @@ pub fn write_output(
         ExportFormat::Ndjson => write_ndjson(stmt, output, limit).map(|()| None),
         ExportFormat::Clipboard => write_clipboard(stmt, limit).map(Some),
         ExportFormat::Value => write_value(stmt, output).map(|()| None),
+        #[cfg(feature = "parquet")]
+        ExportFormat::Parquet => parquet::write_parquet(stmt, output, limit).map(|()| None),
     }
 }
 
@@ -629,33 +684,88 @@ pub fn write_output_to_bytes(
                 "clipboard export is not supported for remote targets",
             )));
         }
+        #[cfg(feature = "parquet")]
+        ExportFormat::Parquet => parquet::write_parquet(stmt, &mut buf, limit)?,
     }
     Ok(buf)
 }
 
+/// Error returned by [`format_from_path`] when the format can't be
+/// determined, or is nonsensical, from a path's extension.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatFromPathError {
+    /// The extension isn't recognized (e.g. `data.txt`).
+    Unknown(String),
+    /// `x.parquet.gz` / `x.parquet.zst`: Parquet has built-in compression,
+    /// so wrapping it in gzip/zstd is refused rather than silently
+    /// producing a file whose extension lies.
+    CompressedParquet(String),
+}
+
+impl fmt::Display for FormatFromPathError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FormatFromPathError::Unknown(p) => {
+                write!(f, "Cannot determine format from path: {}", p)
+            }
+            FormatFromPathError::CompressedParquet(p) => write!(
+                f,
+                "parquet has built-in compression; write to `x.parquet` instead of `{}`",
+                p
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FormatFromPathError {}
+
 /// Determine export format from file path extension.
 ///
 /// Handles compressed files by looking at the extension before `.gz` or `.zst`.
-pub fn format_from_path(path: &Path) -> Option<ExportFormat> {
-    let extension = path.extension().and_then(|e| e.to_str())?;
+pub fn format_from_path(path: &Path) -> Result<ExportFormat, FormatFromPathError> {
+    let unknown = || FormatFromPathError::Unknown(path.display().to_string());
+    let extension = path.extension().and_then(|e| e.to_str()).ok_or_else(unknown)?;
 
     // Handle compression extensions
-    let ext = if extension == "gz" || extension == "zst" {
-        path.with_extension("")
+    let (ext, compressed) = if extension == "gz" || extension == "zst" {
+        let inner = path
+            .with_extension("")
             .extension()
             .and_then(|e| e.to_str())
-            .map(|s| s.to_string())?
+            .map(|s| s.to_string())
+            .ok_or_else(unknown)?;
+        (inner, true)
     } else {
-        extension.to_string()
+        (extension.to_string(), false)
     };
 
     match ext.as_str() {
-        "csv" => Some(ExportFormat::Csv),
-        "tsv" => Some(ExportFormat::Tsv),
-        "json" => Some(ExportFormat::Json),
-        "ndjson" | "jsonl" => Some(ExportFormat::Ndjson),
-        _ => None,
+        "csv" => Ok(ExportFormat::Csv),
+        "tsv" => Ok(ExportFormat::Tsv),
+        "json" => Ok(ExportFormat::Json),
+        "ndjson" | "jsonl" => Ok(ExportFormat::Ndjson),
+        "parquet" => parquet_format(compressed, path),
+        _ => Err(unknown()),
     }
+}
+
+/// `.parquet` → `Parquet` (rejecting `.parquet.gz`/`.parquet.zst`, since
+/// Parquet compresses internally); `Unknown` when the feature is off, so
+/// `.parquet` behaves exactly like any other unrecognized extension.
+#[cfg(feature = "parquet")]
+fn parquet_format(compressed: bool, path: &Path) -> Result<ExportFormat, FormatFromPathError> {
+    if compressed {
+        Err(FormatFromPathError::CompressedParquet(
+            path.display().to_string(),
+        ))
+    } else {
+        Ok(ExportFormat::Parquet)
+    }
+}
+
+#[cfg(not(feature = "parquet"))]
+fn parquet_format(_compressed: bool, path: &Path) -> Result<ExportFormat, FormatFromPathError> {
+    Err(FormatFromPathError::Unknown(path.display().to_string()))
 }
 
 #[cfg(test)]
@@ -667,7 +777,7 @@ mod tests {
     fn test_format_from_path_csv() {
         assert_eq!(
             format_from_path(&PathBuf::from("data.csv")),
-            Some(ExportFormat::Csv)
+            Ok(ExportFormat::Csv)
         );
     }
 
@@ -675,7 +785,7 @@ mod tests {
     fn test_format_from_path_tsv() {
         assert_eq!(
             format_from_path(&PathBuf::from("data.tsv")),
-            Some(ExportFormat::Tsv)
+            Ok(ExportFormat::Tsv)
         );
     }
 
@@ -683,7 +793,7 @@ mod tests {
     fn test_format_from_path_json() {
         assert_eq!(
             format_from_path(&PathBuf::from("data.json")),
-            Some(ExportFormat::Json)
+            Ok(ExportFormat::Json)
         );
     }
 
@@ -691,11 +801,11 @@ mod tests {
     fn test_format_from_path_ndjson() {
         assert_eq!(
             format_from_path(&PathBuf::from("data.ndjson")),
-            Some(ExportFormat::Ndjson)
+            Ok(ExportFormat::Ndjson)
         );
         assert_eq!(
             format_from_path(&PathBuf::from("data.jsonl")),
-            Some(ExportFormat::Ndjson)
+            Ok(ExportFormat::Ndjson)
         );
     }
 
@@ -703,23 +813,57 @@ mod tests {
     fn test_format_from_path_compressed() {
         assert_eq!(
             format_from_path(&PathBuf::from("data.csv.gz")),
-            Some(ExportFormat::Csv)
+            Ok(ExportFormat::Csv)
         );
         assert_eq!(
             format_from_path(&PathBuf::from("data.json.zst")),
-            Some(ExportFormat::Json)
+            Ok(ExportFormat::Json)
         );
     }
 
     #[test]
     fn test_format_from_path_unknown() {
-        assert_eq!(format_from_path(&PathBuf::from("data.txt")), None);
-        assert_eq!(format_from_path(&PathBuf::from("data.xml")), None);
+        assert_eq!(
+            format_from_path(&PathBuf::from("data.txt")),
+            Err(FormatFromPathError::Unknown("data.txt".to_string()))
+        );
+        assert!(format_from_path(&PathBuf::from("data.xml")).is_err());
     }
 
     #[test]
     fn test_format_from_path_no_extension() {
-        assert_eq!(format_from_path(&PathBuf::from("data")), None);
+        assert!(format_from_path(&PathBuf::from("data")).is_err());
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn test_format_from_path_parquet() {
+        assert_eq!(
+            format_from_path(&PathBuf::from("data.parquet")),
+            Ok(ExportFormat::Parquet)
+        );
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn test_format_from_path_compressed_parquet_rejected() {
+        for path in ["data.parquet.gz", "data.parquet.zst"] {
+            let err = format_from_path(&PathBuf::from(path)).unwrap_err();
+            assert!(
+                matches!(err, FormatFromPathError::CompressedParquet(_)),
+                "{path}: {err:?}"
+            );
+            let msg = err.to_string();
+            assert!(msg.contains("built-in compression"), "{msg}");
+            assert!(msg.contains("x.parquet"), "{msg}");
+        }
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn test_format_from_path_parquet_case_sensitive() {
+        // matches csv/json's existing case-sensitivity
+        assert!(format_from_path(&PathBuf::from("data.PARQUET")).is_err());
     }
 
     #[test]
@@ -838,6 +982,8 @@ mod tests {
             ExportFormat::Tsv,
             ExportFormat::Json,
             ExportFormat::Ndjson,
+            #[cfg(feature = "parquet")]
+            ExportFormat::Parquet,
         ] {
             assert_eq!(
                 BlobLimit::Default.resolve(&format),

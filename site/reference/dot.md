@@ -58,6 +58,93 @@ DDL
 In Jupyter, `.describe` renders as sectioned HTML instead of this text
 layout — see [Jupyter Kernel](/jupyter#previewing-a-table).
 
+## .export
+
+Export the result of a query to a file. The path goes on the `.export`
+line; the query follows on the lines after it:
+
+```
+.export users.csv
+SELECT * FROM users;
+```
+
+The format is picked from the target's extension:
+
+| Extension | Format |
+|---|---|
+| `.csv` | Comma-separated values |
+| `.tsv` | Tab-separated values |
+| `.json` | JSON array of objects |
+| `.ndjson` | Newline-delimited JSON |
+| `.parquet` | Apache Parquet |
+
+Text formats (`.csv`, `.tsv`, `.json`, `.ndjson`) can be compressed by
+adding `.gz` or `.zst` to the path, e.g. `.export users.csv.gz`. Parquet
+has its own built-in compression (internal ZSTD), so `.export
+out.parquet.gz` is rejected outright rather than double-compressing or
+silently ignoring the extra suffix — write to `out.parquet` instead.
+
+The path supports `:param` substitution from values set with `.param
+set`:
+
+```
+.param set date 2024-01-01
+.export report_:date.csv
+SELECT * FROM orders WHERE created_at >= '2024-01-01';
+```
+
+Targets can also be `s3://bucket/key` or `t3://bucket/key` URLs, uploaded
+directly instead of written to a local file. Credentials come from
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; the endpoint defaults to
+Tigris (`https://t3.storage.dev`) and can be overridden with
+`AWS_ENDPOINT_URL_S3`, and the region with `AWS_REGION` (defaults to
+`auto`):
+
+```
+.export s3://my-bucket/exports/users.parquet
+SELECT * FROM users;
+```
+
+BLOB cells over 10 MiB fail the export with an error naming the column,
+size, and limit; pass `--blob-limit` on `solite query` for that path (the
+`.export` dot command always uses the 10 MiB default).
+
+### Parquet typing
+
+Parquet needs one fixed type per column before the first row is written,
+so `.export out.parquet` infers a schema:
+
+- If the column comes straight from a table (not an expression) and that
+  column has a declared type, the declared type wins: `INTEGER` → int64,
+  `REAL` → double, `TEXT` → string, `BLOB` → binary, `BOOLEAN`/`BOOL` →
+  bool. `NUMERIC`/`DECIMAL` columns are treated as undeclared and sniffed.
+- Otherwise (expressions, aggregates, CTE/subquery output, or no declared
+  type) the type is sniffed from the first 65,536 rows: all-integer
+  columns become int64, a mix of integers and reals becomes double, text
+  becomes string, blobs become binary, and anything else — including an
+  all-NULL column — falls back to string. In that inferred string column,
+  later integers, reals, or blobs are written in their text form (`42`,
+  `1.5`, `x'00ff'`) rather than rejected — it's the sniffing that put them
+  in a string column in the first place. A **declared** `TEXT` column has
+  no such leniency: a non-text value there is still a type mismatch.
+- A later value that doesn't fit the chosen type fails the whole export
+  with an error naming the column, the row number, and why the column was
+  typed that way, e.g. `column 'a' (row 3) is text, but the column was
+  typed INT64 from its declared type 'INTEGER'`.
+- Integers written into a double/REAL column are widened to floats, not
+  rejected.
+- `BOOLEAN` columns only accept integer `0`/`1`; anything else is a type
+  mismatch.
+- Values produced by `json()`/`json_object()`/`json_array()` (SQLite's
+  JSON subtype) are written as UTF-8 text tagged with Parquet's JSON
+  logical type, so readers that understand it (e.g. pyarrow) can tell the
+  column apart from plain text. A column that mixes JSON and non-JSON text
+  falls back to plain text.
+- `DATE`/`DATETIME`/`TIMESTAMP` columns are exported as plain text, exactly
+  as SQLite stored them — no parsing or reformatting.
+- Every column is nullable; SQL `NULL` becomes a Parquet null regardless
+  of type.
+
 ## .schema
 
 Show CREATE statements for the current database.

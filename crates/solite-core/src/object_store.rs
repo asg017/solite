@@ -47,6 +47,7 @@ pub fn upload(url: &str, data: Vec<u8>) -> Result<(), ExportError> {
 
     let store = AmazonS3Builder::new()
         .with_endpoint(&endpoint)
+        .with_allow_http(endpoint.starts_with("http://"))
         .with_region(
             std::env::var("AWS_REGION")
                 .unwrap_or_else(|_| "auto".to_string()),
@@ -122,5 +123,14 @@ mod tests {
     #[test]
     fn test_parse_url_bad_scheme() {
         assert!(parse_url("http://bucket/key").is_err());
+    }
+
+    #[test]
+    fn test_parse_url_nested_key_path() {
+        // Forward reference for the parquet exporter ticket: a nested
+        // key path like `dir/out.parquet` must parse cleanly.
+        let (bucket, key) = parse_url("s3://b/dir/out.parquet").unwrap();
+        assert_eq!(bucket, "b");
+        assert_eq!(key, "dir/out.parquet");
     }
 }

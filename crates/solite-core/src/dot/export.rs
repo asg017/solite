@@ -90,12 +90,8 @@ impl ExportCommand {
     /// - `DotError::InvalidData` if the format cannot be determined
     /// - `DotError::Io` if the file cannot be written
     pub fn execute(&mut self) -> Result<(), DotError> {
-        let format = format_from_path(&self.target).ok_or_else(|| {
-            DotError::InvalidData(format!(
-                "Cannot determine format from path: {}",
-                self.target.display()
-            ))
-        })?;
+        let format = format_from_path(&self.target)
+            .map_err(|e| DotError::InvalidData(e.to_string()))?;
 
         #[cfg(feature = "object_store")]
         {
@@ -187,5 +183,54 @@ mod tests {
 
         let result = cmd.execute();
         assert!(matches!(result, Err(DotError::InvalidData(_))));
+    }
+
+    /// Regression test for the object_store feature-forwarding bug: without
+    /// this feature compiled in, `.export s3://...` silently fell through to
+    /// `output_from_path()` and failed with an ENOENT-style "No such file or
+    /// directory" error instead of surfacing the real problem (missing
+    /// credentials). This test removes `AWS_ACCESS_KEY_ID` from the process
+    /// environment, so it must not run concurrently with anything else that
+    /// depends on that variable being set.
+    #[cfg(feature = "object_store")]
+    #[test]
+    fn test_export_s3_without_creds_is_not_a_file_error() {
+        // SAFETY: env vars are process-global; this test's name and doc
+        // comment call that out so future edits don't rely on
+        // AWS_ACCESS_KEY_ID being set elsewhere in this process.
+        let prev = std::env::var("AWS_ACCESS_KEY_ID").ok();
+        unsafe {
+            std::env::remove_var("AWS_ACCESS_KEY_ID");
+        }
+
+        let mut runtime = Runtime::new(None).unwrap();
+
+        let mut cmd = ExportCommand::new(
+            "s3://bucket/out.csv".to_string(),
+            &mut runtime,
+            "SELECT 1 AS a",
+        )
+        .unwrap();
+
+        let result = cmd.execute();
+
+        // Restore before asserting so a failed assertion doesn't leak the
+        // mutated environment to later tests.
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var("AWS_ACCESS_KEY_ID", value);
+            }
+        }
+
+        let err = result.expect_err("export without credentials should fail");
+        let message = err.to_string();
+        assert!(
+            message.contains("AWS_ACCESS_KEY_ID"),
+            "expected credentials error, got: {message}"
+        );
+        assert!(
+            !message.contains("No such file or directory"),
+            "expected credentials error, not an ENOENT fallback: {message}"
+        );
     }
 }

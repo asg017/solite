@@ -161,6 +161,65 @@ mod tests {
         assert!(content.contains("2,bob"));
     }
 
+    /// `.export out.geojson` and its gzipped newline-delimited sibling,
+    /// end to end through `format_from_path` + `output_from_path`.
+    #[test]
+    fn test_export_geojson_round_trip() {
+        use std::io::Read;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut runtime = Runtime::new(None).unwrap();
+        let (_, stmt) = runtime
+            .connection
+            .prepare(
+                "CREATE TABLE places AS
+                 SELECT 1 AS id, 'a' AS name,
+                        '{\"type\":\"Point\",\"coordinates\":[1,2]}' AS geometry
+                 UNION ALL
+                 SELECT 2, 'b', '{\"type\":\"Point\",\"coordinates\":[3,4]}'",
+            )
+            .unwrap();
+        stmt.unwrap().execute().unwrap();
+
+        // FeatureCollection
+        let collection_path = temp_dir.path().join("out.geojson");
+        let mut cmd = ExportCommand::new(
+            collection_path.to_string_lossy().to_string(),
+            &mut runtime,
+            "SELECT * FROM places",
+        )
+        .unwrap();
+        cmd.execute().unwrap();
+
+        let doc: serde_json::Value =
+            serde_json::from_slice(&fs::read(&collection_path).unwrap()).unwrap();
+        assert_eq!(doc["type"], "FeatureCollection");
+        assert_eq!(doc["features"].as_array().unwrap().len(), 2);
+        assert_eq!(doc["features"][0]["properties"]["name"], "a");
+
+        // newline-delimited, gzipped
+        let lines_path = temp_dir.path().join("out.geojsonl.gz");
+        let mut cmd = ExportCommand::new(
+            lines_path.to_string_lossy().to_string(),
+            &mut runtime,
+            "SELECT * FROM places",
+        )
+        .unwrap();
+        cmd.execute().unwrap();
+
+        let mut decoded = String::new();
+        flate2::read::GzDecoder::new(fs::File::open(&lines_path).unwrap())
+            .read_to_string(&mut decoded)
+            .unwrap();
+        let features: Vec<serde_json::Value> = decoded
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(features.len(), 2);
+        assert_eq!(features[1]["geometry"]["coordinates"][0], 3);
+    }
+
     #[test]
     fn test_export_invalid_format() {
         let temp_dir = TempDir::new().unwrap();

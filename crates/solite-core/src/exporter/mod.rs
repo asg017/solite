@@ -9,6 +9,8 @@
 //! - **TSV**: Tab-separated values
 //! - **JSON**: JSON array of objects
 //! - **NDJSON**: Newline-delimited JSON (one object per line)
+//! - **GeoJSON**: `FeatureCollection`, newline-delimited Features, or an
+//!   RFC 8142 text sequence (one `Feature` per row)
 //! - **Clipboard**: HTML table copied to system clipboard
 //! - **Value**: Raw value output (single cell)
 //!
@@ -31,8 +33,12 @@ use std::{
 
 use crate::sqlite::{OwnedValue, Statement, ValueRefX, ValueRefXValue};
 
+mod geojson;
+
 #[cfg(feature = "parquet")]
 mod parquet;
+
+use geojson::GeoJsonLayout;
 
 /// Errors that can occur during export operations.
 #[derive(Debug)]
@@ -68,6 +74,43 @@ pub enum ExportError {
         /// The active limit in bytes.
         limit: u64,
     },
+    /// The result set has no geometry column for a GeoJSON export.
+    GeometryColumnMissing {
+        /// The geometry column name that was looked for.
+        wanted: String,
+        /// The columns the result set actually has.
+        columns: Vec<String>,
+    },
+    /// A geometry cell is not a GeoJSON geometry object.
+    InvalidGeometry {
+        /// Name of the geometry column.
+        column: String,
+        /// 1-based row number within the result set.
+        row: usize,
+        /// Why the cell isn't a GeoJSON geometry.
+        reason: String,
+    },
+    /// `--id`/[`GeoJsonOptions::id_column`] named a column the result set
+    /// doesn't have.
+    IdColumnMissing {
+        /// The id column name that was looked for.
+        wanted: String,
+        /// The columns the result set actually has.
+        columns: Vec<String>,
+    },
+    /// A lifted `id` cell wasn't a string or integer (RFC 7946 §3.2 allows
+    /// only those two for a Feature's top-level `id`).
+    IdNotStringOrNumber {
+        /// Name of the id column.
+        column: String,
+        /// 1-based row number within the result set.
+        row: usize,
+        /// Description of the value actually found (e.g. "real", "blob").
+        found: &'static str,
+    },
+    /// `GeoJsonOptions` combination that can't be satisfied (e.g. `--id`
+    /// and `--geometry` naming the same column).
+    GeoJsonOptionsInvalid(String),
     /// Error from the underlying `parquet` crate (writer setup, encoding, I/O).
     #[cfg(feature = "parquet")]
     Parquet(::parquet::errors::ParquetError),
@@ -118,6 +161,34 @@ impl fmt::Display for ExportError {
                 limit,
                 size.div_ceil(1024 * 1024),
             ),
+            ExportError::GeometryColumnMissing { wanted, columns } => write!(
+                f,
+                "no geometry column '{}' in result (columns: {}); \
+                 name the geometry column '{}' or select it with an alias",
+                wanted,
+                columns.join(", "),
+                wanted,
+            ),
+            ExportError::InvalidGeometry {
+                column,
+                row,
+                reason,
+            } => write!(f, "column '{}' (row {}): {}", column, row, reason),
+            ExportError::IdColumnMissing { wanted, columns } => write!(
+                f,
+                "no id column '{}' in result (columns: {}); \
+                 name the id column '{}' or select it with an alias",
+                wanted,
+                columns.join(", "),
+                wanted,
+            ),
+            ExportError::IdNotStringOrNumber { column, row, found } => write!(
+                f,
+                "column '{}' (row {}): {} is not a valid GeoJSON id \
+                 (RFC 7946 \u{a7}3.2 allows only a string or a number)",
+                column, row, found,
+            ),
+            ExportError::GeoJsonOptionsInvalid(msg) => write!(f, "{}", msg),
             #[cfg(feature = "parquet")]
             ExportError::Parquet(e) => write!(f, "Parquet error: {}", e),
             ExportError::ParquetTypeMismatch {
@@ -188,10 +259,32 @@ pub enum ExportFormat {
     Value,
     /// HTML table to clipboard.
     Clipboard,
+    /// GeoJSON `FeatureCollection`: one `Feature` per row, the column named
+    /// `geometry` (or [`GeoJsonOptions::geometry_column`]) as its geometry,
+    /// every other column as a `properties` member.
+    GeoJson(GeoJsonOptions),
+    /// Newline-delimited GeoJSON (`.geojsonl` / `.ndgeojson`): one `Feature`
+    /// per line, no envelope.
+    GeoJsonl(GeoJsonOptions),
+    /// RFC 8142 GeoJSON text sequence (`.geojsons`): like
+    /// [`ExportFormat::GeoJsonl`] but each `Feature` is preceded by an ASCII
+    /// record separator (0x1E).
+    GeoJsonSeq(GeoJsonOptions),
     /// Apache Parquet, with a schema inferred from declared column types
     /// (or sniffed from the first row group) and internal ZSTD compression.
     #[cfg(feature = "parquet")]
     Parquet,
+}
+
+/// Options shared by the GeoJSON family of formats.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+pub struct GeoJsonOptions {
+    /// Column holding the GeoJSON geometry. `None` = the column named
+    /// `geometry` (case-insensitive).
+    pub geometry_column: Option<String>,
+    /// Column lifted to the Feature's top-level `id` member (and removed
+    /// from `properties`). `None` = no `id` member is written.
+    pub id_column: Option<String>,
 }
 
 /// Default BLOB size limit for clipboard exports (1 MiB).
@@ -334,7 +427,7 @@ fn value_to_string(value: &ValueRefX) -> Result<String, ExportError> {
 }
 
 /// Convert a SQLite value to a JSON value.
-fn value_to_json(value: &ValueRefX) -> Result<serde_json::Value, ExportError> {
+pub(super) fn value_to_json(value: &ValueRefX) -> Result<serde_json::Value, ExportError> {
     match &value.value {
         ValueRefXValue::Null => Ok(serde_json::Value::Null),
         ValueRefXValue::Int(v) => Ok(serde_json::Value::Number((*v).into())),
@@ -659,6 +752,17 @@ pub fn write_output(
         ExportFormat::Ndjson => write_ndjson(stmt, output, limit).map(|()| None),
         ExportFormat::Clipboard => write_clipboard(stmt, limit).map(Some),
         ExportFormat::Value => write_value(stmt, output).map(|()| None),
+        ExportFormat::GeoJson(opts) => {
+            geojson::write_geojson(stmt, output, limit, &opts, GeoJsonLayout::Collection)
+                .map(|()| None)
+        }
+        ExportFormat::GeoJsonl(opts) => {
+            geojson::write_geojson(stmt, output, limit, &opts, GeoJsonLayout::Lines)
+                .map(|()| None)
+        }
+        ExportFormat::GeoJsonSeq(opts) => {
+            geojson::write_geojson(stmt, output, limit, &opts, GeoJsonLayout::Seq).map(|()| None)
+        }
         #[cfg(feature = "parquet")]
         ExportFormat::Parquet => parquet::write_parquet(stmt, output, limit).map(|()| None),
     }
@@ -679,6 +783,15 @@ pub fn write_output_to_bytes(
         ExportFormat::Json => write_json(stmt, &mut buf, limit)?,
         ExportFormat::Ndjson => write_ndjson(stmt, &mut buf, limit)?,
         ExportFormat::Value => write_value(stmt, &mut buf)?,
+        ExportFormat::GeoJson(opts) => {
+            geojson::write_geojson(stmt, &mut buf, limit, &opts, GeoJsonLayout::Collection)?
+        }
+        ExportFormat::GeoJsonl(opts) => {
+            geojson::write_geojson(stmt, &mut buf, limit, &opts, GeoJsonLayout::Lines)?
+        }
+        ExportFormat::GeoJsonSeq(opts) => {
+            geojson::write_geojson(stmt, &mut buf, limit, &opts, GeoJsonLayout::Seq)?
+        }
         ExportFormat::Clipboard => {
             return Err(ExportError::Io(std::io::Error::other(
                 "clipboard export is not supported for remote targets",
@@ -744,6 +857,9 @@ pub fn format_from_path(path: &Path) -> Result<ExportFormat, FormatFromPathError
         "tsv" => Ok(ExportFormat::Tsv),
         "json" => Ok(ExportFormat::Json),
         "ndjson" | "jsonl" => Ok(ExportFormat::Ndjson),
+        "geojson" => Ok(ExportFormat::GeoJson(GeoJsonOptions::default())),
+        "geojsonl" | "ndgeojson" => Ok(ExportFormat::GeoJsonl(GeoJsonOptions::default())),
+        "geojsons" => Ok(ExportFormat::GeoJsonSeq(GeoJsonOptions::default())),
         "parquet" => parquet_format(compressed, path),
         _ => Err(unknown()),
     }
@@ -807,6 +923,38 @@ mod tests {
             format_from_path(&PathBuf::from("data.jsonl")),
             Ok(ExportFormat::Ndjson)
         );
+    }
+
+    #[test]
+    fn test_format_from_path_geojson() {
+        let opts = GeoJsonOptions::default();
+        assert_eq!(
+            format_from_path(&PathBuf::from("x.geojson")),
+            Ok(ExportFormat::GeoJson(opts.clone()))
+        );
+        assert_eq!(
+            format_from_path(&PathBuf::from("x.geojsonl")),
+            Ok(ExportFormat::GeoJsonl(opts.clone()))
+        );
+        assert_eq!(
+            format_from_path(&PathBuf::from("x.ndgeojson")),
+            Ok(ExportFormat::GeoJsonl(opts.clone()))
+        );
+        assert_eq!(
+            format_from_path(&PathBuf::from("x.geojsons")),
+            Ok(ExportFormat::GeoJsonSeq(opts.clone()))
+        );
+        // compression is stripped before the format is matched
+        assert_eq!(
+            format_from_path(&PathBuf::from("x.geojson.gz")),
+            Ok(ExportFormat::GeoJson(opts.clone()))
+        );
+        assert_eq!(
+            format_from_path(&PathBuf::from("x.geojsonl.zst")),
+            Ok(ExportFormat::GeoJsonl(opts))
+        );
+        // extensions are case-sensitive, like every other format
+        assert!(format_from_path(&PathBuf::from("x.GEOJSON")).is_err());
     }
 
     #[test]
@@ -982,6 +1130,9 @@ mod tests {
             ExportFormat::Tsv,
             ExportFormat::Json,
             ExportFormat::Ndjson,
+            ExportFormat::GeoJson(GeoJsonOptions::default()),
+            ExportFormat::GeoJsonl(GeoJsonOptions::default()),
+            ExportFormat::GeoJsonSeq(GeoJsonOptions::default()),
             #[cfg(feature = "parquet")]
             ExportFormat::Parquet,
         ] {

@@ -76,10 +76,14 @@ The format is picked from the target's extension:
 | `.tsv` | Tab-separated values |
 | `.json` | JSON array of objects |
 | `.ndjson` | Newline-delimited JSON |
+| `.geojson` | GeoJSON `FeatureCollection` |
+| `.geojsonl` / `.ndgeojson` | Newline-delimited GeoJSON, one `Feature` per line |
+| `.geojsons` | RFC 8142 GeoJSON text sequence |
 | `.parquet` | Apache Parquet |
 
-Text formats (`.csv`, `.tsv`, `.json`, `.ndjson`) can be compressed by
-adding `.gz` or `.zst` to the path, e.g. `.export users.csv.gz`. Parquet
+Text formats (`.csv`, `.tsv`, `.json`, `.ndjson`, `.geojson`, `.geojsonl`,
+`.geojsons`) can be compressed by adding `.gz` or `.zst` to the path, e.g.
+`.export users.csv.gz`. Parquet
 has its own built-in compression (internal ZSTD), so `.export
 out.parquet.gz` is rejected outright rather than double-compressing or
 silently ignoring the extra suffix — write to `out.parquet` instead.
@@ -144,6 +148,62 @@ so `.export out.parquet` infers a schema:
   as SQLite stored them — no parsing or reformatting.
 - Every column is nullable; SQL `NULL` becomes a Parquet null regardless
   of type.
+
+### GeoJSON
+
+`.export out.geojson` (or `.geojsonl`/`.geojsons`) writes one GeoJSON
+`Feature` per row:
+
+- The geometry comes from the column named `geometry` (case-insensitive);
+  every other column, `id` included, becomes a `properties` member using
+  the same value rules as `.json` — JSON-typed text (e.g. from `json()`)
+  nests as an object/array, BLOBs are base64-encoded.
+- The `geometry` column is required and must already hold GeoJSON text: a
+  `json()`/`json_object()`/`->` result, the `geometry` column of a
+  jsonx0 GeoJSON virtual table, or the output of sqlite-tg's
+  `tg_to_geojson()`. sqlite-tg isn't bundled with Solite yet, so load it
+  explicitly with `.load` if you're converting from WKB/WKT geometry
+  columns. A plain WKT string or a BLOB (WKB) in the geometry column is
+  rejected with an error pointing at `tg_to_geojson()` — neither is
+  decoded in v1.
+- A `NULL` geometry produces a `Feature` with `"geometry":null` (an
+  unlocated feature) rather than an error.
+- An empty result set exports `{"type":"FeatureCollection","features":[]}`
+  for `.geojson`, or an empty file for `.geojsonl`/`.geojsons`.
+- `.geojsonl` writes one `Feature` object per line and no surrounding
+  `FeatureCollection`; `.geojsons` is the same but prefixes each line with
+  the ASCII record separator (`0x1E`), per RFC 8142.
+- `.gz`/`.zst` compression and `s3://`/`t3://` targets work the same as
+  for the other text formats.
+
+```
+.export places.geojson
+select id, name, population, geometry from places;
+```
+
+```
+.load ./tg0
+.export s3://bucket/parcels.geojsonl.gz
+select apn, tg_to_geojson(geom) as geometry from parcels;
+```
+
+By default the geometry column must be named `geometry` and every other
+column (including `id`) stays in `properties`. `--geometry <col>` and
+`--id <col>` (space or `--flag=value` form) override that:
+
+```
+.export out.geojson --geometry geom --id apn
+select apn, name, geom from parcels;
+```
+
+`--id` lifts that column to the Feature's top-level `id` member and
+removes it from `properties`; the value must be a string or a number
+(RFC 7946 §3.2) — `NULL` omits the `id` member entirely, and a real or
+BLOB value is an error. The flags work the same way with `solite query -f
+geojson*`/`-o x.geojson*` (see below). The `.export` line is only
+tokenized for flags when it contains ` --` or starts with `--`, so a bare
+target path with spaces still works untouched; a path that itself
+contains ` --` must be quoted, e.g. `.export "a --b.csv"`.
 
 ## .schema
 

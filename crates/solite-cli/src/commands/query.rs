@@ -344,19 +344,45 @@ fn prepare_statement(
 /// behavior); `x.parquet.gz`/`.zst` is a hard error, since parquet's
 /// built-in compression means there's no sane fallback format to use
 /// instead.
+///
+/// `--geometry`/`--id` are layered onto the resolved format afterward: an
+/// error if either is set and the format isn't one of the GeoJSON variants,
+/// otherwise the options replace the variant's (default) `GeoJsonOptions`.
 fn determine_format(args: &QueryArgs) -> Result<ExportFormat, QueryError> {
-    match &args.format {
-        Some(format) => Ok((*format).into()),
+    let format = match &args.format {
+        Some(format) => (*format).into(),
         None => match &args.output {
             Some(p) => match solite_core::exporter::format_from_path(p) {
-                Ok(format) => Ok(format),
-                Err(solite_core::exporter::FormatFromPathError::Unknown(_)) => Ok(ExportFormat::Json),
+                Ok(format) => format,
+                Err(solite_core::exporter::FormatFromPathError::Unknown(_)) => ExportFormat::Json,
                 Err(e @ solite_core::exporter::FormatFromPathError::CompressedParquet(_)) => {
-                    Err(QueryError::ExecutionFailed(e.to_string()))
+                    return Err(QueryError::ExecutionFailed(e.to_string()));
                 }
             },
-            None => Ok(ExportFormat::Json),
+            None => ExportFormat::Json,
         },
+    };
+    apply_geojson_options(format, args)
+}
+
+/// Layer `--geometry`/`--id` onto a resolved [`ExportFormat`]. A no-op when
+/// neither flag is set; an error when either is set but `format` isn't one
+/// of the GeoJSON variants.
+fn apply_geojson_options(format: ExportFormat, args: &QueryArgs) -> Result<ExportFormat, QueryError> {
+    if args.geometry.is_none() && args.id.is_none() {
+        return Ok(format);
+    }
+    let opts = solite_core::exporter::GeoJsonOptions {
+        geometry_column: args.geometry.clone(),
+        id_column: args.id.clone(),
+    };
+    match format {
+        ExportFormat::GeoJson(_) => Ok(ExportFormat::GeoJson(opts)),
+        ExportFormat::GeoJsonl(_) => Ok(ExportFormat::GeoJsonl(opts)),
+        ExportFormat::GeoJsonSeq(_) => Ok(ExportFormat::GeoJsonSeq(opts)),
+        _ => Err(QueryError::ExecutionFailed(
+            "--geometry/--id only apply to geojson output".to_string(),
+        )),
     }
 }
 
@@ -384,6 +410,8 @@ mod tests {
             database: None,
             format: Some(crate::cli::QueryFormat::Csv),
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -400,6 +428,8 @@ mod tests {
             database: None,
             format: None,
             output: Some(PathBuf::from("output.csv")),
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -416,6 +446,8 @@ mod tests {
             database: None,
             format: None,
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -432,6 +464,8 @@ mod tests {
             database: None,
             format: None,
             output: Some(PathBuf::from("output.xyz")),
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -449,6 +483,8 @@ mod tests {
             database: None,
             format: None,
             output: Some(PathBuf::from("output.parquet.gz")),
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -460,6 +496,91 @@ mod tests {
             "{err:?}"
         );
         assert!(err.to_string().contains("built-in compression"), "{err}");
+    }
+
+    #[test]
+    fn test_determine_format_geometry_and_id_with_explicit_geojson_format() {
+        let args = QueryArgs {
+            statement: Some("SELECT 1".to_string()),
+            database: None,
+            format: Some(crate::cli::QueryFormat::Geojson),
+            output: None,
+            geometry: Some("geom".to_string()),
+            id: Some("apn".to_string()),
+            load_extension: None,
+            parameters: vec![],
+            blob_limit: None,
+            remote: Default::default(),
+        };
+        let format = determine_format(&args).unwrap();
+        match format {
+            ExportFormat::GeoJson(opts) => {
+                assert_eq!(opts.geometry_column.as_deref(), Some("geom"));
+                assert_eq!(opts.id_column.as_deref(), Some("apn"));
+            }
+            other => panic!("expected GeoJson, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_determine_format_geometry_inferred_from_geojsonl_path() {
+        let args = QueryArgs {
+            statement: Some("SELECT 1".to_string()),
+            database: None,
+            format: None,
+            output: Some(PathBuf::from("out.geojsonl")),
+            geometry: Some("geom".to_string()),
+            id: None,
+            load_extension: None,
+            parameters: vec![],
+            blob_limit: None,
+            remote: Default::default(),
+        };
+        let format = determine_format(&args).unwrap();
+        match format {
+            ExportFormat::GeoJsonl(opts) => {
+                assert_eq!(opts.geometry_column.as_deref(), Some("geom"));
+                assert_eq!(opts.id_column, None);
+            }
+            other => panic!("expected GeoJsonl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_determine_format_geometry_flag_on_non_geojson_format_is_error() {
+        let args = QueryArgs {
+            statement: Some("SELECT 1".to_string()),
+            database: None,
+            format: Some(crate::cli::QueryFormat::Csv),
+            output: None,
+            geometry: Some("geom".to_string()),
+            id: None,
+            load_extension: None,
+            parameters: vec![],
+            blob_limit: None,
+            remote: Default::default(),
+        };
+        let err = determine_format(&args).unwrap_err();
+        assert!(matches!(err, QueryError::ExecutionFailed(_)), "{err:?}");
+        assert!(err.to_string().contains("--geometry/--id"), "{err}");
+    }
+
+    #[test]
+    fn test_determine_format_id_flag_on_default_json_is_error() {
+        let args = QueryArgs {
+            statement: Some("SELECT 1".to_string()),
+            database: None,
+            format: None,
+            output: None,
+            geometry: None,
+            id: Some("apn".to_string()),
+            load_extension: None,
+            parameters: vec![],
+            blob_limit: None,
+            remote: Default::default(),
+        };
+        let err = determine_format(&args).unwrap_err();
+        assert!(matches!(err, QueryError::ExecutionFailed(_)), "{err:?}");
     }
 
     #[test]
@@ -505,6 +626,8 @@ mod tests {
             database: None,
             format: None,
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -522,6 +645,8 @@ mod tests {
             database: Some(PathBuf::from("data.db")),
             format: None,
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -539,6 +664,8 @@ mod tests {
             database: Some(PathBuf::from("query.sql")),
             format: None,
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -555,6 +682,8 @@ mod tests {
             database: database.map(PathBuf::from),
             format: None,
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,
@@ -659,6 +788,8 @@ mod tests {
             database: None,
             format: None,
             output: None,
+            geometry: None,
+            id: None,
             load_extension: None,
             parameters: vec![],
             blob_limit: None,

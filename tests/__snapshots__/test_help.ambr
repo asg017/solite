@@ -172,7 +172,7 @@
             Allow connecting to ssh:// database URLs and custom --transport commands
   
     -o, --output <OUTPUT>
-            Write results to a file; format inferred from extension (.csv, .tsv, .json, .ndjson, .parquet; .gz/.zst compression for text formats)
+            Write results to a file; format inferred from extension (.csv, .tsv, .json, .ndjson, .geojson, .geojsonl, .geojsons, .parquet; .gz/.zst compression for text formats)
   
     -f, --format <FORMAT>
             Output format (default: table on a TTY, json otherwise)
@@ -184,7 +184,16 @@
             - ndjson:    Newline-delimited JSON, one object per row
             - value:     Bare value of the first column of the first row, for shell interpolation
             - clipboard: Copy results to the system clipboard
+            - geojson:   GeoJSON FeatureCollection; the column named "geometry" is the geometry, other columns are properties
+            - geojsonl:  Newline-delimited GeoJSON, one Feature per line
+            - geojsons:  RFC 8142 GeoJSON text sequence (record-separator delimited)
             - parquet:   Apache Parquet (zstd-compressed; schema inferred from declared types and data)
+  
+        --geometry <COLUMN>
+            GeoJSON only: column holding the geometry (default: "geometry")
+  
+        --id <COLUMN>
+            GeoJSON only: column written as each Feature's top-level "id" (default: none; stays in properties)
   
     -p, --parameters <NAME> <VALUE>
             Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`. Integer/decimal values bind as numbers; single-quote to force text, e.g. -p id "'42'"
@@ -209,6 +218,7 @@
     solite query app.db report.sql -f json          # SQL from a file; order-agnostic
     solite query "SELECT * FROM users" app.db -o users.csv.gz
     solite query "SELECT * FROM users" app.db -o report.parquet
+    solite query "select name, geometry from places" -o places.geojson
     solite query "SELECT * FROM 'data.csv' LIMIT 5" # query a CSV/TSV file directly
     solite query "SELECT name FROM users WHERE id = $id" app.db -p id 42
     solite q "SELECT 1"                             # 'q' alias, in-memory database

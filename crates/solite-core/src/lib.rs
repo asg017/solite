@@ -4,6 +4,7 @@ pub mod replacement_scans;
 pub mod rpc;
 pub mod sqlite;
 pub mod exporter;
+pub mod template;
 #[cfg(feature = "object_store")]
 pub mod object_store;
 

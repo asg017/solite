@@ -2182,10 +2182,12 @@ checksum = "be1f93b8b1eb69c77f24bbb0afdf66f54b632ee39af40ca21c4365a1d7347e49"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
+ "js-sys",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde",
+ "wasm-bindgen",
  "windows-sys 0.59.0",
 ]
 
@@ -2265,6 +2267,14 @@ checksum = "96d9e0d6a8bf886abccc1cbcac7d74f9000ae5882aedc4a9042188bbc9cd4487"
 dependencies = [
  "hashbrown 0.15.4",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "knap"
+version = "0.1.0"
+dependencies = [
+ "jiff",
+ "regress",
 ]
 
 [[package]]
@@ -3774,6 +3784,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "regress"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32eef8b209c3c1c15dbad02c1f30f9539f00dc7253e0cbcdaae442a50a09d7c1"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.11.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4635,6 +4654,7 @@ dependencies = [
  "indicatif",
  "insta",
  "jiff",
+ "knap",
  "libsqlite3-sys",
  "object_store 0.13.2",
  "pico-args",

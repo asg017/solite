@@ -51,12 +51,23 @@ pub fn run_main() {
 
     let (allow_ssh, x) = match cli_result {
         Ok(cli) => {
-            colors::init(cli.color, cli.theme.as_deref());
+            colors::init(
+                cli.color,
+                cli.theme.as_deref(),
+                cli.theme_dark.as_deref(),
+                cli.theme_light.as_deref(),
+            );
             (cli.allow_ssh, cli.command)
         }
         Err(err) => match err.kind() {
             clap::error::ErrorKind::MissingSubcommand => {
-                colors::init(pre_scanned_color, colors::scan_theme_flag(&args).as_deref());
+                let (theme, theme_dark, theme_light) = colors::scan_theme_flags(&args);
+                colors::init(
+                    pre_scanned_color,
+                    theme.as_deref(),
+                    theme_dark.as_deref(),
+                    theme_light.as_deref(),
+                );
                 (false, Box::new(cli::Commands::Repl(ReplArgs { database: None, remote: Default::default() })))
             }
             clap::error::ErrorKind::InvalidSubcommand => {
@@ -67,7 +78,13 @@ pub fn run_main() {
                     .map(PathBuf::from)
                     .filter(|p: &PathBuf| cli::is_database_path(p))
                 {
-                    colors::init(pre_scanned_color, colors::scan_theme_flag(&args).as_deref());
+                    let (theme, theme_dark, theme_light) = colors::scan_theme_flags(&args);
+                    colors::init(
+                        pre_scanned_color,
+                        theme.as_deref(),
+                        theme_dark.as_deref(),
+                        theme_light.as_deref(),
+                    );
                     (false, Box::new(cli::Commands::Repl(ReplArgs {
                         database: Some(path),
                         remote: Default::default(),

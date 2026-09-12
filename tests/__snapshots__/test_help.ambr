@@ -8,11 +8,13 @@
          solite <file>.db        Open the REPL on a database (also .sqlite, .sqlite3)
   
   Options:
-        --allow-ssh      Allow connecting to ssh:// database URLs and custom --transport commands
-        --color <COLOR>  Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
-        --theme <NAME>   Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
-    -h, --help           Print help
-    -V, --version        Print version
+        --allow-ssh           Allow connecting to ssh:// database URLs and custom --transport commands
+        --color <COLOR>       Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
+        --theme <NAME>        Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
+        --theme-dark <NAME>   Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+        --theme-light <NAME>  Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
+    -h, --help                Print help
+    -V, --version             Print version
   
   Scripting and Query Execution:
     run              Run SQL scripts
@@ -79,7 +81,13 @@
             Write the JSON report here instead of stdout
   
         --theme <NAME>
-            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
+  
+        --theme-dark <NAME>
+            Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+  
+        --theme-light <NAME>
+            Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
   
     -h, --help
             Print help (see a summary with '-h')
@@ -132,7 +140,13 @@
             [possible values: auto, always, never]
   
         --theme <NAME>
-            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
+  
+        --theme-dark <NAME>
+            Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+  
+        --theme-light <NAME>
+            Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
   
     -h, --help
             Print help (see a summary with '-h')
@@ -169,10 +183,12 @@
     help       Print this message or the help of the given subcommand(s)
   
   Options:
-        --allow-ssh      Allow connecting to ssh:// database URLs and custom --transport commands
-        --color <COLOR>  Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
-        --theme <NAME>   Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
-    -h, --help           Print help
+        --allow-ssh           Allow connecting to ssh:// database URLs and custom --transport commands
+        --color <COLOR>       Control colored output. `auto` (default) colors only on a terminal, honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override [default: auto] [possible values: auto, always, never]
+        --theme <NAME>        Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
+        --theme-dark <NAME>   Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+        --theme-light <NAME>  Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
+    -h, --help                Print help
   
   '''
 # ---
@@ -217,13 +233,19 @@
             Bind a SQL parameter, e.g. -p id 42 for `WHERE id = $id`. Integer/decimal values bind as numbers; single-quote to force text, e.g. -p id "'42'"
   
         --theme <NAME>
-            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
   
         --load-extension <PATH>
             Load SQLite extension(s) before running the query
   
+        --theme-dark <NAME>
+            Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+  
         --blob-limit <SIZE>
             Max size of a single BLOB cell in exports: bytes (1048576), a k/kb/m/mb/g/gb suffix (16mb), or none/unlimited/0 for no limit. Defaults to 10mb (1mb for clipboard); `-f value` is never limited
+  
+        --theme-light <NAME>
+            Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
   
         --remote-bin <REMOTE_BIN>
             Path to the solite binary on the remote machine (for ssh:// connections)
@@ -275,7 +297,13 @@
             Custom transport command to reach the remote machine (e.g. "fly ssh console -a my-app -C")
   
         --theme <NAME>
-            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
+  
+        --theme-dark <NAME>
+            Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+  
+        --theme-light <NAME>
+            Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
   
     -h, --help
             Print help (see a summary with '-h')
@@ -323,13 +351,19 @@
             Bind a SQL parameter. Use `-p name value` for TEXT, or `-p name @file` to bind the file's bytes as a BLOB
   
         --theme <NAME>
-            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME
+            Color theme: a built-in (`terminal`, `catppuccin-mocha`), a `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or ~/.config/solite/themes, or a path to a theme file. Overrides $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no detection is performed when this is set
   
         --trace <TRACE_DB>
             Record an execution trace (statements + per-opcode bytecode stats) to a SQLite database at this path
   
         --readonly
             Open the database read-only; statements that write will fail
+  
+        --theme-dark <NAME>
+            Theme to use when the terminal's background is detected as dark (same values as --theme). Setting this (or --theme-light) queries the terminal's background once at startup via OSC 11; if detection fails or isn't possible (piped output, tmux, an unsupported terminal, TERM=dumb), this dark theme is used as the fallback. Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+  
+        --theme-light <NAME>
+            Theme to use when the terminal's background is detected as light (same values as --theme); the light-mode counterpart to --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
   
     -h, --help
             Print help (see a summary with '-h')

@@ -36,7 +36,7 @@ fn sync_impl(database: std::path::PathBuf, url: String) -> anyhow::Result<()> {
         Some(r) => {
             println!(
                 "{} synced to {} (txid={}, {} pages, {:.2?})",
-                colors::green("✓"),
+                colors::checkmark(),
                 url,
                 r.txid,
                 r.page_count,
@@ -81,7 +81,7 @@ fn restore_impl(url: String, database: std::path::PathBuf) -> anyhow::Result<()>
     let size = std::fs::metadata(&database).map(|m| m.len()).unwrap_or(0);
     println!(
         "{} restored {} from {} ({}, {:.2?})",
-        colors::green("✓"),
+        colors::checkmark(),
         database.display(),
         url,
         HumanBytes(size),

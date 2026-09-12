@@ -1,9 +1,12 @@
 //! Syntax highlighting for SQL and JSON content in Jupyter cells.
 
-use crate::themes::ctp_mocha_colors;
+use solite_lexer::TokenKind;
+use solite_theme::Theme;
 use std::sync::LazyLock;
 
-use super::html::{Element, HtmlDoc};
+use crate::sql_tokens::classify;
+
+use super::html::HtmlDoc;
 
 /// CSS for statement cells, including JSON overflow handling.
 pub static STATEMENT_CELL_CSS: LazyLock<String> = LazyLock::new(|| {
@@ -20,7 +23,8 @@ pub static STATEMENT_CELL_CSS: LazyLock<String> = LazyLock::new(|| {
   .{json_overflow_classname}::before {{
     content: "...";
     font-size: 1rem;
-    color: #666;
+    color: currentColor;
+    opacity: 0.6;
   }}
   .{json_overflow_classname}::before::selection {{
     color: transparent;
@@ -30,76 +34,13 @@ pub static STATEMENT_CELL_CSS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Render JSON content with syntax highlighting into an HTML table cell.
-///
-/// Tokens are colorized based on their type:
-/// - Keys: blue
-/// - String values: green
-/// - Numbers: peach
-/// - Null: subtext
-/// - Booleans: maroon
-#[allow(dead_code)]
-pub fn render_json_cell(element: &mut Element, contents: &str) {
-    let td = element.child("td");
-    td.style(
-        "color",
-        ctp_mocha_colors::TEXT.clone().to_hex_string(),
-    );
-    td.style("display", "inline-block");
-
-    let tokens = solite_lexer::json::tokenize(contents);
-    for token in tokens {
-        match token.kind {
-            solite_lexer::json::Kind::String => {
-                let color = if token.string_context == Some(solite_lexer::json::StringContext::Key)
-                {
-                    ctp_mocha_colors::BLUE.clone().to_hex_string()
-                } else {
-                    ctp_mocha_colors::GREEN.clone().to_hex_string()
-                };
-                let span = td.child("span");
-                span.style("color", color);
-                span.set_text(token.text);
-            }
-            solite_lexer::json::Kind::Number => {
-                let span = td.child("span");
-                span.style("color", ctp_mocha_colors::PEACH.clone().to_hex_string());
-                span.set_text(token.text);
-            }
-            solite_lexer::json::Kind::Null => {
-                let span = td.child("span");
-                span.style("color", ctp_mocha_colors::SUBTEXT1.clone().to_hex_string());
-                span.set_text(token.text);
-            }
-            solite_lexer::json::Kind::True | solite_lexer::json::Kind::False => {
-                let span = td.child("span");
-                span.style("color", ctp_mocha_colors::MAROON.clone().to_hex_string());
-                span.set_text(token.text);
-            }
-            solite_lexer::json::Kind::Whitespace => {
-                // Skip whitespace - no visual output needed
-            }
-            solite_lexer::json::Kind::LBrace
-            | solite_lexer::json::Kind::RBrace
-            | solite_lexer::json::Kind::LBracket
-            | solite_lexer::json::Kind::RBracket
-            | solite_lexer::json::Kind::Colon
-            | solite_lexer::json::Kind::Comma => {
-                td.child("span").set_text(token.text);
-            }
-            solite_lexer::json::Kind::Unknown => {
-                // Render unknown tokens as plain text rather than panicking
-                td.child("span").set_text(token.text);
-            }
-            solite_lexer::json::Kind::Eof => {}
-        }
-    }
-}
-
 /// Render SQL with syntax highlighting as HTML.
 ///
-/// Returns an HTML string with colorized SQL tokens.
-pub fn render_sql_html(sql: &str) -> String {
+/// Tokens are classified by the shared [`classify`] classifier (also used
+/// by the REPL highlighter, `commands/repl/highlighter.rs`, so the two
+/// surfaces can't drift) and painted with `theme`'s matching role as an
+/// inline `color` declaration. Returns an HTML string.
+pub fn render_sql_html(sql: &str, theme: &Theme) -> String {
     let doc = HtmlDoc::new();
     let mut root = doc.div();
 
@@ -114,78 +55,27 @@ pub fn render_sql_html(sql: &str) -> String {
 
     let tokens = solite_lexer::lex(sql);
     let mut prev_end = 0usize;
+    let mut prev_kind: Option<TokenKind> = None;
 
-    for token in tokens {
+    for (i, token) in tokens.iter().enumerate() {
         // Emit any whitespace/characters between tokens as plain text
         if token.span.start > prev_end {
             code.child("span").set_text(&sql[prev_end..token.span.start]);
         }
 
-        let color = match token.kind {
-            // Numeric literals
-            solite_lexer::TokenKind::Integer
-            | solite_lexer::TokenKind::Float
-            | solite_lexer::TokenKind::HexInteger
-            | solite_lexer::TokenKind::Blob => ctp_mocha_colors::PEACH.clone(),
-
-            // String literals
-            solite_lexer::TokenKind::String => ctp_mocha_colors::GREEN.clone(),
-
-            // Parameters (all variants)
-            solite_lexer::TokenKind::BindParam
-            | solite_lexer::TokenKind::BindParamColon
-            | solite_lexer::TokenKind::BindParamAt
-            | solite_lexer::TokenKind::BindParamDollar => ctp_mocha_colors::YELLOW.clone(),
-
-            // Punctuation & operators
-            solite_lexer::TokenKind::Plus
-            | solite_lexer::TokenKind::Minus
-            | solite_lexer::TokenKind::Star
-            | solite_lexer::TokenKind::Slash
-            | solite_lexer::TokenKind::Pipe
-            | solite_lexer::TokenKind::Lt
-            | solite_lexer::TokenKind::Gt
-            | solite_lexer::TokenKind::Le
-            | solite_lexer::TokenKind::Ge
-            | solite_lexer::TokenKind::Eq
-            | solite_lexer::TokenKind::EqEq
-            | solite_lexer::TokenKind::Ne
-            | solite_lexer::TokenKind::BangEq
-            | solite_lexer::TokenKind::Arrow
-            | solite_lexer::TokenKind::ArrowArrow
-            | solite_lexer::TokenKind::Concat
-            | solite_lexer::TokenKind::Ampersand
-            | solite_lexer::TokenKind::Tilde
-            | solite_lexer::TokenKind::LShift
-            | solite_lexer::TokenKind::RShift
-            | solite_lexer::TokenKind::Percent
-            | solite_lexer::TokenKind::LParen
-            | solite_lexer::TokenKind::RParen
-            | solite_lexer::TokenKind::LBracket
-            | solite_lexer::TokenKind::RBracket
-            | solite_lexer::TokenKind::Comma
-            | solite_lexer::TokenKind::Semicolon
-            | solite_lexer::TokenKind::Dot => ctp_mocha_colors::SKY.clone(),
-
-            // Comments (line and block)
-            solite_lexer::TokenKind::Comment | solite_lexer::TokenKind::BlockComment => {
-                ctp_mocha_colors::OVERLAY0.clone()
-            }
-
-            // Identifiers (regular and quoted)
-            solite_lexer::TokenKind::Ident
-            | solite_lexer::TokenKind::QuotedIdent
-            | solite_lexer::TokenKind::BracketIdent
-            | solite_lexer::TokenKind::BacktickIdent => ctp_mocha_colors::BLUE.clone(),
-
-            // Everything else is a keyword
-            _ => ctp_mocha_colors::MAUVE.clone(),
-        };
+        let text = &sql[token.span.clone()];
+        let next_is_lparen =
+            matches!(tokens.get(i + 1).map(|t| t.kind), Some(TokenKind::LParen));
+        let role = classify(token.kind, text, prev_kind, next_is_lparen);
 
         let span = code.child("span");
-        span.style("color", color.to_hex_string());
-        span.set_text(&sql[token.span.clone()]);
+        if let Some(role) = role {
+            span.style("color", role.style(theme).fg.to_css());
+        }
+        span.set_text(text);
+
         prev_end = token.span.end;
+        prev_kind = Some(token.kind);
     }
 
     // Emit any trailing content after the last token
@@ -194,4 +84,61 @@ pub fn render_sql_html(sql: &str) -> String {
     }
 
     root.to_html()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyword_and_string_get_distinct_colors() {
+        let theme = Theme::catppuccin_mocha();
+        let html = render_sql_html("select 'hi' from t;", &theme);
+        assert!(html.contains(&theme.keyword.fg.to_css()));
+        assert!(html.contains(&theme.string_literal.fg.to_css()));
+    }
+
+    #[test]
+    fn parameter_uses_parameter_role_not_hardcoded_yellow() {
+        // Regression: the old hardcoded map colored parameters YELLOW here
+        // but MAROON in the REPL. Both now go through the shared classifier
+        // and theme.parameter.
+        let theme = Theme::catppuccin_mocha();
+        let html = render_sql_html("select $x;", &theme);
+        assert!(html.contains(&format!(
+            "style=\"color:{}\"",
+            theme.parameter.fg.to_css()
+        )));
+    }
+
+    #[test]
+    fn comment_uses_comment_role_not_hardcoded_overlay0() {
+        let theme = Theme::catppuccin_mocha();
+        let html = render_sql_html("select 1; -- a comment", &theme);
+        assert!(html.contains(&format!(
+            "style=\"color:{}\"",
+            theme.comment.fg.to_css()
+        )));
+    }
+
+    #[test]
+    fn blob_literal_uses_string_literal_role_not_number() {
+        // Regression: the old hardcoded map grouped blob literals with
+        // numeric literals (PEACH); the shared classifier groups them with
+        // string literals, matching the REPL.
+        let theme = Theme::catppuccin_mocha();
+        let html = render_sql_html("select X'CAFE';", &theme);
+        assert!(html.contains(&format!(
+            "style=\"color:{}\"",
+            theme.string_literal.fg.to_css()
+        )));
+    }
+
+    #[test]
+    fn terminal_theme_default_text_is_unstyled() {
+        let theme = Theme::terminal();
+        let html = render_sql_html("select a from t;", &theme);
+        // Bare identifiers are unstyled: no <span style=...> around "a".
+        assert!(!html.contains("style=\"color:currentColor\">a<"));
+    }
 }

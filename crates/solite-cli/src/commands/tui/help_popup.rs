@@ -8,11 +8,12 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem},
     Frame,
 };
+use solite_theme::Theme;
 
 use super::help_bar::HelpBar;
 use super::utils::popup_area_fixed;
@@ -83,8 +84,8 @@ pub(crate) const ROW_KEYS: &[KeyBinding] = &[
 ];
 
 /// Build the bottom help bar from a page keymap (the `in_bar` subset).
-pub(crate) fn help_bar_from(bindings: &'static [KeyBinding]) -> HelpBar<'static> {
-    let mut help_bar = HelpBar::new();
+pub(crate) fn help_bar_from(bindings: &'static [KeyBinding], theme: Theme) -> HelpBar<'static> {
+    let mut help_bar = HelpBar::new(theme);
     for binding in bindings.iter().filter(|b| b.in_bar) {
         help_bar = help_bar.keys(binding.keys.to_vec(), binding.label);
     }
@@ -122,7 +123,7 @@ impl HelpPopup {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if !self.visible {
             return;
         }
@@ -136,15 +137,13 @@ impl HelpPopup {
         let block = Block::default()
             .title(self.title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green))
-            .style(Style::default().bg(Color::Black));
+            .border_style(Style::from(&theme.success))
+            .style(Style::from(&theme.background));
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
 
-        let key_style = Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD);
-        let label_style = Style::default().fg(Color::DarkGray);
+        let key_style = Style::from(&theme.keycap).add_modifier(Modifier::BOLD);
+        let label_style = Style::from(&theme.muted);
 
         let mut items: Vec<ListItem> = self
             .bindings

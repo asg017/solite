@@ -8,6 +8,7 @@ description = "Table rendering for Solite"
 [dependencies]
 solite-core = { path = "../solite-core", default-features = false }
 solite-lexer = { path = "../solite-lexer" }
+solite-theme = { path = "../solite-theme" }
 term_size = "0.3.2"
 unicode-width = "0.2"
 

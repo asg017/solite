@@ -3,11 +3,12 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState},
     Frame,
 };
+use solite_theme::Theme;
 
 use super::help_bar::HelpBar;
 use super::utils::popup_area_fixed;
@@ -107,7 +108,7 @@ impl CopyPopup {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if !self.visible {
             return;
         }
@@ -120,8 +121,8 @@ impl CopyPopup {
         let block = Block::default()
             .title(" Copy to Clipboard ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green))
-            .style(Style::default().bg(Color::Black));
+            .border_style(Style::from(&theme.success))
+            .style(Style::from(&theme.background));
 
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
@@ -137,9 +138,7 @@ impl CopyPopup {
             .map(|(idx, opt)| {
                 let number = Span::styled(
                     format!(" {} ", idx + 1),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD),
+                    Style::from(&theme.muted).add_modifier(Modifier::BOLD),
                 );
                 let label = Span::raw(opt.label());
                 ListItem::new(Line::from(vec![number, label]))
@@ -147,16 +146,12 @@ impl CopyPopup {
             .collect();
 
         let list = List::new(items)
-            .highlight_style(
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .highlight_style(Style::from(&theme.selection).add_modifier(Modifier::BOLD))
             .highlight_symbol("› ");
 
         frame.render_stateful_widget(list, list_area, &mut self.state);
 
-        HelpBar::new()
+        HelpBar::new(*theme)
             .keys(vec!["j", "k"], " nav")
             .item("Enter", " copy")
             .item("Esc", " cancel")

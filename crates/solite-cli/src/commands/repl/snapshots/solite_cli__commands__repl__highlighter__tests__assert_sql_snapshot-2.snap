@@ -1,6 +1,6 @@
 ---
 source: crates/solite-cli/src/commands/repl/highlighter.rs
-expression: sql_html(s).into()
+expression: "sql_html(s, &Theme::catppuccin_mocha()).into()"
 extension: html
 snapshot_kind: binary
 ---

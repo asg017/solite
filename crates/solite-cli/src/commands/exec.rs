@@ -72,7 +72,7 @@ fn exec_impl(args: ExecuteArgs) -> Result<()> {
                 let has_columns = stmt.column_names().map(|c| !c.is_empty()).unwrap_or(false);
                 if has_columns {
                     if std::io::stdout().is_terminal() {
-                        let config = solite_table::TableConfig::terminal();
+                        let config = crate::colors::table_config();
                         solite_table::print_statement(&mut stmt, &config)
                             .map_err(|e| anyhow::anyhow!("{e}"))?;
                     } else {

@@ -2,18 +2,18 @@ use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListDirection, ListItem, ListState};
 use ratatui::Frame;
 use solite_core::Runtime;
+use solite_theme::Theme;
 
 use crate::commands::tui::help_popup::{help_bar_from, HelpPopup, LISTING_KEYS};
-use crate::commands::tui::tui_theme::TuiTheme;
 use crate::commands::tui::{HandleKeyResult, NavigateToPage};
 
 pub struct ListingPage {
-    pub(crate) theme: TuiTheme,
+    pub(crate) theme: Theme,
     pub(crate) state: ListState,
     pub(crate) database_name: String,
     pub(crate) tables: Vec<String>,
@@ -22,7 +22,7 @@ pub struct ListingPage {
 }
 
 impl ListingPage {
-    pub(crate) fn new(runtime: &Runtime, theme: &TuiTheme) -> Self {
+    pub(crate) fn new(runtime: &Runtime, theme: &Theme) -> Self {
         let mut tables = vec![];
         let mut error = None;
 
@@ -157,8 +157,7 @@ impl ListingPage {
             .map(|(idx, table)| {
                 let number = if idx < 9 {
                     Span::from(format!(" {} ", idx + 1))
-                        .bold()
-                        .fg(Color::DarkGray)
+                        .style(Style::from(&self.theme.muted).add_modifier(Modifier::BOLD))
                 } else {
                     Span::from("   ")
                 };
@@ -166,28 +165,28 @@ impl ListingPage {
             })
             .collect();
 
-        let base_color: Color = self.theme.base.clone().into();
-        let hl_bg: Color = self.theme.row_hl_bg.clone().into();
-        let hl_fg: Color = self.theme.keycap.clone().into();
+        let highlight_style = Style::from(&self.theme.selection)
+            .fg(self.theme.keycap.fg.into())
+            .add_modifier(Modifier::BOLD);
 
         let list = List::new(items)
             .block(
                 ratatui::widgets::Block::default()
                     .title(title)
                     .borders(ratatui::widgets::Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(Style::from(&self.theme.border)),
             )
-            .bg(base_color)
-            .highlight_style(Style::new().bg(hl_bg).fg(hl_fg).bold())
+            .style(Style::from(&self.theme.background))
+            .highlight_style(highlight_style)
             .highlight_symbol("› ")
             .direction(ListDirection::TopToBottom);
 
         frame.render_stateful_widget(list, list_area, &mut self.state);
 
         // Render help bar
-        help_bar_from(LISTING_KEYS).render(frame, help_area);
+        help_bar_from(LISTING_KEYS, self.theme).render(frame, help_area);
 
         // Help overlay (renders on top)
-        self.help_popup.render(frame, area);
+        self.help_popup.render(frame, area, &self.theme);
     }
 }

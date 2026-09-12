@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use console::style;
 use indicatif::HumanBytes;
 use solite_core::sqlite::Connection;
 
@@ -49,7 +48,7 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), ()> {
 
     println!(
         "{} Vacuumed {} ({}, {:.2?})",
-        style("\u{2714}").green(),
+        crate::colors::checkmark(),
         target.display(),
         HumanBytes(size),
         elapsed,

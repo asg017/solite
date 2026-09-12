@@ -917,6 +917,35 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub allow_ssh: bool,
 
+    /// Control colored output. `auto` (default) colors only on a terminal,
+    /// honoring NO_COLOR/CLICOLOR_FORCE/CLICOLOR/TERM=dumb; always/never override
+    #[arg(long, global = true, value_enum, default_value_t = clap::ColorChoice::Auto)]
+    pub color: clap::ColorChoice,
+
+    /// Color theme: a built-in (`terminal`, `catppuccin-mocha`), a
+    /// `<name>.toml` in $XDG_CONFIG_HOME/solite/themes or
+    /// ~/.config/solite/themes, or a path to a theme file. Overrides
+    /// $SOLITE_THEME. Also overrides --theme-dark/--theme-light: no
+    /// detection is performed when this is set
+    #[arg(long, global = true, value_name = "NAME")]
+    pub theme: Option<String>,
+
+    /// Theme to use when the terminal's background is detected as dark
+    /// (same values as --theme). Setting this (or --theme-light) queries
+    /// the terminal's background once at startup via OSC 11; if detection
+    /// fails or isn't possible (piped output, tmux, an unsupported
+    /// terminal, TERM=dumb), this dark theme is used as the fallback.
+    /// Ignored if --theme/$SOLITE_THEME is set. Overrides $SOLITE_THEME_DARK
+    #[arg(long, global = true, value_name = "NAME")]
+    pub theme_dark: Option<String>,
+
+    /// Theme to use when the terminal's background is detected as light
+    /// (same values as --theme); the light-mode counterpart to
+    /// --theme-dark. Ignored if --theme/$SOLITE_THEME is set, or if neither
+    /// this nor --theme-dark is set. Overrides $SOLITE_THEME_LIGHT
+    #[arg(long, global = true, value_name = "NAME")]
+    pub theme_light: Option<String>,
+
     #[command(subcommand)]
     pub command: Box<Commands>,
 }

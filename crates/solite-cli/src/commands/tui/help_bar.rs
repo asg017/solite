@@ -4,11 +4,12 @@
 
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use solite_theme::Theme;
 
 /// A single item in the help bar (key binding + label)
 pub struct HelpItem<'a> {
@@ -35,12 +36,16 @@ impl<'a> HelpItem<'a> {
 
 /// Builder for creating help bar content
 pub struct HelpBar<'a> {
+    theme: Theme,
     items: Vec<HelpItem<'a>>,
 }
 
 impl<'a> HelpBar<'a> {
-    pub fn new() -> Self {
-        Self { items: Vec::new() }
+    pub fn new(theme: Theme) -> Self {
+        Self {
+            theme,
+            items: Vec::new(),
+        }
     }
 
     /// Add a key binding with a label
@@ -57,10 +62,10 @@ impl<'a> HelpBar<'a> {
 
     /// Build into a Line for inline use (e.g., in popups)
     pub fn into_line(self) -> Line<'a> {
-        let key_style = Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD);
-        let label_style = Style::default().fg(Color::DarkGray);
+        // Keybinding hints use the `keycap` role; descriptive labels are
+        // de-emphasized chrome text.
+        let key_style = Style::from(&self.theme.keycap).add_modifier(Modifier::BOLD);
+        let label_style = Style::from(&self.theme.muted);
 
         let mut spans = Vec::new();
 
@@ -83,13 +88,10 @@ impl<'a> HelpBar<'a> {
 
     /// Render as a help bar with top border (for bottom of detail views)
     pub fn render(self, f: &mut Frame, area: Rect) {
+        let border_style = Style::from(&self.theme.border);
         let help = Paragraph::new(self.into_line())
             .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            );
+            .block(Block::default().borders(Borders::TOP).border_style(border_style));
         f.render_widget(help, area);
     }
 
@@ -97,11 +99,5 @@ impl<'a> HelpBar<'a> {
     pub fn render_inline(self, f: &mut Frame, area: Rect) {
         let help = Paragraph::new(self.into_line()).alignment(Alignment::Center);
         f.render_widget(help, area);
-    }
-}
-
-impl Default for HelpBar<'_> {
-    fn default() -> Self {
-        Self::new()
     }
 }

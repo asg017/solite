@@ -50,6 +50,17 @@ use solite_core::{
 
 use crate::cli::BenchArgs;
 
+/// A Catppuccin Mocha color for `crossterm`-styled bench output, by its
+/// packed `0xRRGGBB` hex. `solite-theme` doesn't have a `crossterm` feature
+/// (only `ratatui`/`termcolor`), so this converts through the shared
+/// `ColorValue` type rather than duplicating a private palette.
+fn ctp(hex: u32) -> crossterm::style::Color {
+    let (r, g, b) = solite_theme::ColorValue::from_hex(hex)
+        .approximate_rgb()
+        .expect("Rgb always has an approximate_rgb");
+    crossterm::style::Color::Rgb { r, g, b }
+}
+
 /// Error type for benchmark operations. Open/prepare/execute errors are
 /// reported through `anyhow` in `bench_impl`.
 #[derive(Debug)]
@@ -148,24 +159,24 @@ fn print_results(sql: &str, times: &[jiff::Span], steps: Vec<solite_core::sqlite
     println!(
         "  Time  ({} ± {}):  {} ± {} ({} iterations)",
         "mean"
-            .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
+            .with(ctp(solite_theme::catppuccin_mocha_palette::GREEN))
             .bold(),
-        "σ".with(crate::themes::ctp_mocha_colors::GREEN.clone().into()),
+        "σ".with(ctp(solite_theme::catppuccin_mocha_palette::GREEN)),
         avg.as_str()
-            .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
+            .with(ctp(solite_theme::catppuccin_mocha_palette::GREEN))
             .bold(),
         std.as_str()
-            .with(crate::themes::ctp_mocha_colors::GREEN.clone().into()),
+            .with(ctp(solite_theme::catppuccin_mocha_palette::GREEN)),
         iterations,
     );
     println!(
         "  Range ({} … {}):  {} … {}",
-        "min".with(crate::themes::ctp_mocha_colors::SKY.clone().into()),
-        "max".with(crate::themes::ctp_mocha_colors::MAUVE.clone().into()),
+        "min".with(ctp(solite_theme::catppuccin_mocha_palette::SKY)),
+        "max".with(ctp(solite_theme::catppuccin_mocha_palette::MAUVE)),
         mn.as_str()
-            .with(crate::themes::ctp_mocha_colors::SKY.clone().into()),
+            .with(ctp(solite_theme::catppuccin_mocha_palette::SKY)),
         mx.as_str()
-            .with(crate::themes::ctp_mocha_colors::MAUVE.clone().into()),
+            .with(ctp(solite_theme::catppuccin_mocha_palette::MAUVE)),
     );
     println!("{}", render_steps(steps));
 }
@@ -357,7 +368,7 @@ fn bench_impl(args: BenchArgs) -> anyhow::Result<()> {
                     "Current estimate: {}",
                     format_runtime(avg)
                         .as_str()
-                        .with(crate::themes::ctp_mocha_colors::GREEN.clone().into())
+                        .with(ctp(solite_theme::catppuccin_mocha_palette::GREEN))
                 ));
             }
         }
